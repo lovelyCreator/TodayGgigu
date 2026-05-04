@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '/^  en: \\\\{$/{start=NR} /^  \\\\},$/ && start{print start\"-\"NR; start=0}' src/i18n/translations.ts)",
+      "Bash(awk '/^  zh: \\\\{$/{start=NR} /^  \\\\},$/ && start{print start\"-\"NR; start=0}' src/i18n/translations.ts)",
+      "Bash(awk '/^  ko: \\\\{$/{start=NR} /^  \\\\}$/ && start{print start\"-\"NR; start=0}' src/i18n/translations.ts)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
