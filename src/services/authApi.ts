@@ -1612,10 +1612,14 @@ export const forgotPassword = async (
 export const setPassword = async (
   email: string,
   password: string,
-  code: string
+  code: string,
+  users_id?: string
 ): Promise<{ success: boolean; data?: any; error?: string }> => {
   try {
-    const requestBody = { email, password, code };
+    const requestBody: any = { email, password, code };
+    if (users_id && users_id.trim() !== '') {
+      requestBody.users_id = users_id.trim();
+    }
     const signatureHeaders = await buildSignatureHeaders('POST', `${API_BASE_URL}/auth/set-password`, requestBody);
     const response = await apiClient.post('/auth/set-password', requestBody, {
       headers: {

@@ -81,6 +81,7 @@ const SetPasswordScreen = () => {
   };
 
   const [formData, setFormData] = useState({
+    users_id: '',
     password: '',
     confirmPassword: '',
   });
@@ -88,11 +89,18 @@ const SetPasswordScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isUsersIdFocused, setIsUsersIdFocused] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [isConfirmPasswordFocused, setIsConfirmPasswordFocused] = useState(false);
 
   const validateForm = () => {
     const newErrors: { [key: string]: string } = {};
+
+    if (!formData.users_id || formData.users_id.trim() === '') {
+      newErrors.users_id = t('auth.userIdRequired') || 'User ID is required';
+    } else if (formData.users_id.trim().length < 4) {
+      newErrors.users_id = t('auth.userIdTooShort') || 'User ID must be at least 4 characters';
+    }
 
     if (!formData.password) {
       newErrors.password = t('auth.passwordRequired') || 'Password is required';
@@ -144,7 +152,7 @@ const SetPasswordScreen = () => {
 
     setIsLoading(true);
     try {
-      const result = await setPassword(email, formData.password, code);
+      const result = await setPassword(email, formData.password, code, formData.users_id.trim());
       setIsLoading(false);
 
       if (result.success && result.data) {
@@ -243,6 +251,51 @@ const SetPasswordScreen = () => {
                 <Text style={styles.securityMessageText}>
                   {t('auth.infoProtected') || 'Your information is protected'}
                 </Text>
+              </View>
+
+              {/* User ID Input */}
+              <View style={styles.inputContainer}>
+                <View style={[
+                  styles.unifiedInputContainer,
+                  !isUsersIdFocused && styles.unifiedInputContainerUnfocused
+                ]}>
+                  <View style={[
+                    styles.inputFieldContainer,
+                    formData.users_id.length > 0 && styles.inputFieldContainerWithLabel
+                  ]}>
+                    {formData.users_id.length > 0 && (
+                      <Text style={styles.floatingLabel}>
+                        {t('auth.userId') || 'User ID'}
+                      </Text>
+                    )}
+                    <View style={styles.inputRow}>
+                      <RNTextInput
+                        placeholder={formData.users_id.length > 0
+                          ? ''
+                          : (t('auth.enterUserId') || 'Enter user ID')
+                        }
+                        placeholderTextColor={'#999999'}
+                        value={formData.users_id}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        onFocus={() => setIsUsersIdFocused(true)}
+                        onBlur={() => setIsUsersIdFocused(false)}
+                        onChangeText={(text) => {
+                          setFormData({ ...formData, users_id: text });
+                          if (errors.users_id) {
+                            setErrors({ ...errors, users_id: '' });
+                          }
+                        }}
+                        style={styles.unifiedInput}
+                      />
+                    </View>
+                  </View>
+                </View>
+                {errors.users_id ? (
+                  <View style={styles.errorMessageContainer}>
+                    <Text style={styles.errorText}>{errors.users_id}</Text>
+                  </View>
+                ) : null}
               </View>
 
               {/* Password Input */}
@@ -350,16 +403,16 @@ const SetPasswordScreen = () => {
               <Button
                 title={t('auth.register') || 'Register'}
                 onPress={handleSetPassword}
-                disabled={isLoading || !formData.password || !formData.confirmPassword}
+                disabled={isLoading || !formData.users_id || !formData.password || !formData.confirmPassword}
                 loading={isLoading}
                 variant="danger"
                 style={
-                  (isLoading || !formData.password || !formData.confirmPassword)
+                  (isLoading || !formData.users_id || !formData.password || !formData.confirmPassword)
                     ? { ...styles.setPasswordButton, ...styles.setPasswordButtonDisabled }
                     : styles.setPasswordButton
                 }
                 textStyle={
-                  (isLoading || !formData.password || !formData.confirmPassword)
+                  (isLoading || !formData.users_id || !formData.password || !formData.confirmPassword)
                     ? { ...styles.setPasswordButtonText, ...styles.setPasswordButtonTextDisabled }
                     : styles.setPasswordButtonText
                 }

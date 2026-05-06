@@ -34,7 +34,7 @@ import { Button } from '../../components';
 type EmailVerificationScreenNavigationProp = StackNavigationProp<AuthStackParamList, 'EmailVerification'>;
 type EmailVerificationScreenRouteProp = RouteProp<AuthStackParamList, 'EmailVerification'>;
 
-const CELL_COUNT = 4; // Changed from 6 to 4
+const CELL_COUNT = 6;
 
 const EmailVerificationScreen = () => {
   const navigation = useNavigation<EmailVerificationScreenNavigationProp>();

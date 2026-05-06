@@ -14,6 +14,7 @@ import {
   Platform,
   PermissionsAndroid,
   Linking,
+  Clipboard,
 } from 'react-native';
 import { launchCamera, launchImageLibrary, MediaType, ImagePickerResponse, CameraOptions, ImageLibraryOptions } from 'react-native-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -40,6 +41,7 @@ import { useAddToWishlistMutation } from '../../hooks/useAddToWishlistMutation';
 import { useDeleteFromWishlistMutation } from '../../hooks/useDeleteFromWishlistMutation';
 import { useSocket } from '../../context/SocketContext';
 import { inquiryApi } from '../../services/inquiryApi';
+import { orderApi, Order, OrderItem } from '../../services/orderApi';
 const LogoImage = require('../../assets/images/logo.png');
 
 /** Figma TG_Main_S393: 393×3140, gutter 16 → content 361. Group 76728: H 472, left 16 */
@@ -67,7 +69,26 @@ type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Main'>;
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
 
-  const { user, isGuest } = useAuth();
+  const { user, isGuest, isAuthenticated } = useAuth();
+  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isAuthenticated || isGuest) {
+      setRecentOrders([]);
+      return;
+    }
+    (async () => {
+      const res = await orderApi.getOrders({ page: 1, pageSize: 3 });
+      if (cancelled) return;
+      if (res.success && res.data?.orders) {
+        setRecentOrders(res.data.orders);
+      } else {
+        setRecentOrders([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, isGuest, user?.id]);
   
   // import icon locally to avoid circular deps
 
@@ -566,6 +587,282 @@ const HomeScreen: React.FC = () => {
     Linking.openURL(tel).catch(() => {});
   }, []);
 
+  const formatTrackingDate = (iso?: string) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+  };
+
+  const formatPriceKRW = (n?: number) => {
+    if (typeof n !== 'number' || !isFinite(n)) return '$00.00';
+    return `₩${n.toLocaleString('ko-KR')}`;
+  };
+
+  const getOrderItemName = (item: OrderItem) => {
+    return (
+      (item.subjectMultiLang && (item.subjectMultiLang as any)[locale]) ||
+      item.subjectTrans ||
+      item.subject ||
+      ''
+    );
+  };
+
+  const getOrderCompanyName = (item: OrderItem) => {
+    if (!item.companyName) return '';
+    if (typeof item.companyName === 'string') return item.companyName;
+    return (item.companyName as any)[locale] || (item.companyName as any).zh || (item.companyName as any).en || '';
+  };
+
+  const getStatusText = (order: Order) => {
+    const map: Record<string, { en: string; ko: string; zh: string }> = {
+      delivered: { en: 'Delivered', ko: '배송 완료', zh: '已签收' },
+      shipped: { en: 'Shipped', ko: '발송됨', zh: '已发货' },
+      processing: { en: 'Processing', ko: '처리중', zh: '处理中' },
+      pending: { en: 'Pending', ko: '대기중', zh: '待处理' },
+      paid: { en: 'Paid', ko: '결제완료', zh: '已支付' },
+      cancelled: { en: 'Cancelled', ko: '취소됨', zh: '已取消' },
+    };
+    const key = (order.shippingStatus || order.orderStatus || '').toLowerCase();
+    return map[key]?.[locale] || order.shippingStatus || order.orderStatus || '';
+  };
+
+  const handleCopyTracking = (tracking?: string) => {
+    if (!tracking) return;
+    Clipboard.setString(tracking);
+    showToast(t('home.trackingCopied') || 'Tracking number copied', 'success');
+  };
+
+  const renderUserOrderSummaryCard = () => {
+    if (!isAuthenticated || isGuest || !user) return null;
+
+    const displayName = (user as any).userName || (user as any).users_id || user.name || user.email || 'User';
+    const memberLabel =
+      locale === 'ko' ? '회원'
+      : locale === 'zh' ? '会员'
+      : 'Member';
+    const avatarUri =
+      user.avatar && typeof user.avatar === 'string' && user.avatar.trim() !== ''
+        ? user.avatar
+        : 'https://via.placeholder.com/150';
+
+    const primaryAddress: any =
+      (user.addresses || []).find((a: any) => a.isDefault) ||
+      (user.addresses || [])[0] ||
+      null;
+
+    const firstOrder = recentOrders[0];
+    const secondOrder = recentOrders[1];
+
+    const renderOrderBlock = (order: Order, isFirst: boolean) => {
+      const item = order.items?.[0];
+      const itemCount = order.items?.reduce((sum, it) => sum + (it.quantity || 1), 0) || 0;
+      const total = order.totalAmount ?? order.firstTierCost?.totalKRW;
+      const original = order.firstTierCost?.productTotalKRW;
+      const status = getStatusText(order);
+      const lastHistory =
+        order.statusHistory && order.statusHistory.length > 0
+          ? order.statusHistory[order.statusHistory.length - 1]
+          : null;
+      const trackingNumber = order.trackingNumber || '';
+      const courierName = (order as any).courier || (order as any).carrier || 'XX택배';
+      const itemsCountLabel =
+        locale === 'ko' ? `총 : ${itemCount}건 상품`
+        : locale === 'zh' ? `共：${itemCount}件商品`
+        : `Total: ${itemCount} item(s)`;
+
+      return (
+        <View key={order.id} style={[styles.uosOrderBlock, !isFirst && styles.uosOrderBlockSpacer]}>
+          <TouchableOpacity
+            style={styles.uosProductRow}
+            activeOpacity={0.85}
+            onPress={() =>
+              (navigation as any).navigate('OrderDetail', { orderId: order.id, order })
+            }
+          >
+            <Image
+              source={{ uri: item?.imageUrl || 'https://via.placeholder.com/72' }}
+              style={styles.uosProductImage}
+            />
+            <View style={styles.uosProductTextCol}>
+              <Text style={styles.uosProductTitle} numberOfLines={2}>
+                {getOrderCompanyName(item) || getOrderItemName(item)}
+              </Text>
+              <View style={styles.uosProductMetaRow}>
+                <Text style={styles.uosProductMetaLeft}>{itemsCountLabel}</Text>
+                <View style={styles.uosProductPriceCol}>
+                  <Text style={styles.uosProductPrice}>{formatPriceKRW(total)}</Text>
+                  {original != null && original !== total && (
+                    <Text style={styles.uosProductPriceStrike}>{formatPriceKRW(original)}</Text>
+                  )}
+                </View>
+              </View>
+            </View>
+          </TouchableOpacity>
+
+          {isFirst && (trackingNumber || lastHistory) && (
+            <>
+              <View style={styles.uosTrackingRow}>
+                <Text style={styles.uosTrackingCarrier}>
+                  {courierName}: <Text style={styles.uosTrackingNumber}>{trackingNumber || '-'}</Text>
+                </Text>
+                <TouchableOpacity
+                  onPress={() => handleCopyTracking(trackingNumber)}
+                  style={styles.uosCopyButton}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.uosCopyButtonText}>
+                    {locale === 'ko' ? '복사' : locale === 'zh' ? '复制' : 'Copy'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {lastHistory && (
+                <View style={styles.uosStatusBlock}>
+                  <View style={styles.uosStatusHeaderRow}>
+                    <View style={styles.uosStatusDot} />
+                    <Text style={styles.uosStatusText}>{status}</Text>
+                    <Text style={styles.uosStatusTime}>
+                      {formatTrackingDate(lastHistory.timestamp || order.updatedAt)}
+                    </Text>
+                  </View>
+                  {(lastHistory.content || lastHistory.detail || lastHistory.note) && (
+                    <Text style={styles.uosStatusDetail} numberOfLines={3}>
+                      {lastHistory.content || lastHistory.detail || lastHistory.note}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={styles.uosLogisticsMoreRow}
+                activeOpacity={0.7}
+                onPress={() =>
+                  (navigation as any).navigate('OrderDetail', { orderId: order.id, order })
+                }
+              >
+                <View style={styles.uosLogisticsMoreCircle} />
+                <Text style={styles.uosLogisticsMoreText}>
+                  {t('home.viewLogisticsDetails') || (
+                    locale === 'ko' ? '查看更多物流明细' : locale === 'zh' ? '查看更多物流明细' : 'View more logistics details'
+                  )}
+                </Text>
+              </TouchableOpacity>
+
+              {primaryAddress && (
+                <View style={styles.uosAddressBlock}>
+                  <View style={styles.uosAddressRow}>
+                    <Icon name="location-outline" size={16} color={LOGISTICS_ORANGE} />
+                    <Text style={styles.uosAddressText} numberOfLines={2}>
+                      {locale === 'ko' ? '배송지: ' : locale === 'zh' ? '送至 ' : 'Ship to: '}
+                      {[primaryAddress.country, primaryAddress.city, primaryAddress.street]
+                        .filter(Boolean)
+                        .join(' ')}
+                    </Text>
+                  </View>
+                  {(primaryAddress.name || primaryAddress.phone) && (
+                    <Text style={styles.uosAddressContact}>
+                      {locale === 'ko' ? '연락처: ' : locale === 'zh' ? '联系人：' : 'Contact: '}
+                      {primaryAddress.name}
+                      {primaryAddress.phone ? ` ${primaryAddress.phone}` : ''}
+                    </Text>
+                  )}
+                </View>
+              )}
+            </>
+          )}
+
+          <TouchableOpacity
+            style={styles.uosViewAllRow}
+            activeOpacity={0.7}
+            onPress={() =>
+              (navigation as any).navigate('OrderDetail', { orderId: order.id, order })
+            }
+          >
+            <Text style={styles.uosViewAllText}>
+              {t('home.viewAllOrderInfo') || (
+                locale === 'ko' ? '전체 주문 정보 보기' : locale === 'zh' ? '查看全部订单信息' : 'View all order info'
+              )}
+            </Text>
+            <Icon name="chevron-forward" size={14} color={COLORS.text.secondary} />
+          </TouchableOpacity>
+        </View>
+      );
+    };
+
+    const shortcuts: { key: string; label: string; icon: string; route?: string }[] = [
+      { key: 'daily',     label: locale === 'ko' ? '일일특가' : locale === 'zh' ? '天天特卖' : 'Daily Deals',     icon: 'pricetag-outline' },
+      { key: 'flash',     label: locale === 'ko' ? '번개주문' : locale === 'zh' ? '闪购直供' : 'Flash Order',      icon: 'flash-outline' },
+      { key: 'mustpick',  label: locale === 'ko' ? '필수픽숍' : locale === 'zh' ? '必采好店' : 'Must Picks',       icon: 'storefront-outline' },
+      { key: 'member',    label: locale === 'ko' ? '회원상점' : locale === 'zh' ? '会员店铺' : 'Member Shops',     icon: 'ribbon-outline' },
+      { key: 'select',    label: locale === 'ko' ? '엄선상점' : locale === 'zh' ? '严选店铺' : 'Selected Shops',   icon: 'star-outline' },
+      { key: 'factory',   label: locale === 'ko' ? '슈퍼팩토리' : locale === 'zh' ? '超级工厂' : 'Super Factory',  icon: 'construct-outline' },
+      { key: 'official',  label: locale === 'ko' ? '공식직영' : locale === 'zh' ? '官方自营' : 'Official Store',   icon: 'business-outline' },
+      { key: 'newin',     label: locale === 'ko' ? '신상품' : locale === 'zh' ? '新品订货' : 'New Arrivals',       icon: 'gift-outline' },
+      { key: 'sports',    label: locale === 'ko' ? '스포츠' : locale === 'zh' ? '运动户外' : 'Sports',             icon: 'football-outline' },
+      { key: 'digital',   label: locale === 'ko' ? '디지털' : locale === 'zh' ? '数码电脑' : 'Digital',            icon: 'game-controller-outline' },
+    ];
+
+    return (
+      <View style={styles.uosOuter}>
+        {/* User header */}
+        <View style={styles.uosUserHeader}>
+          <Image source={{ uri: avatarUri }} style={styles.uosAvatar} />
+          <View style={styles.uosUserNameCol}>
+            <Text style={styles.uosUserName} numberOfLines={1}>{displayName}</Text>
+            <Text style={styles.uosUserMember}>{memberLabel}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.uosInquiryBtn}
+            onPress={() => (navigation as any).navigate('CustomerService')}
+            activeOpacity={0.85}
+          >
+            <Icon name="chatbubble-ellipses-outline" size={14} color={COLORS.text.primary} />
+            <Text style={styles.uosInquiryText}>
+              {locale === 'ko' ? '상담문의' : locale === 'zh' ? '咨询问题' : 'Inquiry'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Order blocks (up to 2) */}
+        {firstOrder
+          ? renderOrderBlock(firstOrder, true)
+          : (
+            <View style={styles.uosEmptyState}>
+              <Text style={styles.uosEmptyText}>
+                {locale === 'ko' ? '진행 중인 주문이 없습니다.'
+                  : locale === 'zh' ? '暂无进行中的订单。'
+                  : 'No orders yet.'}
+              </Text>
+            </View>
+          )}
+        {secondOrder ? renderOrderBlock(secondOrder, false) : null}
+
+        {/* Category shortcut grid */}
+        <View style={styles.uosShortcutsGrid}>
+          {shortcuts.map((s) => (
+            <TouchableOpacity
+              key={s.key}
+              style={styles.uosShortcutItem}
+              activeOpacity={0.75}
+              onPress={() => (navigation as any).navigate('Category')}
+            >
+              <View style={styles.uosShortcutCircle}>
+                <Icon name={s.icon} size={20} color={COLORS.black} />
+              </View>
+              <Text style={styles.uosShortcutLabel} numberOfLines={1}>{s.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   const renderGlobalLogisticsSection = () => {
     const steps: { icon: string; labelKey: string }[] = [
       { icon: 'checkmark-circle', labelKey: 'home.logisticsStep1' },
@@ -972,14 +1269,17 @@ const HomeScreen: React.FC = () => {
         scrollEventThrottle={32}
       >
         <View style={styles.contentWrapper}>
+          <View style={styles.guestAboveFold}>
+            {renderGuestInsightGrid()}
+          </View>
           {!(user && !isGuest) && (
             <View style={styles.guestAboveFold}>
-              {renderGuestInsightGrid()}
               {renderGuestWelcomePanel()}
               {renderGuestOrbGrid()}
             </View>
           )}
           {/* {renderQuickCategories()} */}
+          {isAuthenticated && !isGuest && user && renderUserOrderSummaryCard()}
           {renderGlobalLogisticsSection()}
           {renderIntegratedServicesSection()}
           {renderCsCenterSection()}
@@ -2838,6 +3138,268 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
     fontWeight: '500',
+  },
+
+  /* ---------- User Order Summary card (login-only) ---------- */
+  uosOuter: {
+    marginHorizontal: HOME_GUTTER,
+    marginTop: SPACING.md,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
+    borderWidth: 1.5,
+    borderColor: LOGISTICS_ORANGE,
+    backgroundColor: '#FFF6F0',
+  },
+  uosUserHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: SPACING.sm,
+  },
+  uosAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.gray[200],
+  },
+  uosUserNameCol: {
+    flex: 1,
+    marginLeft: SPACING.sm,
+    minWidth: 0,
+  },
+  uosUserName: {
+    fontSize: FONTS.sizes.lg,
+    fontWeight: '800',
+    color: COLORS.black,
+  },
+  uosUserMember: {
+    marginTop: 2,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  uosInquiryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: BORDER_RADIUS.sm,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    gap: 4,
+  },
+  uosInquiryText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '600',
+  },
+  uosOrderBlock: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.sm,
+    marginTop: SPACING.sm,
+  },
+  uosOrderBlockSpacer: {
+    marginTop: SPACING.sm,
+  },
+  uosProductRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  uosProductImage: {
+    width: 60,
+    height: 60,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.gray[100],
+  },
+  uosProductTextCol: {
+    flex: 1,
+    marginLeft: SPACING.sm,
+    minWidth: 0,
+  },
+  uosProductTitle: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.black,
+    lineHeight: 18,
+  },
+  uosProductMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  uosProductMetaLeft: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  uosProductPriceCol: {
+    alignItems: 'flex-end',
+  },
+  uosProductPrice: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '800',
+    color: COLORS.black,
+  },
+  uosProductPriceStrike: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.gray[400],
+    textDecorationLine: 'line-through',
+    marginTop: 2,
+  },
+  uosTrackingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: SPACING.sm,
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: FIGMA_OVERLAY_05,
+  },
+  uosTrackingCarrier: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.black,
+    fontWeight: '600',
+  },
+  uosTrackingNumber: {
+    color: '#1976D2',
+    fontWeight: '700',
+  },
+  uosCopyButton: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    backgroundColor: COLORS.white,
+  },
+  uosCopyButtonText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '600',
+  },
+  uosStatusBlock: {
+    marginTop: SPACING.sm,
+  },
+  uosStatusHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  uosStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: LOGISTICS_ORANGE,
+  },
+  uosStatusText: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '800',
+    color: COLORS.black,
+  },
+  uosStatusTime: {
+    marginLeft: 'auto',
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  uosStatusDetail: {
+    marginTop: 4,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    lineHeight: 16,
+  },
+  uosLogisticsMoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SPACING.sm,
+    gap: 6,
+  },
+  uosLogisticsMoreCircle: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: COLORS.gray[400],
+  },
+  uosLogisticsMoreText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  uosAddressBlock: {
+    marginTop: SPACING.sm,
+  },
+  uosAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  uosAddressText: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.black,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  uosAddressContact: {
+    marginTop: 4,
+    marginLeft: 20,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  uosViewAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: SPACING.sm,
+    marginTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: FIGMA_OVERLAY_05,
+    gap: 4,
+  },
+  uosViewAllText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    fontWeight: '600',
+  },
+  uosEmptyState: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.lg,
+    marginTop: SPACING.sm,
+    alignItems: 'center',
+  },
+  uosEmptyText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
+  },
+  uosShortcutsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: SPACING.md,
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 102, 0, 0.15)',
+  },
+  uosShortcutItem: {
+    width: '20%',
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+  },
+  uosShortcutCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: COLORS.black,
+  },
+  uosShortcutLabel: {
+    marginTop: 4,
+    fontSize: 11,
+    color: COLORS.black,
+    textAlign: 'center',
   },
 });
 
