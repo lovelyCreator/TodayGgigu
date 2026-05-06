@@ -143,10 +143,10 @@ export const clearAuthData = async () => {
 };
 
 // Login API (backend)
-export const login = async (email: string, password: string): Promise<{ success: boolean; data?: any; error?: string; errorCode?: string }> => {
+export const login = async (users_id: string, password: string): Promise<{ success: boolean; data?: any; error?: string; errorCode?: string }> => {
   try {
     const requestBody = {
-      email: email,
+      users_id: users_id,
       password: password,
     };
     console.log("Login Request Body", requestBody);
@@ -322,10 +322,14 @@ export const login = async (email: string, password: string): Promise<{ success:
       referralCode?: string;
       lastLogin?: string;
       referredBy?: string;
+      users_id?: string;
+      tjMemberId?: string;
+      frozenDepositAmount?: number;
     } = {
-      id: user._id || user.user_id || user.id || '',
+      id: user._id || user.users_id || user.user_id || user.id || '',
       email: user.email || '',
-      name: user.userName || user.user_id || user.email?.split('@')[0] || 'User',
+      name: user.userName || user.users_id || user.user_id || user.email?.split('@')[0] || 'User',
+      memberId: user.tjMemberId || undefined,
       phone: user.phone || '',
       birthday: user.birthday || undefined,
       gender: user.gender || undefined,
@@ -336,20 +340,23 @@ export const login = async (email: string, password: string): Promise<{ success:
       followingsCount: 0, // Not provided in response
       avatar: user.pictureUrl || undefined, // Use pictureUrl from API if available
       depositBalance: user.depositBalance ?? 0, // Store depositBalance from API
+      frozenDepositAmount: user.frozenDepositAmount ?? 0, // Store frozen deposit amount
       points: user.points ?? 0, // Store points from API
       level: user.level || undefined, // Store user level/tier
       referredCount: user.referredCount ?? 0, // Store number of referrals
-      userUniqueId: user.userUniqueId || undefined, // Store unique user identifier (legacy)
+      userUniqueId: user.userUniqueId || undefined, // Store unique user identifier
       userUniqueNo: user.userUniqueNo || undefined, // Store unique user number
       userName: user.userName || undefined, // Store user name
       notes: user.notes || undefined, // Store user notes
       googleId: user.googleId || undefined, // Store Google ID
-      isBusiness: user.isBusiness || false, // Store business status
+      isBusiness: user.isBusinesser ?? user.isBusiness ?? false, // API returns isBusinesser
       isEmailVerified: user.isEmailVerified || false, // Store email verification status
       authProvider: user.authProvider || 'local', // Store auth provider
       referralCode: user.referralCode || undefined, // Store referral code
       lastLogin: user.lastLogin || undefined, // Store last login time
       referredBy: user.referredBy || undefined, // Store referred by
+      users_id: user.users_id || undefined, // Login identifier
+      tjMemberId: user.tjMemberId || undefined, // TJ member id from API
       searchKeywords: Array.isArray(searchKeywords) ? searchKeywords : [], // Store search keywords from top-level
       preferences: {
         notifications: {
@@ -439,7 +446,7 @@ export const login = async (email: string, password: string): Promise<{ success:
   }
 };
 
-// Register API (backend)
+// Register API (backend) — multipart/form-data
 export const register = async (
   email: string,
   password: string,
@@ -448,50 +455,58 @@ export const register = async (
   isBusiness: boolean = false,
   referralCode?: string,
   user_id?: string,
-  isSeller?: boolean
+  isSeller?: boolean,
+  businessRegistrationImage?: string
 ): Promise<{ success: boolean; data?: any; error?: string; errorCode?: string }> => {
-  // console.log("Registration attempt:", { email, name, phone, isBusiness, referralCode });
-  
   try {
-    const requestBody: any = {
-      email,
-      password,
-      user_id: user_id || name,
-      phone,
-      isBusiness,
-      isSeller: isSeller || false,
-    };
+    const formData = new FormData();
+    formData.append('email', email);
+    formData.append('password', password);
+    formData.append('userName', name);
+    formData.append('users_id', user_id || name);
+    formData.append('phone', phone);
+    formData.append('isBusinesser', String(isSeller || isBusiness || false));
 
-    // Add referral code if provided
     if (referralCode && referralCode.trim() !== '') {
-      requestBody.referralCode = referralCode.trim();
+      formData.append('referalCode', referralCode.trim());
     }
-    
+
+    if (businessRegistrationImage) {
+      const fileUri = businessRegistrationImage;
+      const filename = fileUri.split('/').pop() || 'businessRegistration.png';
+      const match = /\.(\w+)$/.exec(filename);
+      const ext = match ? match[1].toLowerCase() : 'png';
+      const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
+      formData.append('businessRegistration', {
+        uri: fileUri,
+        name: filename,
+        type,
+      } as any);
+    }
+
     const url = `${API_BASE_URL}/auth/register`;
-    const signatureHeaders = await buildSignatureHeaders('POST', url, requestBody);
+    // Multipart bodies are not stable to canonicalize; sign without body hash.
+    const signatureHeaders = await buildSignatureHeaders('POST', url);
 
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true', // Skip ngrok browser warning
+        'ngrok-skip-browser-warning': 'true',
         ...signatureHeaders,
+        // Do NOT set Content-Type - RN sets the multipart boundary automatically.
       },
-      body: JSON.stringify(requestBody),
+      body: formData,
     });
 
-    // console.log("Signup Response Status:", response.status);
-    // console.log("Signup Response Headers:", response.headers);
-    
-    // Get response text first to check if it's JSON
+    console.log("Signup Response Status:", response.status);
+
     const responseText = await response.text();
-    // console.log("Signup Response Text:", responseText.substring(0, 200));
-    
-    // Try to parse as JSON
+    console.log("Signup Response Text:", responseText.substring(0, 500));
+
     let responseData;
     try {
       responseData = JSON.parse(responseText);
-      // console.log("Signup Response:", responseData);
+      console.log("Signup Response:", responseData);
     } catch (parseError) {
       // console.error("Failed to parse response as JSON:", parseError);
       return {

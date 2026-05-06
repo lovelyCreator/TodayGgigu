@@ -25,6 +25,12 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useRegisterMutation } from '../../hooks/useAuthMutations';
 import { useSocialLogin } from '../../services/socialAuth';
+import {
+  launchImageLibrary,
+  MediaType,
+  ImageLibraryOptions,
+  ImagePickerResponse,
+} from 'react-native-image-picker';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS, VALIDATION_RULES, ERROR_MESSAGES, SCREEN_HEIGHT } from '../../constants';
 import { useAppSelector } from '../../store/hooks';
 import { translations } from '../../i18n/translations';
@@ -59,11 +65,15 @@ const SignupScreen: React.FC = () => {
   
   const { mutate: register, isLoading, isError, error, isSuccess, data } = useRegisterMutation({
     onSuccess: (data) => {
-      // The AuthContext will handle updating the global state
-      // This is just for side effects if needed
-      // console.log('User Registeration successful:', data);
-      showToast(t('auth.signupSuccess') || 'Signup successful', 'success');
-      handleLogin();
+      showToast(t('auth.signupSuccess') || 'Verification code sent to email', 'success');
+      if (data?.requiresVerification && data?.email) {
+        (navigation as any).navigate('EmailVerification', {
+          email: data.email,
+          verified: false,
+        });
+      } else {
+        handleLogin();
+      }
     },
     onError: (errorMessage, errorCode) => {
       // Handle specific error codes
@@ -127,6 +137,28 @@ const SignupScreen: React.FC = () => {
   const [isSeller, setIsSeller] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
+  const [businessRegistrationFile, setBusinessRegistrationFile] = useState<{
+    uri: string;
+    name: string;
+  } | null>(null);
+
+  const handlePickBusinessRegistration = () => {
+    const options: ImageLibraryOptions = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.8,
+      selectionLimit: 1,
+    };
+    launchImageLibrary(options, (res: ImagePickerResponse) => {
+      if (res.didCancel || res.errorCode) return;
+      const asset = res.assets?.[0];
+      if (asset?.uri) {
+        setBusinessRegistrationFile({
+          uri: asset.uri,
+          name: asset.fileName || asset.uri.split('/').pop() || 'businessRegistration.png',
+        });
+      }
+    });
+  };
 
   // Email verification screen is no longer needed after signup.
   // Success handling is done in the onSuccess callback (toast + navigate to Login).
@@ -200,6 +232,7 @@ const SignupScreen: React.FC = () => {
       referralCode: formData.referralCode || undefined,
       user_id: formData.user_id || undefined,
       isSeller,
+      businessRegistrationImage: businessRegistrationFile?.uri,
     });
     // console.log('SignupScreen: Signup function completed');
   };
@@ -715,6 +748,25 @@ const SignupScreen: React.FC = () => {
                   </Text>
                 </TouchableOpacity>
 
+                {isSeller && (
+                  <TouchableOpacity
+                    style={styles.businessRegRow}
+                    onPress={handlePickBusinessRegistration}
+                    activeOpacity={0.7}
+                  >
+                    <Icon
+                      name={businessRegistrationFile ? 'document' : 'cloud-upload-outline'}
+                      size={18}
+                      color={COLORS.text.primary}
+                    />
+                    <Text style={styles.businessRegText} numberOfLines={1}>
+                      {businessRegistrationFile
+                        ? businessRegistrationFile.name
+                        : (t('auth.uploadBusinessRegistration') || 'Upload business registration')}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
                 <TouchableOpacity
                   style={styles.checkboxRow}
                   onPress={() => setAgreeToTerms(!agreeToTerms)}
@@ -1155,6 +1207,25 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
     flex: 1,
+  },
+  businessRegRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+    marginLeft: 28, // align with checkbox text
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: COLORS.gray[300],
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: '#FAFAFA',
+  },
+  businessRegText: {
+    flex: 1,
+    marginLeft: SPACING.sm,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
   },
   linkText: {
     color: COLORS.red,

@@ -1120,7 +1120,7 @@ export interface AuthUseMutationOptions {
 }
 
 export interface LoginVariables {
-  email: string;
+  users_id: string;
   password: string;
 }
 
@@ -1133,6 +1133,7 @@ export interface RegisterVariables {
   referralCode?: string;
   user_id?: string;
   isSeller?: boolean;
+  businessRegistrationImage?: string; // local URI of the file to upload
 }
 
 export interface GuestLoginVariables {

@@ -56,21 +56,23 @@ export const buildSignatureHeaders = async (
 ): Promise<Record<string, string>> => {
   const timestamp = Math.floor(Date.now() / 1000).toString(); // Unix seconds
 
-  // Extract path without query
-  let path: string;
+  // Build canonical resource: full URL (origin + path) without query, no trailing slash.
+  let canonicalUrl: string;
   try {
     const full = url.startsWith('http')
       ? new URL(url)
       : new URL(url, API_BASE_URL);
-    path = full.pathname;
+    let path = full.pathname;
+    if (path.length > 1 && path.endsWith('/')) {
+      path = path.slice(0, -1);
+    }
+    canonicalUrl = `${full.origin}${path}`;
   } catch {
-    // Fallback: assume url is already a path
-    path = url.split('?')[0];
-  }
-
-  // Normalize path: backend canonical path does NOT include a trailing slash
-  if (path.length > 1 && path.endsWith('/')) {
-    path = path.slice(0, -1);
+    // Fallback: use the input as-is, stripping query
+    canonicalUrl = url.split('?')[0];
+    if (canonicalUrl.length > 1 && canonicalUrl.endsWith('/')) {
+      canonicalUrl = canonicalUrl.slice(0, -1);
+    }
   }
 
   let bodyHash = '';
@@ -84,14 +86,14 @@ export const buildSignatureHeaders = async (
     bodyHash = sha256(canonicalJson);
   }
 
-  const canonical = `${upperMethod}\n${path}\n${timestamp}\n${bodyHash}`;
+  const canonical = `${upperMethod}\n${canonicalUrl}\n${timestamp}\n${bodyHash}`;
   if (!SIGNATURE_SECRET) {
     console.warn('[signature] API_SIGNATURE_SECRET is not set; requests will be rejected by backend');
   }
   // js-sha256: HMAC usage is sha256.hmac(key, message)
   const signature = sha256.hmac(SIGNATURE_SECRET, canonical);
 
-  console.log('[signature]', upperMethod, path, 'ts:', timestamp, 'bodyHash:', bodyHash || '(empty)', 'sig:', signature.slice(0, 16) + '...');
+  console.log('[signature]', upperMethod, canonicalUrl, 'ts:', timestamp, 'bodyHash:', bodyHash || '(empty)', 'sig:', signature.slice(0, 16) + '...');
 
   return {
     'X-Request-Timestamp': timestamp,

@@ -3,7 +3,7 @@ import { login as apiLogin, register as apiRegister, changePassword as apiChange
 import { User, AuthUseMutationOptions, LoginVariables, RegisterVariables, GuestLoginVariables, UseLoginMutationResult, UseRegisterMutationResult, useGuestLoginMutationResult } from '../types';
 
 // Frontend-only and guest login APIs removed - stub functions
-const loginFrontendOnly = async (_email: string, _password: string) => {
+const loginFrontendOnly = async (_users_id: string, _password: string) => {
   return { success: false, data: null, error: 'Frontend-only login API removed', errorCode: undefined };
 };
 const registerFrontendOnly = async (_data: any) => {
@@ -41,9 +41,9 @@ export const useLoginMutation = (options?: AuthUseMutationOptions): UseLoginMuta
 
     try {
       // Use frontend-only or backend API based on flag
-      const response = USE_FRONTEND_ONLY 
-        ? await loginFrontendOnly(variables.email, variables.password)
-        : await apiLogin(variables.email, variables.password);
+      const response = USE_FRONTEND_ONLY
+        ? await loginFrontendOnly(variables.users_id, variables.password)
+        : await apiLogin(variables.users_id, variables.password);
       
       if (response.success && response.data) {
         setData(response.data);
@@ -114,7 +114,8 @@ export const useRegisterMutation = (options?: AuthUseMutationOptions): UseRegist
         variables.isBusiness,
         variables.referralCode,
         variables.user_id,
-        variables.isSeller
+        variables.isSeller,
+        variables.businessRegistrationImage
       );
       
       if (response.success && response.data) {

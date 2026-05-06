@@ -24,7 +24,7 @@ import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/nativ
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useLoginMutation, useSocialLoginMutation } from '../../hooks/useAuthMutations';
-import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS, VALIDATION_RULES, ERROR_MESSAGES, SCREEN_HEIGHT } from '../../constants';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS, ERROR_MESSAGES, SCREEN_HEIGHT } from '../../constants';
 import { useAppSelector } from '../../store/hooks';
 import { translations } from '../../i18n/translations';
 import ShieldCheckIcon from '../../assets/icons/ShieldCheckIcon';
@@ -96,20 +96,21 @@ const LoginScreen: React.FC = () => {
     onSuccess: (data) => {
       console.log('🔵 LOGIN SUCCESS:', data);
       if (data && data.user) {
-        // Create a full User object from the partial data
+        // Create a full User object from the partial data (new API uses users_id)
         const user = {
-          id: data.user.id || data.user.email || Date.now().toString(), // Use email or timestamp as ID
+          id: data.user.id || (data.user as any).users_id || Date.now().toString(),
           email: data.user.email || '',
-          name: data.user.name || data.user.email?.split('@')[0] || 'User', // Use email prefix or 'User' as name
+          name: data.user.name || (data.user as any).users_id || 'User',
+          memberId: (data.user as any).memberId || (data.user as any).tjMemberId || '',
           avatar: data.user.avatar || 'https://via.placeholder.com/150',
           phone: data.user.phone || '',
           addresses: data.user.addresses || [],
           paymentMethods: data.user.paymentMethods || [],
           wishlist: data.user.wishlist || [],
-          followersCount: data.user.followersCount || 0, // Add followersCount
-          followingsCount: data.user.followingsCount || 0, // Add followingsCount
-          depositBalance: (data.user as any).depositBalance ?? 0, // Preserve depositBalance
-          points: (data.user as any).points ?? 0, // Preserve points
+          followersCount: data.user.followersCount || 0,
+          followingsCount: data.user.followingsCount || 0,
+          depositBalance: (data.user as any).depositBalance ?? 0,
+          points: (data.user as any).points ?? 0,
           preferences: data.user.preferences || {
             notifications: {
               email: true,
@@ -121,8 +122,8 @@ const LoginScreen: React.FC = () => {
           },
           createdAt: data.user.createdAt || new Date(),
           updatedAt: data.user.updatedAt || new Date(),
-          userUniqueId: data.user.userUniqueId || '', // Add userUniqueId if available
-          userUniqueNo: data.user.userUniqueNo || '', // Add userUniqueNo if available
+          userUniqueId: data.user.userUniqueId || '',
+          userUniqueNo: data.user.userUniqueNo || '',
         };
         setAuthenticatedUser(user);
         showToast(t('auth.login.success') || 'Login successful', 'success');
@@ -139,22 +140,28 @@ const LoginScreen: React.FC = () => {
     onError: (error, errorCode) => {
       console.log('🔴 LOGIN ERROR:', { error, errorCode });
       let errorMessage = error;
-      
+      let errorField: 'email' | 'password' = 'password';
+
       switch (errorCode) {
         case 'INVALID_CREDENTIALS':
           errorMessage = t('auth.accountOrPasswordIncorrect') || 'Your account name or password is incorrect.';
+          break;
+        case 'USER_NOT_REGISTERED':
+          errorMessage = t('auth.userNotRegistered') || 'No account with this User ID. Please sign up first.';
+          errorField = 'email';
+          break;
+        case 'EMAIL_NOT_VERIFIED':
+          errorMessage = t('auth.emailNotVerified') || 'Please verify your email before logging in.';
+          errorField = 'email';
           break;
         case 'VALIDATION_ERROR':
           errorMessage = error || t('auth.checkInput');
           break;
         default:
-          errorMessage = t('auth.accountOrPasswordIncorrect') || 'Your account name or password is incorrect.';
+          errorMessage = error || t('auth.accountOrPasswordIncorrect') || 'Your account name or password is incorrect.';
       }
-      
-      // Set error on password field
-      setErrors({ 
-        password: errorMessage
-      });
+
+      setErrors({ [errorField]: errorMessage });
     }
   });
   
@@ -274,9 +281,6 @@ const LoginScreen: React.FC = () => {
 
     if (!formData.email) {
       newErrors.email = ERROR_MESSAGES.REQUIRED_FIELD;
-    } else if (!VALIDATION_RULES.EMAIL_REGEX.test(formData.email) && !/^[0-9+\-\s()]+$/.test(formData.email.replace(/\s/g, ''))) {
-      // Allow email or phone number format
-      newErrors.email = ERROR_MESSAGES.INVALID_EMAIL;
     }
 
     setErrors(newErrors);
@@ -285,7 +289,7 @@ const LoginScreen: React.FC = () => {
 
   const handleLogin = async () => {
     console.log('➡️ LOGIN BUTTON PRESSED', {
-      email: formData.email,
+      users_id: formData.email,
       hasPassword: !!formData.password,
     });
     // Clear any existing errors
@@ -299,7 +303,7 @@ const LoginScreen: React.FC = () => {
     }
 
     console.log('📡 SENDING LOGIN API REQUEST');
-    await login({ email: formData.email, password: formData.password });
+    await login({ users_id: formData.email, password: formData.password });
   };
 
   // Demo login function
@@ -307,18 +311,18 @@ const LoginScreen: React.FC = () => {
     // Clear any existing errors
     setErrors({});
     clearLoginError();
-    
+
     // Use demo credentials
-    const demoEmail = 'demo@example.com';
-    
+    const demoUsersId = 'demo';
+
     // Update form data to show demo credentials
     setFormData({
-      email: demoEmail,
+      email: demoUsersId,
       password: '',
     });
-    
+
     // Perform login with demo credentials
-    await login({ email: demoEmail, password: '' });
+    await login({ users_id: demoUsersId, password: '' });
   };
 
   const handleSocialLogin = async (provider: 'google' | 'facebook' | 'apple' | 'twitter' | 'kakao' | 'naver') => {
@@ -434,15 +438,15 @@ const LoginScreen: React.FC = () => {
                   ]}>
                     {formData.email.length > 0 && (
                       <Text style={styles.floatingLabel}>
-                        {t('auth.email') || 'Email'}
+                        {t('auth.userId') || 'User ID'}
                       </Text>
                     )}
                     <View style={styles.inputRow}>
                       <RNTextInput
                         underlineColorAndroid="transparent"
-                        placeholder={formData.email.length > 0 
-                          ? '' 
-                          : (t('auth.enterEmail') || 'Enter email')
+                        placeholder={formData.email.length > 0
+                          ? ''
+                          : (t('auth.enterUserId') || 'Enter user ID')
                         }
                         placeholderTextColor={COLORS.text.secondary}
                         value={formData.email}
@@ -489,14 +493,14 @@ const LoginScreen: React.FC = () => {
                             setErrors({ ...errors, email: '' });
                           }
                         }}
-                        keyboardType="email-address"
+                        keyboardType="default"
                         autoCapitalize="none"
                         autoCorrect={false}
                         style={styles.unifiedInput}
                       />
                     </View>
                   </View>
-                  
+
                   {formData.email.length > 0 && (
                     <TouchableOpacity
                       style={styles.clearButton}
