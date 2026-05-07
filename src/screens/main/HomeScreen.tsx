@@ -42,6 +42,7 @@ import { useDeleteFromWishlistMutation } from '../../hooks/useDeleteFromWishlist
 import { useSocket } from '../../context/SocketContext';
 import { inquiryApi } from '../../services/inquiryApi';
 import { orderApi, Order, OrderItem } from '../../services/orderApi';
+import Svg, { Path } from 'react-native-svg';
 const LogoImage = require('../../assets/images/logo.png');
 
 /** Figma TG_Main_S393: 393×3140, gutter 16 → content 361. Group 76728: H 472, left 16 */
@@ -942,19 +943,39 @@ const HomeScreen: React.FC = () => {
 
   const renderIntegratedServicesSection = () => {
     const go = () => navigation.navigate('CustomerService' as never);
-    const cell = (labelKey: string, icon: string, large?: boolean) => (
+    const cell = (labelKey: string, icon: string | React.ReactNode, large?: boolean) => (
       <TouchableOpacity
         style={[styles.integratedCell, large && styles.integratedCellLarge]}
         onPress={go}
         activeOpacity={0.88}
       >
         <View style={[styles.integratedCellInner, large && styles.integratedCellInnerLarge]}>
-          <Icon name={icon} size={large ? 28 : 24} color={LOGISTICS_ORANGE} />
+          {typeof icon === 'string'
+            ? <Icon name={icon} size={large ? 28 : 24} color={LOGISTICS_ORANGE} />
+            : icon}
           <Text style={[styles.integratedCellLabel, large && styles.integratedCellLabelLarge]} numberOfLines={3}>
             {t(labelKey)}
           </Text>
         </View>
       </TouchableOpacity>
+    );
+
+    const ParcelTrackingIcon = (
+      <Svg width={32} height={32} viewBox="0 0 48 48" fill="none">
+        <Path
+          d="M6.50014 36.7031V13.3031L3.30014 6.50312C3.00014 5.83646 2.97514 5.16146 3.22514 4.47812C3.47514 3.79479 3.93348 3.30313 4.60014 3.00313C5.26681 2.70312 5.94181 2.66979 6.62514 2.90313C7.30848 3.13646 7.80014 3.58646 8.10014 4.25313L12.3001 13.2031H35.7001L39.9001 4.25313C40.2001 3.58646 40.6918 3.13646 41.3751 2.90313C42.0585 2.66979 42.7335 2.70312 43.4001 3.00313C44.0668 3.30313 44.5168 3.79479 44.7501 4.47812C44.9835 5.16146 44.9501 5.83646 44.6501 6.50312L41.5001 13.3031V36.7031C41.5001 38.2031 40.9918 39.4615 39.9751 40.4781C38.9585 41.4948 37.7001 42.0031 36.2001 42.0031H11.8001C10.3001 42.0031 9.04181 41.4948 8.02514 40.4781C7.00848 39.4615 6.50014 38.2031 6.50014 36.7031ZM19.9001 27.1031H28.1001C28.8335 27.1031 29.4501 26.8531 29.9501 26.3531C30.4501 25.8531 30.7001 25.2365 30.7001 24.5031C30.7001 23.7698 30.4501 23.1365 29.9501 22.6031C29.4501 22.0698 28.8335 21.8031 28.1001 21.8031H19.9001C19.1668 21.8031 18.5501 22.0698 18.0501 22.6031C17.5501 23.1365 17.3001 23.7698 17.3001 24.5031C17.3001 25.2365 17.5501 25.8531 18.0501 26.3531C18.5501 26.8531 19.1668 27.1031 19.9001 27.1031Z"
+          fill={LOGISTICS_ORANGE}
+        />
+      </Svg>
+    );
+
+    const CustomsCodeIcon = (
+      <Svg width={32} height={32} viewBox="0 0 48 48" fill="none">
+        <Path
+          d="M10.6516 41.3031V43.1531C10.6516 43.8865 10.3932 44.5115 9.87656 45.0281C9.3599 45.5448 8.7349 45.8031 8.00156 45.8031H6.00156C5.26823 45.8031 4.64323 45.5448 4.12656 45.0281C3.6099 44.5115 3.35156 43.8865 3.35156 43.1531V38.6531C3.35156 37.9198 3.6099 37.2948 4.12656 36.7781C4.64323 36.2615 5.26823 36.0031 6.00156 36.0031H42.0016C42.7349 36.0031 43.3599 36.2615 43.8766 36.7781C44.3932 37.2948 44.6516 37.9198 44.6516 38.6531V43.1531C44.6516 43.8865 44.3932 44.5115 43.8766 45.0281C43.3599 45.5448 42.7349 45.8031 42.0016 45.8031H40.0016C39.2682 45.8031 38.6432 45.5448 38.1266 45.0281C37.6099 44.5115 37.3516 43.8865 37.3516 43.1531V41.3031H27.6516V43.1531C27.6516 43.8865 27.3932 44.5115 26.8766 45.0281C26.3599 45.5448 25.7349 45.8031 25.0016 45.8031H23.0016C22.2682 45.8031 21.6432 45.5448 21.1266 45.0281C20.6099 44.5115 20.3516 43.8865 20.3516 43.1531V41.3031H10.6516ZM12.0016 32.0031C11.2682 32.0031 10.6432 31.7448 10.1266 31.2281C9.6099 30.7115 9.35156 30.0865 9.35156 29.3531V5.35313C9.35156 4.61979 9.6099 3.99479 10.1266 3.47813C10.6432 2.96146 11.2682 2.70312 12.0016 2.70312H36.0016C36.7349 2.70312 37.3599 2.96146 37.8766 3.47813C38.3932 3.99479 38.6516 4.61979 38.6516 5.35313V29.3531C38.6516 30.0865 38.3932 30.7115 37.8766 31.2281C37.3599 31.7448 36.7349 32.0031 36.0016 32.0031H12.0016ZM28.0016 16.0031C28.7349 16.0031 29.3599 15.7448 29.8766 15.2281C30.3932 14.7115 30.6516 14.0865 30.6516 13.3531C30.6516 12.6198 30.3932 11.9948 29.8766 11.4781C29.3599 10.9615 28.7349 10.7031 28.0016 10.7031H20.0016C19.2682 10.7031 18.6432 10.9615 18.1266 11.4781C17.6099 11.9948 17.3516 12.6198 17.3516 13.3531C17.3516 14.0865 17.6099 14.7115 18.1266 15.2281C18.6432 15.7448 19.2682 16.0031 20.0016 16.0031H28.0016Z"
+          fill={LOGISTICS_ORANGE}
+        />
+      </Svg>
     );
 
     return (
@@ -964,23 +985,31 @@ const HomeScreen: React.FC = () => {
         </Text>
         <Text style={styles.logisticsSectionTitleBlack}>{t('home.integratedTitleBlack')}</Text>
         <View style={styles.integratedPlus}>
-          <View style={styles.integratedRowSpread}>
-            {cell('home.integratedBtn1', 'cube')}
-            {cell('home.integratedBtn2', 'person')}
+          <View style={[styles.integratedCornerSlot, { top: 0, left: 0 }]}>
+            {cell('home.integratedBtn1', ParcelTrackingIcon)}
+          </View>
+          <View style={[styles.integratedCornerSlot, { top: 0, right: 0 }]}>
+            {cell('home.integratedBtn2', CustomsCodeIcon)}
           </View>
           <View style={styles.integratedCenterSlot}>
             <TouchableOpacity style={[styles.integratedCell, styles.integratedCellLarge]} onPress={go} activeOpacity={0.88}>
               <View style={[styles.integratedCellInner, styles.integratedCellInnerLarge]}>
-                <Text style={styles.integratedUnipassMark}>🇰🇷</Text>
+                <Image
+                  source={require('../../assets/icons/kcs-logo.png')}
+                  style={styles.integratedUnipassLogo}
+                  resizeMode="contain"
+                />
                 <Text style={[styles.integratedCellLabel, styles.integratedCellLabelLarge]} numberOfLines={3}>
                   {t('home.integratedBtn3')}
                 </Text>
               </View>
             </TouchableOpacity>
           </View>
-          <View style={styles.integratedRowSpread}>
-            {cell('home.integratedBtn4', 'chatbubbles-outline')}
-            {cell('home.integratedBtn5', 'document-text-outline')}
+          <View style={[styles.integratedCornerSlot, { bottom: 0, left: 0 }]}>
+            {cell('home.integratedBtn4', 'person-outline')}
+          </View>
+          <View style={[styles.integratedCornerSlot, { bottom: 0, right: 0 }]}>
+            {cell('home.integratedBtn5', 'code-slash-outline')}
           </View>
         </View>
       </View>
@@ -995,11 +1024,11 @@ const HomeScreen: React.FC = () => {
       <Text style={[styles.csHours, styles.csHoursAccent]}>{t('home.csHoursLine3')}</Text>
 
       <View style={styles.csQuickRow}>
-        {[
-          { bg: '#FEE500', title: 'home.csKakaoTitle', icon: 'chatbubbles-outline' },
-          { bg: '#07C160', title: 'home.csWechatTitle', icon: 'chatbubbles-outline' },
-          { bg: LOGISTICS_ORANGE, title: 'home.csOneTitle', icon: 'person' },
-        ].map((q) => (
+        {([
+          {  title: 'home.csKakaoTitle', image: require('../../assets/icons/cs-kakao.png') },
+          { title: 'home.csWechatTitle', image: require('../../assets/icons/cs-wechat.png') },
+          { title: 'home.csOneTitle', image: require('../../assets/icons/cs-one.png') },
+        ] as Array<{ bg: string; title: string; icon?: string; image?: any }>).map((q) => (
           <TouchableOpacity
             key={q.title}
             style={styles.csQuickCol}
@@ -1007,7 +1036,11 @@ const HomeScreen: React.FC = () => {
             activeOpacity={0.88}
           >
             <View style={[styles.csQuickCircle, { backgroundColor: q.bg }]}>
-              <Icon name={q.icon} size={26} color={q.bg === '#FEE500' ? COLORS.black : COLORS.white} />
+              {q.image ? (
+                <Image source={q.image} style={styles.csQuickIconImage} resizeMode="contain" />
+              ) : (
+                <Icon name={q.icon!} size={26} color={q.bg === '#FEE500' ? COLORS.black : COLORS.white} />
+              )}
             </View>
             <Text style={styles.csQuickTitle}>{t(q.title)}</Text>
             <Text style={styles.csQuickGo}>{t('home.csGo')}</Text>
@@ -1017,7 +1050,12 @@ const HomeScreen: React.FC = () => {
 
       <View style={styles.csFxCard}>
         <View style={styles.csFxHeader}>
-          <Icon name="information-circle-outline" size={20} color={LOGISTICS_ORANGE} />
+          <Svg width={20} height={20} viewBox="0 0 16 16" fill="none">
+            <Path
+              d="M6.16354 10.2302H7.78021C8.02465 10.2302 8.23299 10.1441 8.40521 9.97188C8.57743 9.79965 8.66354 9.59132 8.66354 9.34688C8.66354 9.10243 8.57743 8.8941 8.40521 8.72188C8.23299 8.54965 8.02465 8.46354 7.78021 8.46354H6.19688L6.44688 8.21354C6.61354 8.04688 6.69688 7.84132 6.69688 7.59688C6.69688 7.35243 6.61354 7.14688 6.44688 6.98021C6.28021 6.81354 6.07465 6.73021 5.83021 6.73021C5.58576 6.73021 5.38021 6.81354 5.21354 6.98021L3.44688 8.74688C3.2691 8.92465 3.18021 9.13021 3.18021 9.36354C3.18021 9.59688 3.2691 9.80243 3.44688 9.98021L5.21354 11.7469C5.38021 11.9135 5.58576 11.9969 5.83021 11.9969C6.07465 11.9969 6.28021 11.9135 6.44688 11.7469C6.61354 11.5802 6.69688 11.3747 6.69688 11.1302C6.69688 10.8858 6.61354 10.6802 6.44688 10.5135L6.16354 10.2302ZM9.79688 7.53021L9.54688 7.78021C9.38021 7.94688 9.29688 8.15243 9.29688 8.39688C9.29688 8.64132 9.38021 8.84688 9.54688 9.01354C9.71354 9.18021 9.9191 9.26354 10.1635 9.26354C10.408 9.26354 10.6135 9.18021 10.7802 9.01354L12.5469 7.24688C12.7247 7.0691 12.8135 6.86354 12.8135 6.63021C12.8135 6.39688 12.7247 6.19132 12.5469 6.01354L10.7802 4.24688C10.6135 4.08021 10.408 3.99688 10.1635 3.99688C9.9191 3.99688 9.71354 4.08021 9.54688 4.24688C9.38021 4.41354 9.29688 4.6191 9.29688 4.86354C9.29688 5.10799 9.38021 5.31354 9.54688 5.48021L9.83021 5.76354H8.21354C7.9691 5.76354 7.76076 5.84965 7.58854 6.02188C7.41632 6.1941 7.33021 6.40243 7.33021 6.64688C7.33021 6.89132 7.41632 7.09965 7.58854 7.27188C7.76076 7.4441 7.9691 7.53021 8.21354 7.53021H9.79688ZM7.99688 15.1969C6.99688 15.1969 6.06076 15.008 5.18854 14.6302C4.31632 14.2524 3.55521 13.7385 2.90521 13.0885C2.25521 12.4385 1.74132 11.6774 1.36354 10.8052C0.985764 9.93299 0.796875 8.99688 0.796875 7.99688C0.796875 6.99688 0.985764 6.05799 1.36354 5.18021C1.74132 4.30243 2.25521 3.53854 2.90521 2.88854C3.55521 2.23854 4.31632 1.72743 5.18854 1.35521C6.06076 0.982986 6.99688 0.796875 7.99688 0.796875C8.99688 0.796875 9.93576 0.982986 10.8135 1.35521C11.6913 1.72743 12.4552 2.23854 13.1052 2.88854C13.7552 3.53854 14.2663 4.30243 14.6385 5.18021C15.0108 6.05799 15.1969 6.99688 15.1969 7.99688C15.1969 8.99688 15.0108 9.93299 14.6385 10.8052C14.2663 11.6774 13.7552 12.4385 13.1052 13.0885C12.4552 13.7385 11.6913 14.2524 10.8135 14.6302C9.93576 15.008 8.99688 15.1969 7.99688 15.1969ZM7.99688 13.4302C9.5191 13.4302 10.8052 12.9052 11.8552 11.8552C12.9052 10.8052 13.4302 9.5191 13.4302 7.99688C13.4302 6.47465 12.9052 5.18854 11.8552 4.13854C10.8052 3.08854 9.5191 2.56354 7.99688 2.56354C6.47465 2.56354 5.18854 3.08854 4.13854 4.13854C3.08854 5.18854 2.56354 6.47465 2.56354 7.99688C2.56354 9.5191 3.08854 10.8052 4.13854 11.8552C5.18854 12.9052 6.47465 13.4302 7.99688 13.4302Z"
+              fill={LOGISTICS_ORANGE}
+            />
+          </Svg>
           <Text style={[styles.csFxHeaderTitle, { color: LOGISTICS_ORANGE }]}>{t('home.csFxTitle')}</Text>
         </View>
         {[
@@ -1035,7 +1073,11 @@ const HomeScreen: React.FC = () => {
 
       <View style={styles.csShipCard}>
         <View style={styles.csShipHeader}>
-          <Icon name="boat" size={20} color={COLORS.text.primary} />
+          <Image
+            source={require('../../assets/icons/boat-plane.png')}
+            style={styles.csShipHeaderIcon}
+            resizeMode="contain"
+          />
           <Text style={styles.csShipHeaderTitle}>{t('home.csShipTitle')}</Text>
         </View>
         <View style={styles.csShipBody}>
@@ -1072,7 +1114,7 @@ const HomeScreen: React.FC = () => {
       <View style={styles.csSection}>
         <Text style={[styles.csTitleOrange, { color: LOGISTICS_ORANGE }]}>{t('home.csTitleOrange')}</Text>
         <Text style={styles.csTitleBlack}>{t('home.csTitleBlack')}</Text>
-        <Text style={styles.csSubtitle}>
+        <Text style={styles.csSubtitle} >
           <Text>{t('home.csSubtitleBefore')}</Text>
           <Text style={{ color: LOGISTICS_ORANGE, fontWeight: '700' }}>{t('home.csSubtitleHighlight')}</Text>
           <Text>{t('home.csSubtitleAfter')}</Text>
@@ -1812,43 +1854,42 @@ const styles = StyleSheet.create({
   },
   integratedPlus: {
     marginTop: SPACING.md,
+    alignSelf: 'center',
+    width: HOME_CONTENT_WIDTH,
+    aspectRatio: 341 / 316,
+    position: 'relative',
   },
   integratedRowSpread: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: SPACING.sm,
   },
   integratedCenterSlot: {
-    alignItems: 'center',
-    marginVertical: SPACING.sm,
+    position: 'absolute',
+    top: `${(74 / 316) * 100}%`,
+    left: `${(94 / 341) * 100}%`,
+    width: `${(152 / 341) * 100}%`,
+    height: `${(152 / 316) * 100}%`,
+  },
+  integratedCornerSlot: {
+    position: 'absolute',
+    width: `${(120 / 341) * 100}%`,
+    height: `${(120 / 316) * 100}%`,
   },
   integratedCell: {
-    flex: 1,
-    minHeight: 100,
-    maxWidth: (HOME_CONTENT_WIDTH - SPACING.sm) / 2,
+    width: '100%',
+    height: '100%',
   },
   integratedCellLarge: {
-    maxWidth: HOME_CONTENT_WIDTH * 0.55,
-    minHeight: 120,
+    width: '100%',
+    height: '100%',
   },
   integratedCellInner: {
     flex: 1,
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 2,
-    borderColor: LOGISTICS_ORANGE,
+    backgroundColor: 'rgba(255, 85, 0, 0.15)',
+    borderRadius: 8,
     padding: SPACING.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      android: { elevation: 3 },
-      ios: {
-        shadowColor: LOGISTICS_ORANGE,
-        shadowOffset: { width: -3, height: 3 },
-        shadowOpacity: 0.15,
-        shadowRadius: 2,
-      },
-    }),
   },
   integratedCellInnerLarge: {
     paddingVertical: SPACING.md,
@@ -1864,11 +1905,16 @@ const styles = StyleSheet.create({
   integratedCellLabelLarge: {
     fontSize: FONTS.sizes.sm,
   },
+  integratedUnipassLogo: {
+    width: 44,
+    height: 44,
+  },
   integratedUnipassMark: {
     fontSize: 28,
     lineHeight: 32,
   },
   csSection: {
+    
     paddingHorizontal: HOME_GUTTER,
     paddingBottom: SPACING.lg,
     backgroundColor: COLORS.background,
@@ -1968,6 +2014,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.xs,
   },
+  csQuickIconImage: {
+    width: 40,
+    height: 40,
+  },
   csQuickTitle: {
     fontSize: 10,
     fontWeight: '700',
@@ -2034,6 +2084,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     backgroundColor: '#E3F2FD',
+  },
+  csShipHeaderIcon: {
+    width: 24,
+    height: 20,
   },
   csShipHeaderTitle: {
     fontSize: FONTS.sizes.md,
