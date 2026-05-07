@@ -945,11 +945,13 @@ const HomeScreen: React.FC = () => {
     const go = () => navigation.navigate('CustomerService' as never);
 
     type CornerKey = 'tl' | 'tr' | 'bl' | 'br';
+    // Smaller translate = closer to each outer corner (farther from center)
+    const CORNER_TRANSLATE_OUTWARD_FACTOR = 0.7;
     const CORNER_TRANSLATE: Record<CornerKey, { x: number; y: number }> = {
-      tl: { x: 35.2, y: 31.2 },
-      tr: { x: -35.2, y: 31.2 },
-      bl: { x: 35.2, y: -31.2 },
-      br: { x: -35.2, y: -31.2 },
+      tl: { x: 35.2 * CORNER_TRANSLATE_OUTWARD_FACTOR, y: 31.2 * CORNER_TRANSLATE_OUTWARD_FACTOR },
+      tr: { x: -35.2 * CORNER_TRANSLATE_OUTWARD_FACTOR, y: 31.2 * CORNER_TRANSLATE_OUTWARD_FACTOR },
+      bl: { x: 35.2 * CORNER_TRANSLATE_OUTWARD_FACTOR, y: -31.2 * CORNER_TRANSLATE_OUTWARD_FACTOR },
+      br: { x: -35.2 * CORNER_TRANSLATE_OUTWARD_FACTOR, y: -31.2 * CORNER_TRANSLATE_OUTWARD_FACTOR },
     };
 
     const cell = (labelKey: string, icon: string | React.ReactNode, large?: boolean, corner?: CornerKey) => (
@@ -1787,10 +1789,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   logisticsSectionTitleOrange: {
+    textAlign: 'center',
     fontSize: FONTS.sizes.xl,
     fontWeight: '800',
   },
   logisticsSectionTitleBlack: {
+    textAlign: 'center',
     fontSize: FONTS.sizes.lg,
     fontWeight: '700',
     color: COLORS.black,
