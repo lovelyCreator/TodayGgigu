@@ -943,19 +943,49 @@ const HomeScreen: React.FC = () => {
 
   const renderIntegratedServicesSection = () => {
     const go = () => navigation.navigate('CustomerService' as never);
-    const cell = (labelKey: string, icon: string | React.ReactNode, large?: boolean) => (
+
+    type CornerKey = 'tl' | 'tr' | 'bl' | 'br';
+    const CORNER_TRANSLATE: Record<CornerKey, { x: number; y: number }> = {
+      tl: { x: 35.2, y: 31.2 },
+      tr: { x: -35.2, y: 31.2 },
+      bl: { x: 35.2, y: -31.2 },
+      br: { x: -35.2, y: -31.2 },
+    };
+
+    const cell = (labelKey: string, icon: string | React.ReactNode, large?: boolean, corner?: CornerKey) => (
       <TouchableOpacity
         style={[styles.integratedCell, large && styles.integratedCellLarge]}
         onPress={go}
         activeOpacity={0.88}
       >
         <View style={[styles.integratedCellInner, large && styles.integratedCellInnerLarge]}>
-          {typeof icon === 'string'
+          {!large && corner && (
+            <View
+              style={[
+                styles.integratedCornerInsetGroup,
+                { transform: [{ translateX: CORNER_TRANSLATE[corner].x }, { translateY: CORNER_TRANSLATE[corner].y }] },
+              ]}
+              pointerEvents="none"
+            >
+              <View style={styles.integratedCornerOverlay} />
+              <View style={styles.integratedCornerInsetContent}>
+                {typeof icon === 'string'
+                  ? <Icon name={icon} size={24} color={LOGISTICS_ORANGE} />
+                  : icon}
+                <Text style={styles.integratedCellLabel} numberOfLines={3}>
+                  {t(labelKey)}
+                </Text>
+              </View>
+            </View>
+          )}
+          {(large || !corner) && (typeof icon === 'string'
             ? <Icon name={icon} size={large ? 28 : 24} color={LOGISTICS_ORANGE} />
-            : icon}
-          <Text style={[styles.integratedCellLabel, large && styles.integratedCellLabelLarge]} numberOfLines={3}>
-            {t(labelKey)}
-          </Text>
+            : icon)}
+          {(large || !corner) && (
+            <Text style={[styles.integratedCellLabel, large && styles.integratedCellLabelLarge]} numberOfLines={3}>
+              {t(labelKey)}
+            </Text>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -985,15 +1015,16 @@ const HomeScreen: React.FC = () => {
         </Text>
         <Text style={styles.logisticsSectionTitleBlack}>{t('home.integratedTitleBlack')}</Text>
         <View style={styles.integratedPlus}>
+          <View style={styles.integratedCenterOrangeStandalone} pointerEvents="none" />
           <View style={[styles.integratedCornerSlot, { top: 0, left: 0 }]}>
-            {cell('home.integratedBtn1', ParcelTrackingIcon)}
+            {cell('home.integratedBtn1', ParcelTrackingIcon, false, 'tl')}
           </View>
           <View style={[styles.integratedCornerSlot, { top: 0, right: 0 }]}>
-            {cell('home.integratedBtn2', CustomsCodeIcon)}
+            {cell('home.integratedBtn2', CustomsCodeIcon, false, 'tr')}
           </View>
           <View style={styles.integratedCenterSlot}>
-            <TouchableOpacity style={[styles.integratedCell, styles.integratedCellLarge]} onPress={go} activeOpacity={0.88}>
-              <View style={[styles.integratedCellInner, styles.integratedCellInnerLarge]}>
+            <TouchableOpacity style={styles.integratedCenterWhiteCard} onPress={go} activeOpacity={0.88}>
+              <View style={styles.integratedCenterContent}>
                 <Image
                   source={require('../../assets/icons/kcs-logo.png')}
                   style={styles.integratedUnipassLogo}
@@ -1006,10 +1037,10 @@ const HomeScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
           <View style={[styles.integratedCornerSlot, { bottom: 0, left: 0 }]}>
-            {cell('home.integratedBtn4', 'person-outline')}
+            {cell('home.integratedBtn4', 'person-outline', false, 'bl')}
           </View>
           <View style={[styles.integratedCornerSlot, { bottom: 0, right: 0 }]}>
-            {cell('home.integratedBtn5', 'code-slash-outline')}
+            {cell('home.integratedBtn5', 'code-slash-outline', false, 'br')}
           </View>
         </View>
       </View>
@@ -1869,11 +1900,13 @@ const styles = StyleSheet.create({
     left: `${(94 / 341) * 100}%`,
     width: `${(152 / 341) * 100}%`,
     height: `${(152 / 316) * 100}%`,
+    zIndex: 2,
   },
   integratedCornerSlot: {
     position: 'absolute',
     width: `${(120 / 341) * 100}%`,
     height: `${(120 / 316) * 100}%`,
+    zIndex: 1,
   },
   integratedCell: {
     width: '100%',
@@ -1890,6 +1923,71 @@ const styles = StyleSheet.create({
     padding: SPACING.sm,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  integratedCornerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: LOGISTICS_ORANGE,
+    borderRadius: 8,
+    zIndex: 0,
+  },
+  integratedCenterOverlay: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    right: 16,
+    bottom: 16,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: LOGISTICS_ORANGE,
+    borderRadius: 8,
+    zIndex: 5,
+  },
+  integratedCenterOrangeBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 85, 0, 0.15)',
+    borderRadius: 8,
+    zIndex: 2,
+  },
+  integratedCenterOrangeStandalone: {
+    position: 'absolute',
+    top: `${(74 / 316) * 100}%`,
+    left: `${(94 / 341) * 100}%`,
+    width: `${(152 / 341) * 100}%`,
+    height: `${(152 / 316) * 100}%`,
+    backgroundColor: 'rgba(255, 85, 0, 0.15)',
+    borderRadius: 8,
+    zIndex: 0,
+  },
+  integratedCenterWhiteCard: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    right: 16,
+    bottom: 16,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: LOGISTICS_ORANGE,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
+  },
+  integratedCenterContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 6,
+  },
+  integratedCornerInsetGroup: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  integratedCornerInsetContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
   integratedCellInnerLarge: {
     paddingVertical: SPACING.md,
