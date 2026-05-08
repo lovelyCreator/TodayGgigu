@@ -840,10 +840,13 @@ const HomeScreen: React.FC = () => {
       locale === 'ko' ? '회원'
       : locale === 'zh' ? '会员'
       : 'Member';
-    const avatarUri =
-      user.avatar && typeof user.avatar === 'string' && user.avatar.trim() !== ''
-        ? user.avatar
-        : 'https://via.placeholder.com/150';
+    const hasRealAvatar =
+      user.avatar &&
+      typeof user.avatar === 'string' &&
+      user.avatar.trim() !== '' &&
+      !user.avatar.includes('via.placeholder.com');
+    const avatarUri = hasRealAvatar ? user.avatar : null;
+    const avatarInitial = (displayName.trim().charAt(0) || 'U').toUpperCase();
 
     const primaryAddress: any =
       (user.addresses || []).find((a: any) => a.isDefault) ||
@@ -993,7 +996,13 @@ const HomeScreen: React.FC = () => {
       <View style={styles.uosOuter}>
         {/* User header */}
         <View style={styles.uosUserHeader}>
-          <Image source={{ uri: avatarUri }} style={styles.uosAvatar} />
+          {avatarUri ? (
+            <Image source={{ uri: avatarUri }} style={styles.uosAvatar} />
+          ) : (
+            <View style={[styles.uosAvatar, styles.uosAvatarFallback]}>
+              <Text style={styles.uosAvatarFallbackText}>{avatarInitial}</Text>
+            </View>
+          )}
           <View style={styles.uosUserNameCol}>
             <Text style={styles.uosUserName} numberOfLines={1}>{displayName}</Text>
             <Text style={styles.uosUserMember}>{memberLabel}</Text>
@@ -3698,6 +3707,16 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     backgroundColor: COLORS.gray[200],
+  },
+  uosAvatarFallback: {
+    backgroundColor: COLORS.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uosAvatarFallbackText: {
+    color: COLORS.white,
+    fontSize: 20,
+    fontWeight: '800',
   },
   uosUserNameCol: {
     flex: 1,
