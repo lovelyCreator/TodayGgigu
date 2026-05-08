@@ -503,7 +503,7 @@ const CartScreen: React.FC = () => {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* PAGE TITLE */}
       <View style={styles.pageHeader}>
-        <Icon name="cart-outline" size={22} color={COLORS.red} />
+        <Icon name="cart-outline" size={22} color={COLORS.secondary} />
         <Text style={styles.pageHeaderTitle}>{t('cart.title')}</Text>
       </View>
 
@@ -1229,7 +1229,7 @@ const styles = StyleSheet.create({
   pageHeaderTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: COLORS.red,
+    color: COLORS.secondary,
     marginLeft: 8,
   },
   // HEADER
