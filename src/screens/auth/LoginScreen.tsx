@@ -147,9 +147,12 @@ const LoginScreen: React.FC = () => {
           errorMessage = t('auth.accountOrPasswordIncorrect') || 'Your account name or password is incorrect.';
           break;
         case 'USER_NOT_REGISTERED':
-          errorMessage = t('auth.userNotRegistered') || 'No account with this User ID. Please sign up first.';
-          errorField = 'email';
-          break;
+          showToast(
+            t('auth.userNotRegistered') || 'No account with this User ID. Please sign up first.',
+            'info',
+          );
+          (navigation as any).navigate('Signup', { prefillUserId: formData.email });
+          return;
         case 'EMAIL_NOT_VERIFIED':
           errorMessage = t('auth.emailNotVerified') || 'Please verify your email before logging in.';
           errorField = 'email';
@@ -303,7 +306,13 @@ const LoginScreen: React.FC = () => {
     }
 
     console.log('📡 SENDING LOGIN API REQUEST');
-    await login({ users_id: formData.email, password: formData.password });
+    const identifier = formData.email.trim();
+    const looksLikeEmail = identifier.includes('@');
+    await login({
+      users_id: identifier,
+      password: formData.password,
+      email: looksLikeEmail ? identifier : undefined,
+    });
   };
 
   // Demo login function
@@ -438,7 +447,7 @@ const LoginScreen: React.FC = () => {
                   ]}>
                     {formData.email.length > 0 && (
                       <Text style={styles.floatingLabel}>
-                        {t('auth.userId') || 'User ID'}
+                        {t('auth.userIdOrEmail') || 'User ID or Email'}
                       </Text>
                     )}
                     <View style={styles.inputRow}>
@@ -446,7 +455,7 @@ const LoginScreen: React.FC = () => {
                         underlineColorAndroid="transparent"
                         placeholder={formData.email.length > 0
                           ? ''
-                          : (t('auth.enterUserId') || 'Enter user ID')
+                          : (t('auth.enterUserIdOrEmail') || 'Enter user ID or email')
                         }
                         placeholderTextColor={COLORS.text.secondary}
                         value={formData.email}

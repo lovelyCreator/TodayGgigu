@@ -43,7 +43,7 @@ export const useLoginMutation = (options?: AuthUseMutationOptions): UseLoginMuta
       // Use frontend-only or backend API based on flag
       const response = USE_FRONTEND_ONLY
         ? await loginFrontendOnly(variables.users_id, variables.password)
-        : await apiLogin(variables.users_id, variables.password);
+        : await apiLogin(variables.users_id, variables.password, variables.email);
       
       if (response.success && response.data) {
         setData(response.data);

@@ -192,7 +192,7 @@ const EmailVerificationScreen = () => {
           errorMsg = t('auth.invalidVerificationCode');
           break;
         case 'USER_NOT_FOUND':
-          errorMsg = t('auth.userNotFound');
+          errorMsg = t('auth.userNotRegistered');
           break;
         case 'VERIFICATION_CODE_EXPIRED':
           errorMsg = t('auth.codeExpired');

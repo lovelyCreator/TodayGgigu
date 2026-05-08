@@ -143,12 +143,15 @@ export const clearAuthData = async () => {
 };
 
 // Login API (backend)
-export const login = async (users_id: string, password: string): Promise<{ success: boolean; data?: any; error?: string; errorCode?: string }> => {
+export const login = async (users_id: string, password: string, email?: string): Promise<{ success: boolean; data?: any; error?: string; errorCode?: string }> => {
   try {
-    const requestBody = {
+    const requestBody: { users_id: string; password: string; email?: string } = {
       users_id: users_id,
       password: password,
     };
+    if (email && email.trim() !== '') {
+      requestBody.email = email.trim();
+    }
     console.log("Login Request Body", requestBody);
     
     const url = `${API_BASE_URL}/auth/login`;

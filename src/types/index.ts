@@ -1122,6 +1122,7 @@ export interface AuthUseMutationOptions {
 export interface LoginVariables {
   users_id: string;
   password: string;
+  email?: string;
 }
 
 export interface RegisterVariables {
