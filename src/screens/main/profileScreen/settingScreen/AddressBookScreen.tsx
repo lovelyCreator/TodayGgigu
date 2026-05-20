@@ -25,6 +25,7 @@ import { useAddAddressMutation } from '../../../../hooks/useAddAddressMutation';
 import { useUpdateAddressMutation } from '../../../../hooks/useUpdateAddressMutation';
 import { addressApi } from '../../../../services/addressApi';
 import { useToast } from '../../../../context/ToastContext';
+import { useTranslation } from '../../../../hooks/useTranslation';
 
 type AddressBookScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AddressBook'>;
 type AddressBookScreenRouteProp = RouteProp<RootStackParamList, 'AddressBook'>;
@@ -34,14 +35,16 @@ const AddressBookScreen: React.FC = () => {
   const route = useRoute<AddressBookScreenRouteProp>();
   const { user, updateUser } = useAuth();
   const { showToast } = useToast();
-  
+  const { t } = useTranslation();
+
   const [selectedAddressIds, setSelectedAddressIds] = useState<Set<string>>(new Set());
   const [isManagementMode, setIsManagementMode] = useState(false);
   const [addressModalVisible, setAddressModalVisible] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
-  const [saveIdChecked, setSaveIdChecked] = useState(false);
+  const [saveIdChecked, setSaveIdChecked] = useState(true);
   const [isDefaultAddress, setIsDefaultAddress] = useState(false);
   const [showKakaoAddress, setShowKakaoAddress] = useState(false);
+  const [addressType, setAddressType] = useState<'personal' | 'business'>('personal');
   
   // Form fields
   const [recipient, setRecipient] = useState('');
@@ -165,9 +168,10 @@ const AddressBookScreen: React.FC = () => {
     setZipCode('');
     setPersonalCustomsCode('');
     setNote('');
-    setSaveIdChecked(false);
+    setSaveIdChecked(true);
     setIsDefaultAddress(false);
     setEditingAddress(null);
+    setAddressType('personal');
   };
 
   const handleAddAddress = () => {
@@ -182,10 +186,11 @@ const AddressBookScreen: React.FC = () => {
     setContact(address.phone || '');
     setDetailedAddress(address.street || '');
     setZipCode(address.zipCode || '');
-    setPersonalCustomsCode(''); // Not stored in Address type
+    setPersonalCustomsCode((address as any).personalCustomsCode || ''); // Not stored in Address type
     setNote('');
-    setSaveIdChecked(false);
+    setSaveIdChecked(true);
     setIsDefaultAddress(address.isDefault || false);
+    setAddressType(address.type === 'work' ? 'business' : 'personal');
     setAddressModalVisible(true);
   };
 
@@ -209,7 +214,7 @@ const AddressBookScreen: React.FC = () => {
     }
 
     const addressData = {
-      customerClearanceType: 'individual',
+      customerClearanceType: addressType === 'business' ? 'business' : 'individual',
       recipient: recipient.trim(),
       contact: contact.trim(),
       personalCustomsCode: personalCustomsCode.trim(),
@@ -417,101 +422,241 @@ const AddressBookScreen: React.FC = () => {
     <Modal
       visible={addressModalVisible}
       transparent={true}
-      animationType="slide"
+      animationType="fade"
       onRequestClose={() => setAddressModalVisible(false)}
     >
       <View style={styles.modalOverlay}>
-        <View style={styles.addressModalContent}>
+        <View style={styles.addressModalCard}>
+          {/* Header */}
           <View style={styles.addressModalHeader}>
-            <Text style={styles.addressModalTitle}>{editingAddress ? 'Edit address' : 'New address'}</Text>
-            <TouchableOpacity onPress={() => setAddressModalVisible(false)}>
-              <Icon name="close" size={24} color={COLORS.text.primary} />
+            <Text style={styles.addressModalTitle}>
+              {t('profile.addressModal.title')}
+            </Text>
+            <TouchableOpacity
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={() => setAddressModalVisible(false)}
+            >
+              <Icon name="close" size={20} color={COLORS.gray[600]} />
             </TouchableOpacity>
           </View>
-          <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={styles.addressModalLabel}>Currently delivering to:</Text>
-            <View style={styles.addressModalRow}>
-              <View style={styles.addressModalDropdown}>
-                <Text style={styles.addressModalDropdownText}>한국</Text>
-                <Icon name="chevron-down" size={20} color={COLORS.gray[600]} />
-              </View>
-              <TouchableOpacity style={styles.defaultCheckboxRow} onPress={() => setIsDefaultAddress(!isDefaultAddress)}>
-                <Text style={styles.defaultText}>Default</Text>
-                <View style={[styles.checkboxSquare, isDefaultAddress && styles.checkboxSquareChecked]}>
-                  {isDefaultAddress && <Icon name="checkmark" size={16} color={COLORS.white} />}
-                </View>
-              </TouchableOpacity>
+
+          {/* Scrollable body */}
+          <ScrollView
+            style={styles.addressModalBody}
+            contentContainerStyle={styles.addressModalBodyContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Personal / Business segmented tabs */}
+            <View style={styles.segmentRow}>
+              {(['personal', 'business'] as const).map((type) => {
+                const active = addressType === type;
+                return (
+                  <TouchableOpacity
+                    key={type}
+                    style={[styles.segmentItem, active && styles.segmentItemActive]}
+                    activeOpacity={0.7}
+                    onPress={() => setAddressType(type)}
+                  >
+                    <Text
+                      style={[
+                        styles.segmentText,
+                        active && styles.segmentTextActive,
+                      ]}
+                    >
+                      {type === 'personal'
+                        ? t('profile.addressModal.typePersonal')
+                        : t('profile.addressModal.typeBusiness')}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
-            <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Address information:</Text>
-            <TouchableOpacity style={styles.addressSearchBtn} onPress={() => setShowKakaoAddress(true)}>
-              <Icon name="search" size={16} color={COLORS.white} />
-              <Text style={styles.addressSearchBtnText}>Search Address (Kakao)</Text>
+            {/* Customs notice */}
+            <Text style={styles.customsNotice}>
+              {t('profile.addressModal.customsNotice')}
+            </Text>
+
+            {/* Current destination */}
+            <Text style={styles.fieldLabel}>
+              {t('profile.addressModal.currentDestination')}
+            </Text>
+            <TouchableOpacity style={styles.dropdownBox} activeOpacity={0.7}>
+              <Text style={styles.dropdownText}>
+                {t('profile.addressModal.countryKorea')}
+              </Text>
+              <Icon name="chevron-down" size={18} color={COLORS.gray[600]} />
             </TouchableOpacity>
 
-            <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Postal code:</Text>
+            {/* Address */}
+            <Text style={styles.fieldLabel}>
+              <Text style={styles.requiredMark}>* </Text>
+              {t('profile.addressModal.address')}
+            </Text>
+            <TouchableOpacity
+              style={styles.searchAddressButton}
+              activeOpacity={0.8}
+              onPress={() => setShowKakaoAddress(true)}
+            >
+              <Text style={styles.searchAddressButtonText}>
+                {t('profile.addressModal.searchAddress')}
+              </Text>
+            </TouchableOpacity>
+            <View style={[styles.inputBox, styles.inputBoxSpacing]}>
+              <Text style={styles.inputPlaceholderStatic} numberOfLines={1}>
+                {t('profile.addressModal.selectRegion')}
+              </Text>
+            </View>
+
+            {/* Detail address */}
+            <Text style={styles.fieldLabel}>
+              <Text style={styles.requiredMark}>* </Text>
+              {t('profile.addressModal.detailAddress')}:
+            </Text>
             <TextInput
-              style={styles.addressModalInput}
-              placeholder="e.g. 06000"
+              style={styles.input}
+              placeholder={t('profile.addressModal.detailAddressPlaceholder')}
+              placeholderTextColor={COLORS.gray[400]}
+              value={detailedAddress}
+              onChangeText={setDetailedAddress}
+              maxLength={120}
+            />
+            <Text style={styles.helperTextRed}>
+              {t('profile.addressModal.detailAddressHelper')}
+            </Text>
+
+            {/* Postal code */}
+            <Text style={styles.fieldLabel}>
+              <Text style={styles.requiredMark}>* </Text>
+              {t('profile.addressModal.postalCode')}:
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder={t('profile.addressModal.postalCodePlaceholder')}
               placeholderTextColor={COLORS.gray[400]}
               value={zipCode}
               onChangeText={setZipCode}
               keyboardType="number-pad"
             />
 
-            <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Detail address:</Text>
+            {/* Recipient name */}
+            <Text style={styles.fieldLabel}>
+              <Text style={styles.requiredMark}>* </Text>
+              {t('profile.addressModal.recipientName')}:
+            </Text>
             <TextInput
-              style={styles.addressModalInput}
-              placeholder="Search address above or enter manually"
-              placeholderTextColor={COLORS.gray[400]}
-              value={detailedAddress}
-              onChangeText={setDetailedAddress}
-            />
-
-            <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Recipient name:</Text>
-            <TextInput
-              style={styles.addressModalInput}
-              placeholder="Up to 25 characters"
+              style={styles.input}
               placeholderTextColor={COLORS.gray[400]}
               value={recipient}
               onChangeText={setRecipient}
               maxLength={25}
             />
 
-            <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Mobile number:</Text>
-            <View style={styles.addressModalPhoneRow}>
-              <View style={styles.addressModalPhoneCode}>
-                <Text style={{ fontSize: FONTS.sizes.sm, color: COLORS.text.primary }}>한국 +82</Text>
-                <Icon name="chevron-down" size={20} color={COLORS.gray[600]} />
-              </View>
+            {/* Mobile number */}
+            <Text style={styles.fieldLabel}>
+              <Text style={styles.requiredMark}>* </Text>
+              {t('profile.addressModal.mobileNumber')}:
+            </Text>
+            <View style={styles.phoneRow}>
+              <TouchableOpacity style={styles.phoneCodeBox} activeOpacity={0.7}>
+                <Text style={styles.phoneCodeText}>
+                  {t('profile.addressModal.phoneCode')}
+                </Text>
+              </TouchableOpacity>
               <TextInput
-                style={[styles.addressModalInput, { flex: 1 }]}
+                style={[styles.input, styles.phoneInput]}
+                placeholderTextColor={COLORS.gray[400]}
                 value={contact}
                 onChangeText={setContact}
                 keyboardType="phone-pad"
               />
             </View>
 
-            <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Customs clearance code:</Text>
+            {/* Customs code */}
+            <Text style={styles.fieldLabel}>
+              <Text style={styles.requiredMark}>* </Text>
+              {t('profile.addressModal.customsCode')}:
+            </Text>
             <TextInput
-              style={styles.addressModalInput}
-              placeholder="Please enter the customs clearance code"
+              style={styles.input}
+              placeholder={t('profile.addressModal.customsCodePlaceholder')}
               placeholderTextColor={COLORS.gray[400]}
               value={personalCustomsCode}
               onChangeText={setPersonalCustomsCode}
             />
+            <Text style={styles.helperTextRed}>
+              {t('profile.addressModal.customsCodeHelper')}
+            </Text>
 
+            {/* Save customs code checkbox */}
             <TouchableOpacity
-              style={styles.addressModalSaveButton}
-              onPress={handleSaveAddress}
+              style={styles.checkboxRow}
+              activeOpacity={0.7}
+              onPress={() => setSaveIdChecked(!saveIdChecked)}
             >
-              {(isAdding || isUpdating) ? (
-                <ActivityIndicator size="small" color={COLORS.white} />
-              ) : (
-                <Text style={styles.addressModalSaveButtonText}>Save</Text>
-              )}
+              <View
+                style={[
+                  styles.checkboxSquare,
+                  saveIdChecked && styles.checkboxSquareChecked,
+                ]}
+              >
+                {saveIdChecked && (
+                  <Icon name="checkmark" size={13} color={COLORS.white} />
+                )}
+              </View>
+              <Text style={styles.checkboxLabel}>
+                {t('profile.addressModal.saveCustomsCode')}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Set as default checkbox */}
+            <TouchableOpacity
+              style={styles.checkboxRow}
+              activeOpacity={0.7}
+              onPress={() => setIsDefaultAddress(!isDefaultAddress)}
+            >
+              <View
+                style={[
+                  styles.checkboxSquare,
+                  isDefaultAddress && styles.checkboxSquareChecked,
+                ]}
+              >
+                {isDefaultAddress && (
+                  <Icon name="checkmark" size={13} color={COLORS.white} />
+                )}
+              </View>
+              <Text style={styles.checkboxLabel}>
+                {t('profile.addressModal.setAsDefault')}
+              </Text>
             </TouchableOpacity>
           </ScrollView>
+
+          {/* Fixed footer */}
+          <View style={styles.addressModalFooter}>
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              activeOpacity={0.7}
+              onPress={() => setAddressModalVisible(false)}
+            >
+              <Text style={styles.modalCancelButtonText}>
+                {t('profile.addressModal.cancel')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalSaveButton}
+              activeOpacity={0.85}
+              onPress={handleSaveAddress}
+              disabled={isAdding || isUpdating}
+            >
+              {isAdding || isUpdating ? (
+                <ActivityIndicator size="small" color={COLORS.white} />
+              ) : (
+                <Text style={styles.modalSaveButtonText}>
+                  {t('profile.addressModal.save')}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -809,53 +954,210 @@ const styles = StyleSheet.create({
   // Address Modal Styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.lg,
   },
-  addressModalContent: {
+  addressModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '88%',
     backgroundColor: COLORS.white,
-    borderTopLeftRadius: BORDER_RADIUS.xl,
-    borderTopRightRadius: BORDER_RADIUS.xl,
-    maxHeight: '90%',
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.lg,
-    paddingBottom: SPACING.xl,
+    borderRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
   },
   addressModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: SPACING.lg,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[100],
   },
   addressModalTitle: {
     fontSize: FONTS.sizes.md,
     fontWeight: '700',
     color: COLORS.text.primary,
   },
-  addressModalLabel: {
+  addressModalBody: {
+    flexGrow: 0,
+  },
+  addressModalBodyContent: {
+    padding: SPACING.md,
+    paddingBottom: SPACING.md,
+  },
+  // Segmented tabs
+  segmentRow: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.gray[100],
+    borderRadius: BORDER_RADIUS.md,
+    padding: 3,
+  },
+  segmentItem: {
+    flex: 1,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BORDER_RADIUS.sm,
+  },
+  segmentItemActive: {
+    backgroundColor: COLORS.white,
+    ...SHADOWS.sm,
+  },
+  segmentText: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '600',
+    color: COLORS.gray[500],
+  },
+  segmentTextActive: {
+    color: COLORS.text.primary,
+    fontWeight: '700',
+  },
+  customsNotice: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.gray[500],
+    lineHeight: 17,
+    marginTop: SPACING.smmd,
+  },
+  // Fields
+  fieldLabel: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
     marginTop: SPACING.md,
-    marginBottom: SPACING.sm,
+    marginBottom: SPACING.xs,
   },
-  addressModalRequired: {
+  requiredMark: {
     color: COLORS.red,
   },
-  addressSearchBtn: {
+  dropdownBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.xs,
-    backgroundColor: COLORS.red,
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
     borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.sm,
+    height: 44,
+  },
+  dropdownText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.sm,
+    height: 44,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    backgroundColor: COLORS.white,
+  },
+  inputBox: {
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.sm,
+    height: 44,
+    justifyContent: 'center',
+  },
+  inputBoxSpacing: {
+    marginTop: SPACING.sm,
+  },
+  inputPlaceholderStatic: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.gray[400],
+  },
+  searchAddressButton: {
+    height: 44,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.lightRed,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchAddressButtonText: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.red,
+  },
+  helperTextRed: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.red,
+    marginTop: SPACING.xs,
+    lineHeight: 16,
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  phoneCodeBox: {
+    minWidth: 130,
+    height: 44,
+    paddingHorizontal: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phoneCodeText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+  },
+  phoneInput: {
+    flex: 1,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
+  },
+  checkboxLabel: {
+    flex: 1,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.gray[600],
+    lineHeight: 17,
+  },
+  // Footer
+  addressModalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: SPACING.sm,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    alignSelf: 'flex-start',
-    marginBottom: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
   },
-  addressSearchBtnText: {
+  modalCancelButton: {
+    paddingHorizontal: SPACING.lg,
+    height: 42,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelButtonText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.gray[700],
+    fontWeight: '600',
+  },
+  modalSaveButton: {
+    minWidth: 72,
+    paddingHorizontal: SPACING.lg,
+    height: 42,
+    backgroundColor: COLORS.text.primary,
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalSaveButtonText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.white,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   kakaoModalOverlay: {
     flex: 1,
@@ -881,84 +1183,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.text.primary,
   },
-  addressModalRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-    marginBottom: SPACING.sm,
-  },
-  addressModalDropdown: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.gray[50],
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.gray[200],
-  },
-  addressModalDropdownText: {
-    fontSize: FONTS.sizes.md,
-    color: COLORS.text.primary,
-    fontWeight: "400",
-  },
-  defaultCheckboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  defaultText: {
-    fontSize: FONTS.sizes.sm,
-    color: COLORS.text.primary,
-    fontWeight: '600',
-  },
-  addressModalInput: {
-    backgroundColor: COLORS.gray[50],
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.gray[200],
-    fontSize: FONTS.sizes.md,
-    color: COLORS.text.primary,
-  },
-  addressModalTextArea: {
-    backgroundColor: COLORS.gray[50],
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.gray[200],
-    fontSize: FONTS.sizes.md,
-    color: COLORS.text.primary,
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  addressModalPhoneRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  addressModalPhoneCode: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.gray[50],
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.gray[200],
-    minWidth: 120,
-  },
-  addressModalCheckbox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginTop: SPACING.md,
-    gap: SPACING.sm,
-  },
   checkboxSquare: {
     width: 20,
     height: 20,
@@ -972,29 +1196,6 @@ const styles = StyleSheet.create({
   checkboxSquareChecked: {
     backgroundColor: COLORS.red,
     borderColor: COLORS.red,
-  },
-  addressModalCheckboxText: {
-    flex: 1,
-    fontSize: FONTS.sizes.sm,
-    color: COLORS.gray[600],
-    lineHeight: 18,
-  },
-  addressModalSaveButton: {
-    backgroundColor: COLORS.red,
-    paddingVertical: SPACING.smmd,
-    borderRadius: BORDER_RADIUS.lg,
-    alignItems: 'center',
-    marginTop: SPACING.lg,
-    // marginBottom: SPACING.md,
-  },
-  addressModalSaveButtonDisabled: {
-    backgroundColor: COLORS.gray[300],
-    opacity: 0.6,
-  },
-  addressModalSaveButtonText: {
-    fontSize: FONTS.sizes.lg,
-    fontWeight: '600',
-    color: COLORS.white,
   },
 });
 

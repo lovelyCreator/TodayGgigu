@@ -7,7 +7,7 @@ interface UseChildCategoriesMutationOptions {
 }
 
 interface UseChildCategoriesMutationResult {
-  mutate: (platform: string, parentId: string) => Promise<void>;
+  mutate: (platform: string, parentId: string, lang?: string) => Promise<void>;
   data: any | null;
   error: string | null;
   isLoading: boolean;
@@ -25,15 +25,15 @@ export const useChildCategoriesMutation = (
   const [isError, setIsError] = useState<boolean>(false);
 
   const mutate = useCallback(
-    async (platform: string, parentId: string) => {
+    async (platform: string, parentId: string, lang?: string) => {
       setIsLoading(true);
       setIsSuccess(false);
       setIsError(false);
       setError(null);
 
       try {
-        
-        const response = await productsApi.getChildCategories(platform, parentId);
+
+        const response = await productsApi.getChildCategories(platform, parentId, lang);
         
 
         if (response.success && response.data) {

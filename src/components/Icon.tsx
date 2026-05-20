@@ -203,6 +203,7 @@ const iconNameMap: { [key: string]: { name: string; library: 'material' | 'mater
   'ellipsis-vertical': { name: 'more-vert', library: 'material' },
   'menu': { name: 'menu', library: 'material' },
   'filter': { name: 'filter-list', library: 'material' },
+  'refresh': { name: 'refresh', library: 'material' },
   
   // Media
   'camera-outline': { name: 'camera-alt', library: 'material' },

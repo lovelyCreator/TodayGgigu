@@ -400,6 +400,12 @@ export type RootStackParamList = {
   PointDetail: undefined;
   Coupon: undefined;
   BuyList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'error' | 'shipping_delay' | 'refunds' | 'purchase_agency' | 'warehouse' | 'international_shipping' | 'all' } | undefined;
+  ProductManagement: undefined;
+  UnitSurvey: undefined;
+  OEMSurvey: undefined;
+  PaymentHistory: undefined;
+  PersonalInformation: undefined;
+  ProgressNotification: undefined;
   RefundRequest: { orderId: string; orderNumber: string; items: any[]; refundData?: any };
   ProblemProduct: undefined;
   MyDeliveries: undefined;

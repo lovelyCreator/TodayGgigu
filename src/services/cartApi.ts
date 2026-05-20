@@ -183,13 +183,11 @@ export interface DirectPurchaseRequest {
 
 export const cartApi = {
   // Get cart
-  getCart: async (): Promise<ApiResponse<{ cart: Cart }>> => {
+  getCart: async (lang: string = 'en'): Promise<ApiResponse<{ cart: Cart }>> => {
     try {
       const token = await getStoredToken();
-      // console.log('🛒 GET CART - ACCESS TOKEN:', token);
 
-      const url = `${API_BASE_URL}/cart`;
-      console.log('🛒 GET CART REQUEST URL:', url);
+      const url = `${API_BASE_URL}/cart?lang=${lang}`;
 
       const signatureHeaders = await buildSignatureHeaders('GET', url);
 
@@ -200,9 +198,6 @@ export const cartApi = {
           ...signatureHeaders,
         },
       });
-
-      console.log('🛒 GET CART RESPONSE STATUS:', response.status);
-      console.log('🛒 GET CART RESPONSE DATA:', JSON.stringify(response.data, null, 2));
 
       if (!response.data || !response.data.data) {
         return {
@@ -218,8 +213,7 @@ export const cartApi = {
         message: 'Cart retrieved successfully',
       };
     } catch (error: any) {
-      console.error('🛒 GET CART ERROR:', error);
-      console.error('🛒 GET CART ERROR RESPONSE:', error.response?.data);
+      if (__DEV__) console.warn('🛒 GET CART ERROR:', error?.message, error.response?.data);
       const errorMessage = error.response?.data?.message || error.message || 'Failed to get cart';
       return {
         success: false,

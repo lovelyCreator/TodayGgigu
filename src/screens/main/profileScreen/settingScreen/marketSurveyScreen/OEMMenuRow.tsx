@@ -5,13 +5,13 @@ import type { ProfileSettingsMenuRowComponentProps } from '../profileSettingsSec
 /** OEM */
 const OEMMenuRow: React.FC<ProfileSettingsMenuRowComponentProps> = ({
   t,
-  showComingSoon,
+  navigation,
   isFirst,
   isLast,
 }) => (
   <ProfileSettingsMenuRowView
     title={t('profile.OEM')}
-    onPress={() => showComingSoon(t('profile.OEM'))}
+    onPress={() => navigation.navigate('OEMSurvey')}
     isFirst={isFirst}
     isLast={isLast}
   />

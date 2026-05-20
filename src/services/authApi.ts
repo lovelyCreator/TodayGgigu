@@ -145,12 +145,22 @@ export const clearAuthData = async () => {
 // Login API (backend)
 export const login = async (users_id: string, password: string, email?: string): Promise<{ success: boolean; data?: any; error?: string; errorCode?: string }> => {
   try {
-    const requestBody: { users_id: string; password: string; email?: string } = {
-      users_id: users_id,
-      password: password,
+    const trimmedUsersId = users_id.trim();
+    const trimmedEmailArg = email?.trim() ?? '';
+    // Register stores `users_id` as optional handle or display name — not the email (see register()).
+    // If we send the same string as `users_id`, the API resolves the user by handle first and returns
+    // USER_NOT_REGISTERED. For email login, send only `email` + `password`.
+    const emailForLogin =
+      trimmedEmailArg || (trimmedUsersId.includes('@') ? trimmedUsersId : '');
+    const useEmailLogin = emailForLogin.length > 0;
+
+    const requestBody: { password: string; users_id?: string; email?: string } = {
+      password,
     };
-    if (email && email.trim() !== '') {
-      requestBody.email = email.trim();
+    if (useEmailLogin) {
+      requestBody.email = emailForLogin;
+    } else {
+      requestBody.users_id = trimmedUsersId;
     }
     console.log("Login Request Body", requestBody);
     

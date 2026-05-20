@@ -44,17 +44,17 @@ const LanguageSettingsScreen: React.FC = () => {
   const languages: Language[] = [
     {
       code: 'en',
-      name: 'English',
+      name: t('profile.languageEnglish'),
       nativeName: 'English',
     },
     {
       code: 'ko',
-      name: 'Korean',
+      name: t('profile.languageKorean'),
       nativeName: '한국어',
     },
     {
       code: 'zh',
-      name: 'Chinese',
+      name: t('profile.languageChinese'),
       nativeName: '中文',
     },
   ];

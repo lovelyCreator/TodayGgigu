@@ -61,6 +61,9 @@ import WishlistScreen from '../screens/lazy/WishlistScreen.lazy';
 import ProfileSettingsScreen from '../screens/main/profileScreen/myPageScreen/ProfileSettingsScreen';
 import LanguageSettingsScreen from '../screens/main/profileScreen/LanguageSettingsScreen';
 import PaymentScreen from '../screens/main/profileScreen/settingScreen/PaymentScreen';
+import PaymentHistoryScreen from '../screens/main/profileScreen/settingScreen/PaymentHistoryScreen';
+import PersonalInformationScreen from '../screens/main/profileScreen/settingScreen/PersonalInformationScreen';
+import ProgressNotificationScreen from '../screens/main/profileScreen/settingScreen/ProgressNotificationScreen';
 
 // import EditProductScreen from '../screens/main/EditProductScreen'; // Temporarily removed due to missing module
 // Order screens
@@ -79,6 +82,9 @@ import CouponScreen from '../screens/main/profileScreen/depositScreen/CouponScre
 import BuyListScreen from '../screens/main/profileScreen/settingScreen/BuyListScreen';
 import RefundRequestScreen from '../screens/main/profileScreen/settingScreen/RefundRequestScreen';
 import ProblemProductScreen from '../screens/main/profileScreen/settingScreen/ProblemProductScreen';
+import ProductManagementScreen from '../screens/main/profileScreen/settingScreen/productManagementScreen/ProductManagementScreen';
+import UnitSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/UnitSurveyScreen';
+import OEMSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/OEMSurveyScreen';
 import MyDeliveriesScreen from '../screens/main/profileScreen/settingScreen/MyDeliveriesScreen';
 import DeliveryDetailScreen from '../screens/main/profileScreen/settingScreen/DeliveryDetailScreen';
 import OrderDetailScreen from '../screens/main/profileScreen/settingScreen/OrderDetailScreen';
@@ -820,8 +826,38 @@ const RootNavigator = () => {
             }}
           />
           <RootStack.Screen name="RefundRequest" component={RefundRequestScreen} options={{ headerShown: false }} />
-          <RootStack.Screen 
-            name="ProblemProduct" 
+          <RootStack.Screen
+            name="ProductManagement"
+            component={ProductManagementScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="UnitSurvey"
+            component={UnitSurveyScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="OEMSurvey"
+            component={OEMSurveyScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="PaymentHistory"
+            component={PaymentHistoryScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="PersonalInformation"
+            component={PersonalInformationScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="ProgressNotification"
+            component={ProgressNotificationScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="ProblemProduct"
             component={ProblemProductScreen}
             options={{
               headerShown: false,

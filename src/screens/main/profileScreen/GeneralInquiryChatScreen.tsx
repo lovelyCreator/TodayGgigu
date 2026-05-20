@@ -6,7 +6,6 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
@@ -17,9 +16,9 @@ import {
 } from 'react-native';
 import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from '../../../components/Icon';
-import { COLORS, FONTS, SHADOWS, SPACING, BORDER_RADIUS } from '../../../constants';
+import { COLORS, FONTS, SHADOWS, SPACING, BORDER_RADIUS, IMAGE_CONFIG, BACK_NAVIGATION_HIT_SLOP } from '../../../constants';
 import { RootStackParamList } from '../../../types';
 import { launchCamera, launchImageLibrary, MediaType, ImagePickerResponse, CameraOptions, ImageLibraryOptions } from 'react-native-image-picker';
 import { requestCameraPermission, requestPhotoLibraryPermission } from '../../../utils/permissions';
@@ -345,7 +344,7 @@ const GeneralInquiryChatScreen: React.FC = () => {
       }
       const options: ImageLibraryOptions = {
         mediaType: 'photo' as MediaType,
-        quality: 0.7,
+        quality: IMAGE_CONFIG.QUALITY,
         selectionLimit: 5,
       };
       launchImageLibrary(options, (response: ImagePickerResponse) => {
@@ -378,7 +377,7 @@ const GeneralInquiryChatScreen: React.FC = () => {
       }
       const options: CameraOptions = {
         mediaType: 'photo' as MediaType,
-        quality: 0.7,
+        quality: IMAGE_CONFIG.QUALITY,
         saveToPhotos: false,
       };
       launchCamera(options, (response: ImagePickerResponse) => {
@@ -591,7 +590,7 @@ const GeneralInquiryChatScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity hitSlop={BACK_NAVIGATION_HIT_SLOP} onPress={() => navigation.goBack()} style={styles.backButton}>
           <Icon name="arrow-back" size={16} color={COLORS.black} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
@@ -612,9 +611,18 @@ const GeneralInquiryChatScreen: React.FC = () => {
         </View>
       ) : (
         <KeyboardAvoidingView
-          style={[styles.flex, { paddingBottom: Platform.OS === 'android' && keyboardHeight > 0 ? keyboardHeight + insets.bottom : 0 }]}
+          style={styles.flex}
+          // iOS uses `padding` so the bottom edge slides up with the keyboard;
+          // Android relies on the manifest's `adjustResize`, which already
+          // shrinks the window. Adding manual paddingBottom here on top of
+          // adjustResize was double-counting and pushing the input bar off
+          // the bottom of the screen.
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          // Offset = the height of everything ABOVE this view (status bar +
+          // safe-area top + custom header). Using insets.top alone works for
+          // both notched and non-notched devices because the SafeAreaView
+          // wrapper already accounts for the header sitting inside it.
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
           <ScrollView
             ref={scrollViewRef}
@@ -650,24 +658,37 @@ const GeneralInquiryChatScreen: React.FC = () => {
             </View>
           )}
 
-          {/* Pending Attachments Preview */}
+          {/* Pending Attachments Preview — height clamped so the strip
+              fits the thumbnail + padding and the surrounding column
+              collapses downward toward the input bar instead of letting
+              this band stretch to fill the flex space above it. */}
           {pendingAttachments.length > 0 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: COLORS.white }}>
-              {pendingAttachments.map((att, idx) => (
-                <View key={`pending-${idx}`} style={{ marginRight: 8, position: 'relative' }}>
-                  <Image source={{ uri: att.uri }} style={{ width: 60, height: 60, borderRadius: 8 }} resizeMode="cover" />
-                  <TouchableOpacity
-                    style={{ position: 'absolute', top: -6, right: -6, backgroundColor: COLORS.red || '#FF0000', borderRadius: 10, width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}
-                    onPress={() => setPendingAttachments((prev) => prev.filter((_, i) => i !== idx))}
-                  >
-                    <Icon name="close" size={12} color={COLORS.white} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </ScrollView>
+            <View style={{ height: 72, backgroundColor: COLORS.white }}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' }}
+              >
+                {pendingAttachments.map((att, idx) => (
+                  <View key={`pending-${idx}`} style={{ marginRight: 8, position: 'relative' }}>
+                    <Image source={{ uri: att.uri }} style={{ width: 60, height: 60, borderRadius: 8 }} resizeMode="cover" />
+                    <TouchableOpacity
+                      style={{ position: 'absolute', top: -6, right: -6, backgroundColor: COLORS.red || '#FF0000', borderRadius: 10, width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}
+                      onPress={() => setPendingAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                    >
+                      <Icon name="close" size={12} color={COLORS.white} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
           )}
 
           {/* Message input */}
+          {/* paddingBottom: when the keyboard is up, just use the base 10;
+              when it's closed, add insets.bottom so the bar clears the home
+              indicator. With KeyboardAvoidingView (iOS) / adjustResize (Android)
+              now doing the lift, we no longer need to add keyboardHeight here. */}
           <View style={[styles.inputContainer, { paddingBottom: keyboardHeight > 0 ? 10 : 10 + insets.bottom }]}>
             <TouchableOpacity style={styles.attachIconBtn} onPress={handleMoreOptions}>
               <Icon name="image-outline" size={22} color={COLORS.gray[500]} />
@@ -744,7 +765,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: 12,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background,
   },
   backButton: {
     width: 36,

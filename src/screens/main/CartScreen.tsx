@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,10 @@ import {
   Image,
   Alert,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import Icon from '../../components/Icon';
 import { COLORS, FONTS, SPACING } from '../../constants';
 import {
@@ -21,6 +23,7 @@ import {
 } from 'react-native-image-picker';
 import { requestPhotoLibraryPermission } from '../../utils/permissions';
 import { useTranslation } from '../../hooks/useTranslation';
+import { cartApi, CartItem, MultiLang } from '../../services/cartApi';
 
 interface ExtraService {
   id: string;
@@ -110,8 +113,56 @@ const SERVICE_CATEGORIES: ServiceCategory[] = [
 
 const ALL_SERVICES: ExtraService[] = SERVICE_CATEGORIES.flatMap((c) => c.items);
 
+// Pick the string for the active locale from a multi-language field, with fallbacks.
+const pickLang = (
+  value: string | MultiLang | undefined,
+  locale: string,
+): string => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  return value[locale as keyof MultiLang] || value.en || value.ko || value.zh || '';
+};
+
+// Map an API CartItem into the screen's local CartCard shape.
+const mapCartItemToCard = (
+  item: CartItem,
+  index: number,
+  locale: string,
+): CartCard => {
+  const attrs = item.skuInfo?.skuAttributes || [];
+  const colorAttr = attrs[0];
+  const sizeAttr = attrs[1];
+  // Prefer the discounted fenxiao offer price, fall back to sku price.
+  const rawPrice =
+    item.skuInfo?.fenxiaoPriceInfo?.offerPrice ||
+    item.skuInfo?.price ||
+    item.skuInfo?.consignPrice ||
+    '0';
+  return {
+    id: item._id || String(item.offerId),
+    index: String(index + 1).padStart(3, '0'),
+    companyName: pickLang(item.companyName, locale),
+    productName:
+      pickLang(item.subjectMultiLang, locale) ||
+      item.subjectTrans ||
+      item.subject ||
+      '',
+    productImage: item.imageUrl || null,
+    photoUri: null,
+    color: colorAttr ? pickLang(colorAttr.valueMultiLang, locale) || colorAttr.valueTrans || colorAttr.value : '',
+    size: sizeAttr ? pickLang(sizeAttr.valueMultiLang, locale) || sizeAttr.valueTrans || sizeAttr.value : '',
+    quantity: item.quantity || 1,
+    unitPrice: parseFloat(rawPrice) || 0,
+    checked: false,
+    expanded: false,
+    addedAt: item.addedAt ? new Date(item.addedAt).getTime() : Date.now(),
+    remarks: '',
+  };
+};
+
 const CartScreen: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const navigation = useNavigation<any>();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState<number>(0);
   const [showPeriodMenu, setShowPeriodMenu] = useState(false);
@@ -156,29 +207,58 @@ const CartScreen: React.FC = () => {
   const tServiceName = (id: string) => t(`cartOrder.serviceModal.services.${svcKey(id)}`);
   const tCategoryTitle = (id: string) => t(`cartOrder.serviceModal.categories.${catKey(id)}`);
 
-  const [cards, setCards] = useState<CartCard[]>([
-    {
-      id: 'card-1',
-      index: '001',
-      companyName: '义乌市科桥日用品有限公司',
-      productName: '꿀병',
-      productImage: null,
-      photoUri: null,
-      color: '1',
-      size: '30ml',
-      quantity: 2,
-      unitPrice: 30,
-      checked: false,
-      expanded: false,
-      addedAt: Date.now() - 60 * 1000,
-      remarks: '',
-    },
-  ]);
+  const [cards, setCards] = useState<CartCard[]>([]);
+  const [cartLoading, setCartLoading] = useState(true);
+  const [cartError, setCartError] = useState<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Fetch the cart from the API and map items into local CartCard shape.
+  const loadCart = useCallback(async () => {
+    setCartLoading(true);
+    setCartError(null);
+    try {
+      const res = await cartApi.getCart(locale);
+      if (res.success && res.data?.cart) {
+        const items = res.data.cart.items || [];
+        setCards((prev) =>
+          items.map((item, idx) => {
+            const mapped = mapCartItemToCard(item, idx, locale);
+            // Preserve UI-only state (checked / expanded / photo / remarks) across refetches.
+            const existing = prev.find((c) => c.id === mapped.id);
+            return existing
+              ? {
+                  ...mapped,
+                  checked: existing.checked,
+                  expanded: existing.expanded,
+                  photoUri: existing.photoUri,
+                  remarks: existing.remarks,
+                }
+              : mapped;
+          }),
+        );
+      } else {
+        setCards([]);
+        setCartError(res.message || 'Failed to load cart');
+      }
+    } catch (e: any) {
+      setCards([]);
+      setCartError(e?.message || 'Failed to load cart');
+    } finally {
+      setCartLoading(false);
+    }
+    // `t` is intentionally excluded — useTranslation returns a new `t` each render,
+    // including it here would re-create loadCart every render and loop the fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locale]);
+
+  // Reload whenever the screen mounts or the UI language changes.
+  useEffect(() => {
+    loadCart();
+  }, [loadCart]);
 
   const formatElapsed = (ms: number): string => {
     const sec = Math.max(0, Math.floor(ms / 1000));
@@ -191,24 +271,50 @@ const CartScreen: React.FC = () => {
   const earliestAdd = cards.length > 0 ? Math.min(...cards.map((c) => c.addedAt)) : now;
   const elapsed = now - earliestAdd;
 
+  // Defer Alert.alert past the current render frame so it reliably attaches to the
+  // Android Activity (fixes "Tried to show an alert while not attached to an Activity").
+  const showAlert = (
+    title: string,
+    message: string,
+    buttons?: Parameters<typeof Alert.alert>[2],
+  ) => {
+    requestAnimationFrame(() => {
+      Alert.alert(title, message, buttons);
+    });
+  };
+
   const handleDeleteChecked = () => {
-    const anyChecked = cards.some((c) => c.checked);
-    if (!anyChecked) {
-      Alert.alert(t('cartOrder.alerts.notice'), t('cartOrder.alerts.noItemsSelected'));
+    const checkedIds = cards.filter((c) => c.checked).map((c) => c.id);
+    if (checkedIds.length === 0) {
+      showAlert(t('cartOrder.alerts.notice'), t('cartOrder.alerts.noItemsSelected'));
       return;
     }
-    Alert.alert(t('cartOrder.alerts.confirm'), t('cartOrder.alerts.deletePrompt'), [
+    showAlert(t('cartOrder.alerts.confirm'), t('cartOrder.alerts.deletePrompt'), [
       { text: t('cartOrder.alerts.cancel'), style: 'cancel' },
       {
         text: t('cartOrder.alerts.delete'),
         style: 'destructive',
-        onPress: () => setCards((prev) => prev.filter((c) => !c.checked)),
+        onPress: async () => {
+          const prev = cards;
+          setCards((c) => c.filter((x) => !x.checked)); // optimistic
+          const res = await cartApi.deleteCartBatch(checkedIds);
+          if (!res.success) {
+            setCards(prev); // revert
+            showAlert(t('cartOrder.alerts.notice'), res.message || 'Failed to delete items');
+          }
+        },
       },
     ]);
   };
 
-  const handleDeleteOne = (id: string) => {
-    setCards((prev) => prev.filter((c) => c.id !== id));
+  const handleDeleteOne = async (id: string) => {
+    const prev = cards;
+    setCards((c) => c.filter((x) => x.id !== id)); // optimistic
+    const res = await cartApi.deleteCartItem(id);
+    if (!res.success) {
+      setCards(prev); // revert
+      showAlert(t('cartOrder.alerts.notice'), res.message || 'Failed to delete item');
+    }
   };
 
   const toggleCheck = (id: string) => {
@@ -297,12 +403,20 @@ const CartScreen: React.FC = () => {
     }
   };
 
-  const changeQty = (id: string, delta: number) => {
-    setCards((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, quantity: Math.max(1, c.quantity + delta) } : c,
-      ),
-    );
+  const changeQty = async (id: string, delta: number) => {
+    const target = cards.find((c) => c.id === id);
+    if (!target) return;
+    const nextQty = Math.max(1, target.quantity + delta);
+    if (nextQty === target.quantity) return;
+    const prev = cards;
+    setCards((c) =>
+      c.map((x) => (x.id === id ? { ...x, quantity: nextQty } : x)),
+    ); // optimistic
+    const res = await cartApi.updateCartItem(id, nextQty);
+    if (!res.success) {
+      setCards(prev); // revert
+      Alert.alert(t('cartOrder.alerts.notice'), res.message || 'Failed to update quantity');
+    }
   };
 
   const updateUnitPrice = (id: string, text: string) => {
@@ -624,9 +738,32 @@ const CartScreen: React.FC = () => {
           showsVerticalScrollIndicator={false}
           onScrollBeginDrag={() => collapseAll()}
         >
-          {filteredCards.length === 0 ? (
+          {cartLoading ? (
             <View style={styles.emptyWrap}>
-              <Text style={styles.emptyText}>{t('cartOrder.empty')}</Text>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+            </View>
+          ) : cartError ? (
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyText}>{cartError}</Text>
+              <TouchableOpacity onPress={loadCart} style={styles.retryButton}>
+                <Text style={styles.retryButtonText}>{t('cartOrder.alerts.confirm')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : filteredCards.length === 0 ? (
+            <View style={styles.emptyCartWrap}>
+              <Image
+                source={require('../../assets/icons/cart_empty.png')}
+                style={styles.emptyCartImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.emptyCartTitle}>{t('cart.cartEmptyTitle')}</Text>
+              <TouchableOpacity
+                style={styles.emptyCartButton}
+                activeOpacity={0.85}
+                onPress={() => navigation.navigate('Category')}
+              >
+                <Text style={styles.emptyCartButtonText}>{t('cart.cartEmptyBrowse')}</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             filteredCards.map(renderCard)
@@ -1985,6 +2122,52 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: FONTS.sizes.md,
     color: COLORS.gray[500],
+  },
+  retryButton: {
+    marginTop: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.white,
+    fontWeight: '600',
+  },
+  // Empty cart state
+  emptyCartWrap: {
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.xl,
+    paddingVertical: SPACING.xl,
+    paddingHorizontal: SPACING.lg,
+    backgroundColor: COLORS.lightRed,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  emptyCartImage: {
+    width: 98,
+    height: 98,
+  },
+  emptyCartTitle: {
+    fontSize: FONTS.sizes.lg,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    textAlign: 'center',
+    marginTop: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  emptyCartButton: {
+    width: '100%',
+    paddingVertical: SPACING.md,
+    backgroundColor: COLORS.black,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  emptyCartButtonText: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '700',
+    color: COLORS.white,
   },
   // Summary bar
   summaryBar: {

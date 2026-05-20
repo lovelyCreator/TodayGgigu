@@ -5,11 +5,11 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
   FlatList,
   Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../../components/Icon';
 import { useTopCategoriesMutation } from '../../hooks/useTopCategoriesMutation';
 import { useChildCategoriesMutation } from '../../hooks/useChildCategoriesMutation';

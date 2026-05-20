@@ -7,6 +7,9 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost
+import com.facebook.react.modules.network.OkHttpClientFactory
+import com.facebook.react.modules.network.OkHttpClientProvider
+import okhttp3.OkHttpClient
 
 class MainApplication : Application(), ReactApplication {
 
@@ -52,6 +55,25 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    OkHttpClientProvider.setOkHttpClientFactory(StripSecureCookieClientFactory())
     loadReactNative(this)
+  }
+}
+
+private class StripSecureCookieClientFactory : OkHttpClientFactory {
+  override fun createNewNetworkModuleClient(): OkHttpClient {
+    return OkHttpClientProvider.createClientBuilder()
+      .addNetworkInterceptor { chain ->
+        val response = chain.proceed(chain.request())
+        val rewritten = response.headers("Set-Cookie").map { value ->
+          value.split(";")
+            .filter { it.trim().lowercase() != "secure" }
+            .joinToString(";")
+        }
+        val builder = response.newBuilder().removeHeader("Set-Cookie")
+        rewritten.forEach { builder.addHeader("Set-Cookie", it) }
+        builder.build()
+      }
+      .build()
   }
 }

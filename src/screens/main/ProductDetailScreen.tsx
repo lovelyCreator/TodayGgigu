@@ -329,7 +329,7 @@ const ProductDetailScreen: React.FC = () => {
 
     const isLiked = isProductLiked(product);
     const source = (product as any).source || selectedPlatform || '1688';
-    const country = locale === 'zh' ? 'en' : locale;
+    const country = locale;
 
     if (isLiked) {
       // Remove from wishlist - optimistic update (removes from state and AsyncStorage immediately)
@@ -460,7 +460,7 @@ const ProductDetailScreen: React.FC = () => {
     if (raw === 'live-commerce' || raw === 'companymall' || raw === 'myCompany' || raw?.toLowerCase() === 'mycompany') return 'ownmall';
     return raw;
   }, [routeSource, selectedPlatform]);
-  const country = useMemo(() => routeCountry || (locale === 'zh' ? 'en' : locale), [routeCountry, locale]);
+  const country = useMemo(() => routeCountry || locale, [routeCountry, locale]);
   
   // Live stats data - defined before useEffect that uses it
   const liveStats = [
@@ -877,48 +877,35 @@ const ProductDetailScreen: React.FC = () => {
   }, [product?.minOrderQuantity]);
 
   // Fetch product detail if productId is available and no initialProductData
-  // Only fetch once per productId - use route params in dependencies to avoid infinite loops
+  // Dedupe key includes locale so a language switch re-fetches with the new language
   useEffect(() => {
+    const fetchCountry = (routeCountry as string) || locale;
     if (initialProductData) {
       setProduct(initialProductData);
       setLoading(false);
-      // Mark as fetched so we don't fetch again
       const currentProductId = productId?.toString() || offerId?.toString() || '';
       if (currentProductId) {
-        hasFetchedProductRef.current = currentProductId;
+        hasFetchedProductRef.current = `${currentProductId}|${fetchCountry}`;
       }
     } else {
-      // Determine which productId to use
       const currentProductId = productId?.toString() || offerId?.toString() || '';
-      
+
       if (currentProductId) {
-        // Check if we've already fetched for this productId
-        const alreadyFetched = hasFetchedProductRef.current === currentProductId;
-        
-        // Only fetch if we haven't fetched for this productId yet and not currently loading
+        const fetchKey = `${currentProductId}|${fetchCountry}`;
+        const alreadyFetched = hasFetchedProductRef.current === fetchKey;
+
         if (!alreadyFetched && !isFetchingDetail) {
-          hasFetchedProductRef.current = currentProductId; // Mark as fetching
+          hasFetchedProductRef.current = fetchKey;
           setLoading(true);
           const fetchSource = sourceRef.current;
-          const fetchCountry = countryRef.current;
-          // console.log('📦 [ProductDetailScreen] Fetching product detail:', {
-          //   currentProductId,
-          //   productId,
-          //   offerId,
-          //   source: fetchSource,
-          //   country: fetchCountry,
-          //   routeSource,
-          //   routeCountry,
-          // });
           fetchProductDetail(currentProductId, fetchSource, fetchCountry);
         } else if (alreadyFetched) {
-          // Already fetched, don't show loading
           setLoading(false);
         }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId, offerId, initialProductData, routeSource, routeCountry]); // Use route params instead of derived source/country
+  }, [productId, offerId, initialProductData, routeSource, routeCountry, locale]);
   
   // Fetch wishlist count when product is loaded
   useEffect(() => {

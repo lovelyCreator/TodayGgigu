@@ -11,7 +11,7 @@ const PaymentMenuRow: React.FC<ProfileSettingsMenuRowComponentProps> = ({
 }) => (
   <ProfileSettingsMenuRowView
     title={t('profile.payment')}
-    onPress={() => navigation.navigate('Payment')}
+    onPress={() => navigation.navigate('PaymentHistory')}
     isFirst={isFirst}
     isLast={isLast}
   />

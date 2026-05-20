@@ -131,13 +131,13 @@ class SocketService {
 
         this.socket.on('connect_error', (error) => {
           this.reconnectAttempts++;
-          console.error(`[SocketService] Connection error (${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error.message);
+          console.warn(`[SocketService] Connection error (${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error.message);
           this.isConnecting = false;
 
           if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             this.connectionFailed = true;
             this.lastFailTime = Date.now();
-            console.error('[SocketService] Max retries reached. Cooldown for', this.RETRY_COOLDOWN / 1000, 's. App will use REST API.');
+            console.warn('[SocketService] Max retries reached. Cooldown for', this.RETRY_COOLDOWN / 1000, 's. App will use REST API.');
             // Disconnect to stop socket.io's own reconnection
             if (this.socket) {
               this.socket.disconnect();
@@ -174,17 +174,17 @@ class SocketService {
         this.socket.on('reconnect_error', (error) => {
           // Only log once every few attempts to reduce spam
           if (this.reconnectAttempts % 3 === 0) {
-            console.error('[SocketService] Reconnection error:', error.message);
+            console.warn('[SocketService] Reconnection error:', error.message);
           }
         });
 
         this.socket.on('reconnect_failed', () => {
-          console.error('[SocketService] Reconnection failed after max attempts. App will use REST API.');
+          console.warn('[SocketService] Reconnection failed after max attempts. App will use REST API.');
           this.connectionFailed = true;
           this.lastFailTime = Date.now();
         });
       } catch (error) {
-        console.error('[SocketService] Error creating connection:', error);
+        console.warn('[SocketService] Error creating connection:', error);
         this.isConnecting = false;
         this.connectionFailed = true;
         this.lastFailTime = Date.now();

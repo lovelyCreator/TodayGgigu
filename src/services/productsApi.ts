@@ -12,7 +12,7 @@ import { getStoredToken } from './authApi';
 import axios, { AxiosRequestConfig } from 'axios';
 import { uploadToCloudinary, uploadVideoToCloudinary } from './cloudinary';
 
-import { API_BASE_URL } from '../constants';
+import { API_BASE_URL, CATEGORIES_BASE_URL } from '../constants';
 import { buildSignatureHeaders } from './signature';
 
 // In-memory cache for category tree (clears on app restart)
@@ -1002,9 +1002,24 @@ export const productsApi = {
       const payload = response.data;
       console.log('🔍 [Live Commerce API] Response:', payload.data.popularItems);
       if (payload && payload.status === 'success' && payload.data) {
+        const raw = payload.data || {};
+        const normalizedData = {
+          ...raw,
+          // New API keys
+          liveStreamSchedule: Array.isArray(raw.liveStreamSchedule) ? raw.liveStreamSchedule : [],
+          topSellers: Array.isArray(raw.topSellers) ? raw.topSellers : [],
+          pointSellers: Array.isArray(raw.pointSellers) ? raw.pointSellers : [],
+          liveReels: Array.isArray(raw.liveReels) ? raw.liveReels : [],
+          popularItems: Array.isArray(raw.popularItems) ? raw.popularItems : [],
+          // Backward-compatible aliases
+          schedule: Array.isArray(raw.liveStreamSchedule) ? raw.liveStreamSchedule : (Array.isArray(raw.schedule) ? raw.schedule : []),
+          top10Sellers: Array.isArray(raw.topSellers) ? raw.topSellers : (Array.isArray(raw.top10Sellers) ? raw.top10Sellers : []),
+          pointPartnerSellers: Array.isArray(raw.pointSellers) ? raw.pointSellers : (Array.isArray(raw.pointPartnerSellers) ? raw.pointPartnerSellers : []),
+        };
+
         return {
           success: true,
-          data: payload.data,
+          data: normalizedData,
           message: 'Live commerce data retrieved successfully',
         };
       }
@@ -1144,23 +1159,20 @@ export const productsApi = {
 
   // Get top level categories
   getTopCategories: async (
-    platform: string = '1688'
+    platform: string = '1688',
+    lang: string = 'ko'
   ): Promise<ApiResponse<any>> => {
+    const url = `${CATEGORIES_BASE_URL}/categories-proxy?endpoint=top&platform=${platform}&lang=${lang}`;
     try {
       const token = await getStoredToken();
-      
-      // Always use 'platform' parameter for both 1688 and taobao
-      const url = `${API_BASE_URL}/categories/top?platform=${platform}`;
-      const signatureHeaders = await buildSignatureHeaders('GET', url);
-      
       const response = await axios.get(url, {
+        timeout: 15000,
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
-          ...signatureHeaders,
         },
       });
-      
+
       if (response.data && response.data.status === 'success' && response.data.data) {
         return {
           success: true,
@@ -1168,7 +1180,7 @@ export const productsApi = {
           message: 'Top categories retrieved successfully',
         };
       }
-      
+
       return {
         success: false,
         message: 'No top categories data received',
@@ -1187,22 +1199,21 @@ export const productsApi = {
   // Get child categories by parent ID
   getChildCategories: async (
     platform: string = '1688',
-    parentId: string
+    parentId: string,
+    lang: string = 'ko'
   ): Promise<ApiResponse<any>> => {
     try {
       const token = await getStoredToken();
-      const signatureHeaders = await buildSignatureHeaders('GET', `${API_BASE_URL}/categories/children?platform=${platform}&parentId=${parentId}`);
-      // Always use 'platform' parameter for both 1688 and taobao
-      const url = `${API_BASE_URL}/categories/children?platform=${platform}&parentId=${parentId}`;
-      
+      const url = `${CATEGORIES_BASE_URL}/categories-proxy?endpoint=children&platform=${platform}&parentId=${parentId}&lang=${lang}`;
+
       const response = await axios.get(url, {
+        timeout: 15000,
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
-          ...signatureHeaders,
         },
       });
-      
+
       if (response.data && response.data.status === 'success' && response.data.data) {
         return {
           success: true,
@@ -1210,7 +1221,7 @@ export const productsApi = {
           message: 'Child categories retrieved successfully',
         };
       }
-      
+
       return {
         success: false,
         message: 'No child categories data received',
@@ -1443,7 +1454,7 @@ export const productsApi = {
         const signatureHeaders = await buildSignatureHeaders('GET', ownMallUrl);
         const ownMallResponse = await axios.get(ownMallUrl, {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
             'ngrok-skip-browser-warning': 'true',
             ...signatureHeaders,
@@ -1493,7 +1504,24 @@ export const productsApi = {
                 // Root-level fields not in productData
                 companyName: ownProduct.companyName || '',
                 sellerOpenId: ownProduct.sellerOpenId || '',
+                ownerSellerId: ownProduct.ownerSellerId || '',
                 promotionUrl: ownProduct.promotionUrl || '',
+                // Live-commerce / own-mall listing code (API root); not inside productData
+                liveCode:
+                  ownProduct.liveCode != null && String(ownProduct.liveCode).trim() !== ''
+                    ? String(ownProduct.liveCode).trim()
+                    : undefined,
+                productNo:
+                  ownProduct.productNo != null && String(ownProduct.productNo).trim() !== ''
+                    ? String(ownProduct.productNo).trim()
+                    : ownProduct.productData?.productNo != null &&
+                        String(ownProduct.productData.productNo).trim() !== ''
+                      ? String(ownProduct.productData.productNo).trim()
+                      : undefined,
+                productCode:
+                  ownProduct.productCode != null && String(ownProduct.productCode).trim() !== ''
+                    ? String(ownProduct.productCode).trim()
+                    : undefined,
                 tradeScore: ownProduct.sellerRating || 0,
                 soldOut: String(ownProduct.soldAmount || 0),
                 // Localized titles

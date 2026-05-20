@@ -232,7 +232,7 @@ export const DEMO_MODE = false;
 
 // API Configuration
 // Import from env.json in project root with fallback defaults
-let envConfig: { API_BASE_URL?: string; SERVER_BASE_URL?: string };
+let envConfig: { API_BASE_URL?: string; SERVER_BASE_URL?: string; CATEGORIES_BASE_URL?: string };
 try {
   envConfig = require('../../env.json');
 } catch (e) {
@@ -245,6 +245,7 @@ try {
 
 export const API_BASE_URL = envConfig.API_BASE_URL;
 export const SERVER_BASE_URL = envConfig.SERVER_BASE_URL;
+export const CATEGORIES_BASE_URL = envConfig.CATEGORIES_BASE_URL;
 
 export const API_CONFIG = {
   baseUrl: API_BASE_URL,
@@ -369,7 +370,7 @@ export const IMAGE_CONFIG = {
   API_MAX_WIDTH: 600,
   API_MAX_HEIGHT: 400,
   API_QUALITY: 0.4,
-};
+} as const;
 
 // Validation Rules
 export const VALIDATION_RULES = {

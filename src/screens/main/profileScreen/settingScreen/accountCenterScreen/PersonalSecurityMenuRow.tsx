@@ -11,7 +11,7 @@ const PersonalSecurityMenuRow: React.FC<ProfileSettingsMenuRowComponentProps> = 
 }) => (
   <ProfileSettingsMenuRowView
     title={t('profile.personalSecurity')}
-    onPress={() => navigation.navigate('ChangePassword')}
+    onPress={() => navigation.navigate('PersonalInformation')}
     isFirst={isFirst}
     isLast={isLast}
   />

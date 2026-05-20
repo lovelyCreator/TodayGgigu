@@ -5,17 +5,18 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   TextInput as RNTextInput,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../../../components/Icon';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../../constants';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS, BACK_NAVIGATION_HIT_SLOP } from '../../../constants';
 import { RootStackParamList } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { useAuth } from '../../../context/AuthContext';
 import { inquiryApi } from '../../../services/inquiryApi';
+import { useTranslation } from '../../../hooks/useTranslation';
 
 type OrderInquiryScreenNavigationProp = StackNavigationProp<RootStackParamList, 'OrderInquiry'>;
 type OrderInquiryScreenRouteProp = RouteProp<RootStackParamList, 'OrderInquiry'>;
@@ -25,6 +26,7 @@ const OrderInquiryScreen: React.FC = () => {
   const route = useRoute<OrderInquiryScreenRouteProp>();
   const { showToast } = useToast();
   const { user } = useAuth();
+  const { t } = useTranslation();
   
   const [formData, setFormData] = useState({
     orderId: route.params?.orderId || '',
@@ -50,23 +52,23 @@ const OrderInquiryScreen: React.FC = () => {
     const newErrors: { [key: string]: string } = {};
 
     if (!formData.orderNumber.trim()) {
-      newErrors.orderNumber = 'Order number is required';
+      newErrors.orderNumber = t('chat.orderNumberRequired');
     }
 
     if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
+      newErrors.email = t('chat.emailAddressRequired');
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email';
+      newErrors.email = t('chat.validEmailRequired');
     }
 
     if (!formData.subject.trim()) {
-      newErrors.subject = 'Subject is required';
+      newErrors.subject = t('chat.subjectFieldRequired');
     }
 
     if (!formData.message.trim()) {
-      newErrors.message = 'Message is required';
+      newErrors.message = t('chat.messageFieldRequired');
     } else if (formData.message.trim().length < 10) {
-      newErrors.message = 'Message must be at least 10 characters';
+      newErrors.message = t('chat.messageMinLength');
     }
 
     setErrors(newErrors);
@@ -84,7 +86,7 @@ const OrderInquiryScreen: React.FC = () => {
       const orderIdToSend = formData.orderId || formData.orderNumber;
 
       if (!orderIdToSend) {
-        showToast(t('home.orderIdRequired'), 'error');
+        showToast(t('chat.orderIdRequired'), 'error');
         setIsSubmitting(false);
         return;
       }
@@ -93,11 +95,11 @@ const OrderInquiryScreen: React.FC = () => {
       const response = await inquiryApi.createInquiry(orderIdToSend, inquiryMessage);
 
       if (!response.success) {
-        showToast(response.error || 'Failed to submit order inquiry', 'error');
+        showToast(response.error || t('chat.failedToSubmitOrderInquiry'), 'error');
         return;
       }
 
-      showToast(t('home.inquirySubmitted'), 'success');
+      showToast(t('chat.inquirySubmitted'), 'success');
 
       const inquiryId = response.data?.inquiry?._id || response.data?.inquiry?._id;
       if (inquiryId) {
@@ -122,7 +124,7 @@ const OrderInquiryScreen: React.FC = () => {
         navigation.goBack();
       }, 800);
     } catch (error: any) {
-      showToast(error?.message || 'Failed to submit inquiry. Please try again.', 'error');
+      showToast(error?.message || t('chat.failedToSubmitInquiryTryAgain'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -133,13 +135,13 @@ const OrderInquiryScreen: React.FC = () => {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
+        <TouchableOpacity hitSlop={BACK_NAVIGATION_HIT_SLOP}
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
           <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('home.orderInquiryTitle')}</Text>
+        <Text style={styles.headerTitle}>{t('chat.orderInquiryTitle')}</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -150,18 +152,18 @@ const OrderInquiryScreen: React.FC = () => {
       >
         <View style={styles.content}>
           <Text style={styles.description}>
-            {t('home.orderInquiryDescription')}
+            {t('chat.orderInquiryDescription')}
           </Text>
 
           <View style={styles.orderInfoBlock}>
-            <Text style={styles.orderInfoTitle}>{t('home.orderInformation')}</Text>
+            <Text style={styles.orderInfoTitle}>{t('chat.orderInformation')}</Text>
             <View style={styles.orderInfoRow}>
-              <Text style={styles.orderInfoLabel}>{t('home.orderNumber')}</Text>
-              <Text style={styles.orderInfoValue}>{formData.orderNumber || t('home.na')}</Text>
+              <Text style={styles.orderInfoLabel}>{t('chat.orderNumber')}</Text>
+              <Text style={styles.orderInfoValue}>{formData.orderNumber || t('chat.na')}</Text>
             </View>
             {formData.orderId ? (
               <View style={styles.orderInfoRow}>
-                <Text style={styles.orderInfoLabel}>{t('home.orderId')}</Text>
+                <Text style={styles.orderInfoLabel}>{t('chat.orderId')}</Text>
                 <Text style={styles.orderInfoValue}>{formData.orderId}</Text>
               </View>
             ) : null}
@@ -169,10 +171,10 @@ const OrderInquiryScreen: React.FC = () => {
 
           {/* Order Number */}
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>{t('home.orderNumber')} *</Text>
+            <Text style={styles.label}>{t('chat.orderNumber')} *</Text>
             <RNTextInput
               style={[styles.input, errors.orderNumber && styles.inputError]}
-              placeholder={t('home.enterOrderNumber')}
+              placeholder={t('chat.enterOrderNumber')}
               placeholderTextColor={COLORS.gray[400]}
               value={formData.orderNumber}
               onChangeText={(text) => {
@@ -190,10 +192,10 @@ const OrderInquiryScreen: React.FC = () => {
 
           {/* Email */}
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>{t('home.emailRequired')}</Text>
+            <Text style={styles.label}>{t('chat.emailRequired')}</Text>
             <RNTextInput
               style={[styles.input, errors.email && styles.inputError]}
-              placeholder={t('home.enterEmail')}
+              placeholder={t('chat.enterEmail')}
               placeholderTextColor={COLORS.gray[400]}
               value={formData.email}
               onChangeText={(text) => {
@@ -213,10 +215,10 @@ const OrderInquiryScreen: React.FC = () => {
 
           {/* Subject */}
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>{t('home.subjectRequired')}</Text>
+            <Text style={styles.label}>{t('chat.subjectRequired')}</Text>
             <RNTextInput
               style={[styles.input, errors.subject && styles.inputError]}
-              placeholder={t('home.subjectPlaceholder')}
+              placeholder={t('chat.subjectPlaceholder')}
               placeholderTextColor={COLORS.gray[400]}
               value={formData.subject}
               onChangeText={(text) => {
@@ -233,10 +235,10 @@ const OrderInquiryScreen: React.FC = () => {
 
           {/* Message */}
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>{t('home.messageRequired')}</Text>
+            <Text style={styles.label}>{t('chat.messageRequired')}</Text>
             <RNTextInput
               style={[styles.textArea, errors.message && styles.inputError]}
-              placeholder={t('home.messagePlaceholder')}
+              placeholder={t('chat.messagePlaceholder')}
               placeholderTextColor={COLORS.gray[400]}
               value={formData.message}
               onChangeText={(text) => {
@@ -266,7 +268,7 @@ const OrderInquiryScreen: React.FC = () => {
             activeOpacity={0.8}
           >
             <Text style={styles.submitButtonText}>
-              {isSubmitting ? t('home.submitting') : t('home.submitInquiry')}
+              {isSubmitting ? t('chat.submitting') : t('chat.submitInquiry')}
             </Text>
           </TouchableOpacity>
 
@@ -274,7 +276,7 @@ const OrderInquiryScreen: React.FC = () => {
           <View style={styles.helpContainer}>
             <Icon name="information-circle-outline" size={20} color={COLORS.text.secondary} />
             <Text style={styles.helpText}>
-              {t('home.inquiryHelpText')}
+              {t('chat.inquiryHelpText')}
             </Text>
           </View>
         </View>
@@ -294,14 +296,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.sm,
-    paddingTop: SPACING['2xl'],
-    backgroundColor: COLORS.white,
+    paddingTop: SPACING.md,
+    backgroundColor: COLORS.background,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.gray[100],
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -311,7 +312,8 @@ const styles = StyleSheet.create({
     color: COLORS.text.primary,
   },
   placeholder: {
-    width: 40,
+    width: 32,
+    height: 32,
   },
   scrollView: {
     flex: 1,

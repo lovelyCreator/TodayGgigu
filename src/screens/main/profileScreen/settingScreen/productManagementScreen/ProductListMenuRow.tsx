@@ -11,7 +11,7 @@ const ProductListMenuRow: React.FC<ProfileSettingsMenuRowComponentProps> = ({
 }) => (
   <ProfileSettingsMenuRowView
     title={t('profile.productList')}
-    onPress={() => navigation.navigate('BuyList', { initialTab: 'all' })}
+    onPress={() => navigation.navigate('ProductManagement')}
     isFirst={isFirst}
     isLast={isLast}
   />

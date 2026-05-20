@@ -7,7 +7,7 @@ interface UseTopCategoriesMutationOptions {
 }
 
 interface UseTopCategoriesMutationResult {
-  mutate: (platform: string) => Promise<void>;
+  mutate: (platform: string, lang?: string) => Promise<void>;
   data: any | null;
   error: string | null;
   isLoading: boolean;
@@ -25,14 +25,14 @@ export const useTopCategoriesMutation = (
   const [isError, setIsError] = useState<boolean>(false);
 
   const mutate = useCallback(
-    async (platform: string) => {
+    async (platform: string, lang?: string) => {
       setIsLoading(true);
       setIsSuccess(false);
       setIsError(false);
       setError(null);
 
       try {
-        const response = await productsApi.getTopCategories(platform);
+        const response = await productsApi.getTopCategories(platform, lang);
 
         if (response.success && response.data) {
           setData(response.data);

@@ -1,135 +1,75 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
+  SectionList,
   TouchableOpacity,
-  Image,
   RefreshControl,
   ScrollView,
-  Dimensions,
   ActivityIndicator,
   StatusBar,
-  TextInput,
-  Platform,
   Alert,
+  Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../../components/Icon';
-import LinearGradient from 'react-native-linear-gradient';
 import { launchCamera, launchImageLibrary, MediaType, ImagePickerResponse, CameraOptions, ImageLibraryOptions } from 'react-native-image-picker';
 import RNFS from 'react-native-fs';
 import { useNavigation } from '@react-navigation/native';
 import { requestCameraPermission, requestPhotoLibraryPermission } from '../../utils/permissions';
 import { StackNavigationProp } from '@react-navigation/stack';
 
-import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants';
-import { RootStackParamList, Product } from '../../types';
-import { SearchButton, NotificationBadge, ProductCard, ImagePickerModal } from '../../components';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS, IMAGE_CONFIG } from '../../constants';
+
+const BACK_NAVIGATION_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
+import { RootStackParamList } from '../../types';
+import { SearchButton, NotificationBadge, ImagePickerModal } from '../../components';
 import NotificationIcon from '../../assets/icons/NotificationIcon';
-import { useAuth } from '../../context/AuthContext';
 
 import { useToast } from '../../context/ToastContext';
 import { usePlatformStore } from '../../store/platformStore';
 import { useAppSelector } from '../../store/hooks';
 import { translations } from '../../i18n/translations';
 import { useTopCategoriesMutation } from '../../hooks/useTopCategoriesMutation';
-import { useChildCategoriesMutation } from '../../hooks/useChildCategoriesMutation';
-import { useSearchProductsMutation } from '../../hooks/useSearchProductsMutation';
-import { useWishlistStatus } from '../../hooks/useWishlistStatus';
-import { useAddToWishlistMutation } from '../../hooks/useAddToWishlistMutation';
-import { useDeleteFromWishlistMutation } from '../../hooks/useDeleteFromWishlistMutation';
-
-const { width } = Dimensions.get('window');
+import { productsApi } from '../../services/productsApi';
 
 type CategoryTabScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Category'>;
 
-// Calculate card width for right column (accounting for left column width of 90)
-const LEFT_COLUMN_WIDTH = 90;
-const RIGHT_COLUMN_WIDTH = width - LEFT_COLUMN_WIDTH - SPACING.md * 3; // 3 spacings: left, middle, right
-const FOR_YOU_CARD_WIDTH = (RIGHT_COLUMN_WIDTH - SPACING.sm * 3) / 2; // 2 cards per row with spacing
+const COMPANY_TABS = ['All', '1688', 'Taobao'] as const;
 
-const CategoryTabScreen: React.FC = () => {
+// Fixed heights make `getItemLayout` exact, which is the only way `scrollToLocation`
+// reliably lands on a section that hasn't been rendered yet (taps to far-away L1s).
+const ROW_HEIGHT = 44;
+const SECTION_HEADER_HEIGHT = 40;
+
+type CategoryTabScreenProps = {
+  hideHeader?: boolean;
+  onModalClose?: () => void;
+};
+
+/**
+ * scrollToIndex + viewPosition fights RN's max scroll at the list end; bottom rows
+ * should align toward the bottom of the viewport to avoid overscroll/bounce glitches.
+ */
+function getLeftListViewPosition(index: number, length: number): number {
+  if (length <= 1) return 0;
+  // Short lists fit on screen — don't bother snapping to top/bottom; let RN keep them in place.
+  if (length <= 4) return 0;
+  if (index <= 1) return 0;
+  if (index >= length - 2) return 1;
+  return 0.5;
+}
+
+const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = false, onModalClose }) => {
   const navigation = useNavigation<CategoryTabScreenNavigationProp>();
-  const { user, isGuest } = useAuth();
-  // Use wishlist status hook to check if products are liked based on external IDs
-  const { isProductLiked, refreshExternalIds, addExternalId, removeExternalId } = useWishlistStatus();
-  
-  // Add to wishlist mutation
-  const { mutate: addToWishlist } = useAddToWishlistMutation({
-    onSuccess: async (data) => {
-      // console.log('Product added to wishlist successfully:', data);
-      showToast(t('home.productAddedToWishlist'), 'success');
-      // Immediately refresh external IDs to update heart icon color
-      await refreshExternalIds();
-    },
-    onError: (error) => {
-      // console.error('Failed to add product to wishlist:', error);
-      showToast(error || t('home.failedToAddToWishlist'), 'error');
-    },
-  });
-
-  // Delete from wishlist mutation
-  const { mutate: deleteFromWishlist } = useDeleteFromWishlistMutation({
-    onSuccess: async (data) => {
-      // console.log('Product removed from wishlist successfully:', data);
-      showToast(t('home.productRemovedFromWishlist'), 'success');
-      // Immediately refresh external IDs to update heart icon color
-      await refreshExternalIds();
-    },
-    onError: (error) => {
-      // console.error('Failed to remove product from wishlist:', error);
-      showToast(error || t('home.failedToRemoveFromWishlist'), 'error');
-    },
-  });
-  
-  // Toggle wishlist function
-  const toggleWishlist = async (product: any) => {
-    if (!user || isGuest) {
-      showToast(t('home.pleaseLogin'), 'warning');
-      return;
-    }
-
-    // Get product external ID - prioritize externalId, never use MongoDB _id
-    const externalId = 
-      (product as any).externalId?.toString() ||
-      (product as any).offerId?.toString() ||
-      '';
-
-    if (!externalId) {
-      showToast(t('home.invalidProductId'), 'error');
-      return;
-    }
-
-    const isLiked = isProductLiked(product);
-    const source = (product as any).source || selectedPlatform || '1688';
-    const country = locale || 'en';
-
-    if (isLiked) {
-      // Remove from wishlist - optimistic update (removes from state and AsyncStorage immediately)
-      await removeExternalId(externalId);
-      deleteFromWishlist(externalId);
-    } else {
-      // Add to wishlist - extract required fields from product
-      const imageUrl = product.image || product.images?.[0] || '';
-      const price = product.price || 0;
-      const title = product.name || product.title || '';
-
-      if (!imageUrl || !title || price <= 0) {
-        showToast(t('home.invalidProductData'), 'error');
-        return;
-      }
-
-      // Optimistic update - add to state and AsyncStorage immediately
-      await addExternalId(externalId);
-      addToWishlist({ offerId: externalId, platform: source });
-    }
-  };
-  
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const isTabletLandscape = Math.min(winWidth, winHeight) >= 600 && winWidth > winHeight;
+  const isEmbeddedLandscapeHeader = hideHeader && isTabletLandscape;
   // Zustand store
   const { 
-    selectedPlatform, 
     selectedCategory,
     setSelectedPlatform, 
     setSelectedCategory,
@@ -139,18 +79,6 @@ const CategoryTabScreen: React.FC = () => {
   const locale = useAppSelector((s) => s.i18n.locale);
   const { showToast } = useToast();
 
-  // Helper function to navigate to product detail
-  const navigateToProductDetail = async (
-    productId: string | number,
-    source: string = selectedPlatform,
-    country: string = locale as string
-  ) => {
-    navigation.navigate('ProductDetail', {
-      productId: productId.toString(),
-      source: source,
-      country: country,
-    });
-  };
   const t = (key: string) => {
     const keys = key.split('.');
     let value: any = translations[locale as keyof typeof translations];
@@ -159,7 +87,23 @@ const CategoryTabScreen: React.FC = () => {
     }
     return value || key;
   };
-  
+
+  const getCategoryImage = useCallback((category: any): string => {
+    if (!category) return '';
+    return (
+      category.imageUrl ||
+      category.image ||
+      category.mainImage ||
+      category.main_image_url ||
+      category.thumbnail ||
+      category.thumbnailUrl ||
+      category.thumbUrl ||
+      category.iconUrl ||
+      category.icon ||
+      ''
+    );
+  }, []);
+
   // Map company name to platform/source parameter
   const getPlatformFromCompany = (company: string): string => {
     if (company === 'All') {
@@ -172,255 +116,431 @@ const CategoryTabScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [unreadCount, setUnreadCount] = useState(25);
   const [imagePickerModalVisible, setImagePickerModalVisible] = useState(false);
-  const [showRecommended, setShowRecommended] = useState(true);
-  const [forYouProducts, setForYouProducts] = useState<Product[]>([]);
-  const [companies, setCompanies] = useState<string[]>(['All', '1688', 'Taobao']);
   const [selectedCompany, setSelectedCompany] = useState<string>('All');
   const [topCategories, setTopCategories] = useState<any[]>([]);
-  const [childCategories, setChildCategories] = useState<any[]>([]);
+  // L2 categories grouped by parent L1 id; the right column reads from this
+  // to render every L1's L2 list as one continuous SectionList.
+  const [allL2ByL1, setAllL2ByL1] = useState<Record<string, any[]>>({});
+  const [isLoadingAllL2, setIsLoadingAllL2] = useState(false);
 
-  const platforms = ['1688', 'taobao', 'myCompany'];
+  const hasFetchedRef = useRef<string | null>(null);
+  // Bumped to invalidate in-flight batch fetches (company/locale switch, refresh).
+  const fetchTokenRef = useRef(0);
+  const sectionListRef = useRef<SectionList<any> | null>(null);
+  const leftCategoryListRef = useRef<FlatList<any> | null>(null);
+  const isProgrammaticRightScrollRef = useRef(false);
+  /** After an L1 tap, re-run scrollToLocation when `sections` grows (L2 streaming) so the right list stays aligned. */
+  const tapAlignCategoryIdRef = useRef<string | null>(null);
+  /** After the user drags the right SectionList, do not auto scrollToLocation on L2 batch updates (preserves manual position). */
+  const skipRightAutoAlignRef = useRef(false);
+  const topCategoriesLenRef = useRef(0);
+  topCategoriesLenRef.current = topCategories.length;
+  const programmaticScrollUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Get categories tree from store to check if already loaded
-  const { categoriesTree } = usePlatformStore();
-  const hasFetchedRef = useRef<string | null>(null); // Track which platform we've fetched
-  const hasFetchedForYouRef = useRef<string | null>(null); // Track which category we've fetched for "For You"
-  const lastPlatformForCategoryRef = useRef<string | null>(null); // Track which platform we last set category for
+  useEffect(() => {
+    return () => {
+      if (programmaticScrollUnlockTimerRef.current) {
+        clearTimeout(programmaticScrollUnlockTimerRef.current);
+      }
+    };
+  }, []);
 
-  // Top categories mutation
-  const { mutate: fetchTopCategories, isLoading: isLoadingTopCategories } = useTopCategoriesMutation({
+  const [isLoadingTopCategories, setIsLoadingTopCategories] = useState(false);
+
+  // L1 mutation — fetches top-level categories from the API.
+  const { mutate: refetchTopCategories, isLoading: isMutationLoading } = useTopCategoriesMutation({
     onSuccess: (data) => {
-      // console.log('Top categories fetched successfully:', data);
-      const categories = data.categories || [];
+      const categories = data?.categories || [];
       setTopCategories(categories);
-      // Auto-select first category
-      if (categories.length > 0 && !selectedCategory) {
+      if (categories.length > 0 && !usePlatformStore.getState().selectedCategory) {
         setSelectedCategory(categories[0]._id);
       }
-      // Mark this platform as fetched
-      hasFetchedRef.current = data.platform;
     },
     onError: (error) => {
-      // console.error('Failed to fetch top categories:', error);
       setTopCategories([]);
-      // Reset ref on error so we can retry
       hasFetchedRef.current = null;
       showToast(error || t('category.failedToLoadCategories'), 'error');
     },
   });
 
-  // Child categories mutation
-  const { mutate: fetchChildCategories, isLoading: isLoadingChildCategories } = useChildCategoriesMutation({
-    onSuccess: (data) => {
-      // console.log('Child categories fetched successfully:', data);
-      const childCatsTree = data.tree || [];
-      setChildCategories(childCatsTree);
-    },
-    onError: (error) => {
-      // console.error('Failed to fetch child categories:', error);
-      setChildCategories([]);
-      showToast(error || t('category.failedToLoadSubcategories'), 'error');
-    },
-  });
-
-  // Fetch top categories when selected company changes
-  // Platform parameter is determined by selected company (All = 1688)
+  // Fetch L1 categories when the selected company/platform changes (and on mount).
+  // hasFetchedRef key includes locale so a language switch re-fetches with the new lang.
   useEffect(() => {
-    if (selectedCompany) {
-      // Get platform from selected company
-      const platformForCompany = getPlatformFromCompany(selectedCompany);
-      
-      // Check if we already have top categories for this platform
-      const alreadyFetched = hasFetchedRef.current === platformForCompany;
-      
-      // Only fetch if we haven't fetched yet and not currently loading
-      if (!alreadyFetched && !isLoadingTopCategories) {
-        hasFetchedRef.current = platformForCompany; // Mark as fetching
-        fetchTopCategories(platformForCompany);
+    if (!selectedCompany) return;
+    const platform = getPlatformFromCompany(selectedCompany);
+    const lang = locale || 'ko';
+    const fetchKey = `${platform}|${lang}`;
+    if (hasFetchedRef.current === fetchKey) return;
+    hasFetchedRef.current = fetchKey;
+    setIsLoadingTopCategories(true);
+    refetchTopCategories(platform, lang).finally(() => {
+      setIsLoadingTopCategories(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompany, locale]);
+  void isMutationLoading;
+
+  // Batch-fetch L2 for every L1 once topCategories are known. The right
+  // column shows a single continuous SectionList grouped by L1, so we need
+  // every L1's L2 data; processes the selected L1 first then fans out with
+  // bounded concurrency.
+  useEffect(() => {
+    if (topCategories.length === 0 || !selectedCompany) {
+      setAllL2ByL1({});
+      setIsLoadingAllL2(false);
+      return;
+    }
+    const platform = getPlatformFromCompany(selectedCompany);
+    const lang = locale || 'ko';
+
+    const token = ++fetchTokenRef.current;
+    setIsLoadingAllL2(true);
+    setAllL2ByL1({});
+
+    (async () => {
+      let queue: typeof topCategories = [...topCategories];
+      const selId = usePlatformStore.getState().selectedCategory;
+      const selPos = queue.findIndex((l1: any) => l1._id === selId);
+      if (selPos > 0) {
+        const picked = queue.splice(selPos, 1)[0];
+        queue = [picked, ...queue];
       }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompany]); // Depend on selectedCompany
+      const pending = queue;
+      const CONCURRENCY = 4;
+      const fetchOne = async (l1: any) => {
+        if (token !== fetchTokenRef.current) return;
+        let tree: any[] = [];
+        try {
+          const resp = await productsApi.getChildCategories(platform, l1._id, lang);
+          if (token !== fetchTokenRef.current) return;
+          tree = (resp?.success && resp?.data?.tree) || [];
+        } catch {
+          if (token !== fetchTokenRef.current) return;
+        }
+        setAllL2ByL1((prev) => ({ ...prev, [l1._id]: tree }));
+      };
 
-  // Fetch child categories when top category is selected
-  useEffect(() => {
-    if (selectedCategory && selectedCompany) {
-      const platformForCompany = getPlatformFromCompany(selectedCompany);
-      fetchChildCategories(platformForCompany, selectedCategory);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCategory, selectedCompany]);
+      if (pending.length > 0 && pending[0]._id === selId) {
+        await fetchOne(pending.shift());
+        if (token !== fetchTokenRef.current) return;
+      }
 
-  // Search products mutation for "For You" section
-  const { mutate: searchForYouProducts, isLoading: isLoadingForYou } = useSearchProductsMutation({
-    onSuccess: (data) => {
-      // console.log('For You products fetched successfully:', data);
-      if (data && data.data && data.data.products && Array.isArray(data.data.products)) {
-        // Map API response to Product format
-        const mappedProducts = data.data.products.map((item: any) => {
-          const price = parseFloat(item.price || item.wholesalePrice || item.dropshipPrice || 0);
-          const originalPrice = parseFloat(item.originalPrice || price);
-          const discount = originalPrice > price && originalPrice > 0
-            ? Math.round(((originalPrice - price) / originalPrice) * 100)
-            : 0;
-          
+      let cursor = 0;
+      const workers = Array.from({ length: Math.min(CONCURRENCY, pending.length) }, async () => {
+        while (true) {
+          if (token !== fetchTokenRef.current) return;
+          const i = cursor++;
+          if (i >= pending.length) return;
+          await fetchOne(pending[i]);
+        }
+      });
+      await Promise.all(workers);
+      if (token !== fetchTokenRef.current) return;
+      setIsLoadingAllL2(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topCategories, selectedCompany, locale]);
+
+  // Top categories for the left column.
+  const categoriesToDisplay = useMemo(() => topCategories.map((cat: any) => ({
+    id: cat._id,
+    name: typeof cat.name === 'object'
+      ? (cat.name[locale] || cat.name.en || cat.name.zh || 'Category')
+      : cat.name,
+    image: cat.imageUrl || '',
+  })), [topCategories, locale]);
+
+  /**
+   * Right column: one SectionList section per L1, in the same order as `topCategories`.
+   * Each section shows that L1’s title (header) and its L2 rows; the next L1 follows below.
+   */
+  const sections = useMemo(() => {
+    return topCategories.map((l1: any) => {
+      const l1Name = typeof l1.name === 'object'
+        ? (l1.name[locale] || l1.name.en || l1.name.zh || 'Category')
+        : (l1.name || 'Category');
+      const tree = allL2ByL1[l1._id] || [];
+      const hasL2Loaded = Object.prototype.hasOwnProperty.call(allL2ByL1, l1._id);
+      const data = tree.map((level2: any) => {
+        const level3Children = Array.isArray(level2.children) ? level2.children : [];
+        const level2Name = typeof level2.name === 'object'
+          ? (level2.name[locale] || level2.name.en || level2.name.zh || '')
+          : (level2.name || '');
+        return {
+          id: level2._id,
+          name: level2Name,
+          l1Id: l1._id,
+          l1Name,
+          subsubcategories: level3Children.map((level3: any) => ({
+            id: level3._id,
+            name: typeof level3.name === 'object'
+              ? (level3.name[locale] || level3.name.en || level3.name.zh || '')
+              : (level3.name || ''),
+            externalId: level3.externalId,
+            image: getCategoryImage(level3) || '',
+          })),
+        };
+      }).filter((item: any) => item.name);
+
+      if (!hasL2Loaded) {
+        return {
+          l1Id: l1._id,
+          title: l1Name,
+          data: [
+            { id: `${l1._id}-placeholder-1`, isPlaceholder: true, l1Id: l1._id, l1Name },
+            { id: `${l1._id}-placeholder-2`, isPlaceholder: true, l1Id: l1._id, l1Name },
+            { id: `${l1._id}-placeholder-3`, isPlaceholder: true, l1Id: l1._id, l1Name },
+          ],
+        };
+      }
+
+      if (data.length === 0 && hasL2Loaded) {
+        return {
+          l1Id: l1._id,
+          title: l1Name,
+          data: [{ id: `${l1._id}-empty`, isEmpty: true, l1Id: l1._id, l1Name }],
+        };
+      }
+
+      return { l1Id: l1._id, title: l1Name, data };
+    });
+  }, [topCategories, allL2ByL1, selectedCategory, locale, getCategoryImage]);
+
+  /**
+   * Map each section's flat-index entry to a precise pixel offset/length so
+   * `scrollToLocation` works for sections that haven't been rendered yet.
+   * SectionList visits each section as: [header, ...items, footer]; index 0 is
+   * section 0's header, then its items, then its (zero-height) footer, then
+   * section 1's header, and so on.
+   */
+  const getItemLayout = useMemo(() => {
+    const sectionOffsets: number[] = [];
+    let runningOffset = 0;
+    for (const sec of sections) {
+      sectionOffsets.push(runningOffset);
+      // header + items + footer (footer is 0 here)
+      runningOffset += SECTION_HEADER_HEIGHT + sec.data.length * ROW_HEIGHT;
+    }
+
+    return (
+      _data: any,
+      index: number,
+    ): { length: number; offset: number; index: number } => {
+      // Walk the flat index across [header, items, footer] groups.
+      let cursor = 0;
+      for (let s = 0; s < sections.length; s++) {
+        const itemCount = sections[s].data.length;
+        // header
+        if (index === cursor) {
+          return { length: SECTION_HEADER_HEIGHT, offset: sectionOffsets[s], index };
+        }
+        cursor += 1;
+        // items
+        if (index < cursor + itemCount) {
+          const itemPos = index - cursor;
           return {
-            id: item.id?.toString() || item.externalId?.toString() || '',
-            externalId: item.externalId?.toString() || item.id?.toString() || '',
-            offerId: item.offerId?.toString() || item.externalId?.toString() || item.id?.toString() || '',
-            name: locale === 'zh' 
-              ? (item.subject || item.title || item.titleOriginal || '')
-              : (item.title || item.titleOriginal || item.subject || ''),
-            image: item.image || '',
-            price: price,
-            originalPrice: originalPrice,
-            discount: discount,
-            description: '',
-            category: { id: '', name: '', icon: '', image: '', subcategories: [] },
-            subcategory: '',
-            brand: '',
-            seller: { 
-              id: '', 
-              name: '', 
-              avatar: '', 
-              rating: 0, 
-              reviewCount: 0, 
-              isVerified: false, 
-              followersCount: 0, 
-              description: '', 
-              location: '', 
-              joinedDate: new Date() 
-            },
-            rating: item.rating || 0,
-            reviewCount: item.sales || 0,
-            rating_count: item.sales || 0,
-            inStock: true,
-            stockCount: 0,
-            tags: [],
-            isNew: false,
-            isFeatured: false,
-            isOnSale: discount > 0,
-            createdAt: new Date(item.createDate || new Date()),
-            updatedAt: new Date(item.modifyDate || new Date()),
-            orderCount: item.sales || 0,
-            repurchaseRate: item.repurchaseRate || '',
-          } as Product;
-        });
-        setForYouProducts(mappedProducts);
-        
-        // Extract unique company names from mapped products
-        const uniqueCompanies = new Set<string>(['All']);
-        mappedProducts.forEach((product: any) => {
-          const companyName = product.companyName || product.seller?.name || '';
-          if (companyName && companyName.trim()) {
-            uniqueCompanies.add(companyName);
-          }
-        });
-        // Sort companies with "All" always first
-        const sortedCompanies = Array.from(uniqueCompanies).sort((a, b) => {
-          if (a === 'All') return -1;
-          if (b === 'All') return 1;
-          return a.localeCompare(b);
-        });
-        // setCompanies(sortedCompanies);
-        
-        // Mark this category as fetched
-        if (selectedCategory) {
-          hasFetchedForYouRef.current = selectedCategory;
+            length: ROW_HEIGHT,
+            offset: sectionOffsets[s] + SECTION_HEADER_HEIGHT + itemPos * ROW_HEIGHT,
+            index,
+          };
         }
+        cursor += itemCount;
+        // footer (zero height, but counted in flat indexing)
+        if (index === cursor) {
+          return {
+            length: 0,
+            offset: sectionOffsets[s] + SECTION_HEADER_HEIGHT + itemCount * ROW_HEIGHT,
+            index,
+          };
+        }
+        cursor += 1;
       }
-    },
-    onError: (error) => {
-      // console.error('Failed to fetch For You products:', error);
-      setForYouProducts([]);
-      // Reset ref on error so we can retry
-      hasFetchedForYouRef.current = null;
-      showToast(error || t('category.failedToLoadProducts'), 'error');
-    },
-  });
+      // Trailing list-end entry.
+      return { length: 0, offset: runningOffset, index };
+    };
+  }, [sections]);
 
-  // Fetch "For You" products when category or company is selected
-  useEffect(() => {
-    if (locale && selectedCategory) {
-      // Create a unique key for this combination of category and company
-      const fetchKey = `${selectedCategory}-${selectedCompany}`;
-      const alreadyFetched = hasFetchedForYouRef.current === fetchKey;
-      
-      // Only fetch if we haven't fetched for this combination yet and not currently loading
-      if (!alreadyFetched && !isLoadingForYou) {
-        // Find the selected category to get its name
-        const selectedCategoryData = categoriesToDisplay.find((cat: any) => cat.id === selectedCategory);
-        
-        if (selectedCategoryData) {
-          // Mark as fetching with the combination key
-          hasFetchedForYouRef.current = fetchKey;
-          
-          // Get category name
-          const categoryName = selectedCategoryData.name;
-          
-          // Get platform from selected company (default to '1688' for 'All')
-          const platformSource = getPlatformFromCompany(selectedCompany);
-          // For Chinese case, use 'en' country code but show subject not subjectTrans
-          const countryCode = locale === 'zh' ? 'en' : locale;
-          
-          // Different filter for Taobao vs 1688
-          const searchFilter = platformSource === 'taobao' ? undefined : 'isQqyx';
-          
-          searchForYouProducts(
-            categoryName,
-            platformSource,
-            countryCode,
-            1,
-            20,
-            '', // sort
-            undefined, // priceStart
-            undefined, // priceEnd
-            searchFilter, // filter - 'isQqyx' for 1688, undefined for Taobao
-            false // requireAuth = false for category page
-          );
+  const openProductDiscoveryForL2 = useCallback(
+    (l2Item: any, initialL3Id?: string) => {
+      const platform = getPlatformFromCompany(selectedCompany);
+      const localizedSubSubs = (l2Item.subsubcategories || []).map((subSubCat: any) => {
+        if (subSubCat.name && typeof subSubCat.name === 'object') {
+          return {
+            ...subSubCat,
+            name: subSubCat.name[locale] || subSubCat.name.en || subSubCat.name,
+          };
         }
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCategory, selectedCompany, locale]); // Depend on selectedCategory, selectedCompany, and locale
+        return subSubCat;
+      });
+      navigation.navigate('ProductDiscovery', {
+        subCategoryName: l2Item.name,
+        // Each L2 carries the parent L1 it actually belongs to (set in the
+        // sections memo). Don't fall back to selectedCategory — that tracks
+        // the visible section and may differ from the tapped row's parent
+        // during scroll.
+        categoryId: l2Item.l1Id,
+        categoryName: l2Item.l1Name,
+        subcategoryId: l2Item.id,
+        subsubcategories: localizedSubSubs,
+        source: platform,
+        ...(initialL3Id ? { initialSubSubCategoryId: initialL3Id } : {}),
+      });
+    },
+    [selectedCompany, locale, navigation],
+  );
 
   const onRefresh = async () => {
+    if (!selectedCompany) return;
+    skipRightAutoAlignRef.current = false;
     setRefreshing(true);
-    // Refresh For You products
-    if (selectedPlatform && locale && selectedCategory) {
-      const selectedCategoryData = categoriesToDisplay.find((cat: any) => cat.id === selectedCategory);
-      
-      if (selectedCategoryData) {
-        const categoryName = selectedCategoryData.name;
-        
-        // Get platform from selected company (default to '1688' for 'All')
-        const platformSource = getPlatformFromCompany(selectedCompany);
-        // For Chinese case, use 'en' country code but show subject not subjectTrans
-        const countryCode = locale === 'zh' ? 'en' : locale;
-        
-        // Different filter for Taobao vs 1688
-        const searchFilter = platformSource === 'taobao' ? undefined : 'isQqyx';
-        
-        searchForYouProducts(
-          categoryName,
-          platformSource,
-          countryCode,
-          1,
-          20,
-          '',
-          undefined,
-          undefined,
-          searchFilter // 'isQqyx' for 1688, undefined for Taobao
-        );
-      }
+    const platform = getPlatformFromCompany(selectedCompany);
+    setAllL2ByL1({});
+    // Re-trigger the top-categories fetch which in turn re-runs the
+    // batch L2 effect (its dependency on `topCategories` reference fires).
+    hasFetchedRef.current = null;
+    try {
+      await refetchTopCategories(platform, locale || 'ko');
+    } finally {
+      setRefreshing(false);
     }
-    setRefreshing(false);
   };
 
-  const handleCategoryPress = (categoryId: string) => {
-    // Just select the category - recommended subcategories will show automatically
-    setSelectedCategory(categoryId);
-  };
+  const performTargetScroll = useCallback((sectionIndex: number) => {
+    if (!sectionListRef.current) return false;
+    try {
+      isProgrammaticRightScrollRef.current = true;
+      sectionListRef.current.scrollToLocation({
+        sectionIndex,
+        itemIndex: 0,
+        animated: false,
+        viewOffset: 0,
+        viewPosition: 0,
+      });
+      // Hold the lockout long enough that any viewability callbacks emitted *because of*
+      // this scroll don't fight the user's tap intent. ~1 RAF wasn't enough — visibility
+      // events can land a few frames later, especially when sections have variable height.
+      if (programmaticScrollUnlockTimerRef.current) {
+        clearTimeout(programmaticScrollUnlockTimerRef.current);
+      }
+      programmaticScrollUnlockTimerRef.current = setTimeout(() => {
+        isProgrammaticRightScrollRef.current = false;
+        programmaticScrollUnlockTimerRef.current = null;
+      }, 220);
+      return true;
+    } catch {
+      isProgrammaticRightScrollRef.current = false;
+      return false;
+    }
+  }, []);
+
+  const scrollLeftRowIntoView = useCallback((categoryId: string) => {
+    const index = categoriesToDisplay.findIndex((c) => c.id === categoryId);
+    if (index < 0 || !leftCategoryListRef.current) return;
+    const n = categoriesToDisplay.length;
+    const viewPosition = getLeftListViewPosition(index, n);
+    try {
+      // Non-animated avoids stacked scroll animations clashing with RefreshControl /
+      // end-of-list clamping when several deferred scrollLeftRowIntoView ran back-to-back.
+      leftCategoryListRef.current.scrollToIndex({
+        index,
+        animated: false,
+        viewPosition,
+      });
+    } catch {
+      /* layout may not be ready */
+    }
+  }, [categoriesToDisplay]);
+
+  const handleCategoryPress = useCallback(
+    (categoryId: string) => {
+      const idx = topCategories.findIndex((t: any) => t._id === categoryId);
+      if (idx < 0) return;
+      const isResnap = categoryId === usePlatformStore.getState().selectedCategory;
+      // Always re-arm: a tap is an explicit user intent to align both columns,
+      // so override any prior skip-flag set by an incidental drag.
+      skipRightAutoAlignRef.current = false;
+      tapAlignCategoryIdRef.current = categoryId;
+      // Scroll right column. SectionList without `getItemLayout` measures lazily;
+      // run once now (often hits) and once after a frame so the second call sees
+      // the freshly-committed layout when the first miscalculated.
+      performTargetScroll(idx);
+      requestAnimationFrame(() => performTargetScroll(idx));
+      if (!isResnap) {
+        scrollLeftRowIntoView(categoryId);
+        setSelectedCategory(categoryId);
+      }
+    },
+    [topCategories, performTargetScroll, scrollLeftRowIntoView, setSelectedCategory],
+  );
+
+  const rightViewabilityConfigRef = useRef({
+    itemVisiblePercentThreshold: 15,
+    minimumViewTime: 40,
+  });
+
+  const onRightViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
+    if (isProgrammaticRightScrollRef.current) return;
+    if (!Array.isArray(viewableItems) || viewableItems.length === 0) return;
+
+    const firstVisible = viewableItems.find((v: any) => v?.isViewable && v?.section?.l1Id);
+    const visibleL1Id = firstVisible?.section?.l1Id;
+    if (!visibleL1Id) return;
+    if (visibleL1Id === usePlatformStore.getState().selectedCategory) return;
+
+    setSelectedCategory(visibleL1Id);
+    scrollLeftRowIntoView(visibleL1Id);
+  });
+
+  /** If the global selection is not in the current company’s top list (stale id), snap to the first L1. */
+  useEffect(() => {
+    if (topCategories.length === 0 || !selectedCategory) return;
+    const exists = topCategories.some((t: any) => t._id === selectedCategory);
+    if (!exists) {
+      const firstId = topCategories[0]._id;
+      tapAlignCategoryIdRef.current = null;
+      skipRightAutoAlignRef.current = false;
+      setSelectedCategory(firstId);
+    }
+  }, [topCategories, selectedCategory, setSelectedCategory]);
+
+  /** Re-allow auto-align when switching company tab so the right column follows the new tree. */
+  useEffect(() => {
+    skipRightAutoAlignRef.current = false;
+  }, [selectedCompany]);
+
+  /**
+   * Snap the right column to the selected L1 **before paint** for non-tap selection changes
+   * (initial hydration, stale-id recovery, company-tab switch). Tap-driven changes are
+   * handled imperatively in handleCategoryPress and would double-fire here, so skip them.
+   * Section indices match `topCategories` even while L2 is still placeholders — do **not**
+   * re-subscribe to `allL2ByL1` here or each batch fetch will fire scroll again.
+   */
+  useLayoutEffect(() => {
+    if (!selectedCategory || topCategories.length === 0) return;
+    if (skipRightAutoAlignRef.current) return;
+    if (tapAlignCategoryIdRef.current === selectedCategory) return;
+    const idx = topCategories.findIndex((t: any) => t._id === selectedCategory);
+    if (idx < 0) return;
+    performTargetScroll(idx);
+    scrollLeftRowIntoView(selectedCategory);
+  }, [selectedCategory, topCategories, performTargetScroll, scrollLeftRowIntoView]);
+
+  /**
+   * Re-snap the right column once the tapped L1's L2 rows arrive. After a tap we record
+   * the target id; when its data lands the section grows from 3 placeholder rows to N
+   * real rows, drifting the snapped position. Re-run scroll exactly once for that id,
+   * then clear the ref to avoid cascading on later batch updates.
+   */
+  useLayoutEffect(() => {
+    const targetId = tapAlignCategoryIdRef.current;
+    if (!targetId) return;
+    if (skipRightAutoAlignRef.current) return;
+    if (!Object.prototype.hasOwnProperty.call(allL2ByL1, targetId)) return;
+    const idx = topCategories.findIndex((t: any) => t._id === targetId);
+    if (idx < 0) return;
+    performTargetScroll(idx);
+    tapAlignCategoryIdRef.current = null;
+  }, [allL2ByL1, topCategories, performTargetScroll]);
 
   // Helper function to convert image URI to base64
   const convertUriToBase64 = async (uri: string): Promise<string | null> => {
@@ -450,7 +570,7 @@ const CategoryTabScreen: React.FC = () => {
 
     const options: CameraOptions = {
       mediaType: 'photo' as MediaType,
-      quality: 0.1, // Very low quality to ensure <1.2MB for large images
+      quality: IMAGE_CONFIG.QUALITY,
       saveToPhotos: false,
       includeBase64: true,
     };
@@ -467,7 +587,7 @@ const CategoryTabScreen: React.FC = () => {
         setImagePickerModalVisible(false);
         let base64Data = response.assets[0].base64;
         
-        // Image is already compressed with quality: 0.5 in camera options
+        // Then compressImageForSearch uses IMAGE_CONFIG.QUALITY (may step down for size)
         // Only compress if base64 is not available (fallback case)
         if (!base64Data && response.assets[0].uri) {
           const { compressImageForSearch } = require('../../utils/imageCompression');
@@ -503,7 +623,7 @@ const CategoryTabScreen: React.FC = () => {
 
     const options: ImageLibraryOptions = {
       mediaType: 'photo' as MediaType,
-      quality: 0.1, // Very low quality to ensure <1.2MB for large images
+      quality: IMAGE_CONFIG.QUALITY,
       selectionLimit: 1,
       includeBase64: true,
     };
@@ -520,7 +640,7 @@ const CategoryTabScreen: React.FC = () => {
         setImagePickerModalVisible(false);
         let base64Data = response.assets[0].base64;
         
-        // Image is already compressed with quality: 0.5 in camera options
+        // Then compressImageForSearch uses IMAGE_CONFIG.QUALITY (may step down for size)
         // Only compress if base64 is not available (fallback case)
         if (!base64Data && response.assets[0].uri) {
           const { compressImageForSearch } = require('../../utils/imageCompression');
@@ -546,47 +666,39 @@ const CategoryTabScreen: React.FC = () => {
     });
   };
 
-  const handleProductPress = async (product: Product) => {
-    // Get source from product data, fallback to selectedPlatform (which is now updated when company is selected)
-    const source = (product as any).source || selectedPlatform || '1688';
-    await navigateToProductDetail(product.id, source, locale as string);
-  };
-
   // Render company filter tabs
-  const renderCompanyTabs = () => {
-    // Always show company tabs if there are any companies (at least "All")
-    if (companies.length === 0) return null;
-    
+  const renderCompanyTabs = (options?: { hideAllTab?: boolean; compactSpacing?: boolean }) => {
+    const tabs = options?.hideAllTab ? COMPANY_TABS.filter((tab) => tab !== 'All') : COMPANY_TABS;
     return (
-      <View style={styles.companyTabsContainer}>
+      <View style={[styles.companyTabsContainer, options?.compactSpacing && styles.companyTabsContainerCompact]}>
         <ScrollView 
           horizontal 
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.companyTabs}
         >
-          {companies.map((company, index) => {
+          {tabs.map((company, index) => {
             const isSelected = selectedCompany === company;
             
             return (
-              <TouchableOpacity
+              <TouchableOpacity hitSlop={BACK_NAVIGATION_HIT_SLOP}
                 key={`company-${company}-${index}`}
                 style={[
                   styles.companyTab,
-                  index === companies.length - 1 && { marginRight: SPACING.md },
+                  index === tabs.length - 1 && { marginRight: SPACING.md },
                   index === 0 && { marginLeft: SPACING.md }
                 ]}
                 onPress={() => {
-                  setSelectedCompany(company);
-                  // Update selectedPlatform in store based on selected company
+                  if (company === selectedCompany) return;
                   const platform = getPlatformFromCompany(company);
                   setSelectedPlatform(platform);
-                  // console.log('[CategoryTabScreen] Company selected:', company, 'Platform updated to:', platform);
-                  // Reset fetch refs to allow refetch with new company
-                  hasFetchedRef.current = null; // Reset category tree fetch ref
-                  hasFetchedForYouRef.current = null; // Reset products fetch ref
-                  lastPlatformForCategoryRef.current = null; // Reset platform ref so category gets set for new company
-                  setForYouProducts([]);
-                  // The useEffect will automatically set first category and refetch category tree and products when selectedCompany changes
+                  // Cancel in-flight L2 batch and clear staged state in one render.
+                  fetchTokenRef.current++;
+                  hasFetchedRef.current = null;
+                  setTopCategories([]);
+                  setAllL2ByL1({});
+                  // Stale-recovery effect snaps selectedCategory to the first L1 of the new list.
+                  setSelectedCategory('');
+                  setSelectedCompany(company);
                 }}
               >
                 <Text style={[
@@ -607,6 +719,14 @@ const CategoryTabScreen: React.FC = () => {
     <View style={styles.header}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
       <View style={styles.headerRow}>
+        <TouchableOpacity hitSlop={BACK_NAVIGATION_HIT_SLOP}
+          style={styles.headerBackButton}
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.8}
+        >
+          <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
+        </TouchableOpacity>
+
         <SearchButton
           placeholder={t('category.searchPlaceholder')}
           onPress={() => navigation.navigate('Search' as never)}
@@ -614,21 +734,22 @@ const CategoryTabScreen: React.FC = () => {
           style={styles.searchButton}
           isHomepage={false}
         />
-        
+
         <NotificationBadge
           customIcon={<NotificationIcon width={28} height={28} color={COLORS.text.primary} />}
           count={unreadCount}
           onPress={() => {
-            // Navigate to notifications or customer service
-            // navigation.navigate('CustomerService' as never);
+            navigation.navigate('Message' as never);
           }}
         />
       </View>
+      {/* {renderCompanyTabs()} */}
       {renderCompanyTabs()}
     </View>
   );
 
-  const renderCategoryItem = ({ item }: { item: any }) => {
+  
+  const renderLevel1CategoryItem = useCallback(({ item }: { item: any }) => {
     const isSelected = selectedCategory === item.id;
     return (
       <TouchableOpacity
@@ -646,286 +767,157 @@ const CategoryTabScreen: React.FC = () => {
         </Text>
       </TouchableOpacity>
     );
-  };
+  }, [selectedCategory, handleCategoryPress]);
 
-  const renderRecommendedItem = ({ item }: { item: any }) => {
-    return (
-      <TouchableOpacity
-        style={styles.recommendedItem}
-        onPress={() => {
-          // Get the selected category to pass along
-          const selectedCategoryData = categoriesToDisplay.find(cat => cat.id === selectedCategory);
-          
-          // Convert subsubcategories to correct locale if they exist
-          let localizedSubSubCategories: any[] = [];
-          if (item.subsubcategories && item.subsubcategories.length > 0) {
-            localizedSubSubCategories = item.subsubcategories.map((subSubCat: any) => {
-              // If subSubCat.name is an object with zh, en, ko, extract the correct locale
-              if (subSubCat.name && typeof subSubCat.name === 'object') {
-                return {
-                  ...subSubCat,
-                  name: subSubCat.name[locale] || subSubCat.name.en || subSubCat.name
-                };
-              }
-              // If it's already a string, use it as is
-              return subSubCat;
-            });
-          }
-          
-          // Get platform from selected company
-          const platform = getPlatformFromCompany(selectedCompany);
-          
-          // Always go directly to ProductDiscovery
-          navigation.navigate('ProductDiscovery', { 
-            subCategoryName: item.name,
-            categoryId: selectedCategory,
-            categoryName: selectedCategoryData?.name,
-            subcategoryId: item.id,
-            subsubcategories: localizedSubSubCategories,
-            source: platform, // Pass the current platform/company selection
-          });
-        }}
-      >
-        <View style={styles.recommendedImageContainer}>
-          {item.image ? (
-            <Image 
-              source={{ uri: item.image }} 
-              style={styles.recommendedImage}
-              resizeMode="cover"
-            />
-          ) : (
-            <Image 
-              source={require('../../assets/icons/logo.png')} 
-              style={styles.recommendedLogo}
-              resizeMode="contain"
-            />
-          )}
-        </View>
-        <Text style={styles.recommendedName} numberOfLines={2}>
-          {item.name}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
-
-  const renderForYouProducts = () => {
-    // Show loading state
-    if (isLoadingForYou) {
+  const renderL2Row = useCallback(({ item }: { item: any }) => {
+    if (item?.isPlaceholder) {
       return (
-        <View style={styles.forYouSection}>
-          <View style={styles.forYouHeader}>
-            <Text style={styles.forYouTitle}>{t('home.forYou')}</Text>
-          </View>
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color={COLORS.primary} />
-            <Text style={styles.loadingText}>{t('category.loadingProducts')}</Text>
-          </View>
+        <View style={styles.browseSubcatRow}>
+          <View style={styles.browseSubcatSkelText} />
         </View>
       );
     }
-
-    // Show empty state
-    if (!Array.isArray(forYouProducts) || forYouProducts.length === 0) {
-      return null;
+    if (item?.isEmpty) {
+      return (
+        <View style={styles.browseSubcatRow}>
+          <Text style={styles.browseSubcatEmpty} numberOfLines={1}>
+            {t('category.noItemsAvailableForCategory')}
+          </Text>
+        </View>
+      );
     }
-    
     return (
-      <View style={styles.forYouSection}>
-        <View style={styles.forYouHeader}>
-          <Text style={styles.forYouTitle}>{t('home.forYou')}</Text>
-        </View>
-        <View style={styles.forYouGrid}>
-          {forYouProducts.map((product: Product, index: number) => {
-            const handleLike = async () => {
-              if (!user || isGuest) {
-                Alert.alert('', t('home.pleaseLogin'));
-                return;
-              }
-              try {
-                await toggleWishlist(product);
-              } catch (error) {
-                // console.error('Error toggling wishlist:', error);
-              }
-            };
-
-            return (
-              <ProductCard
-                key={`foryou-${product.id || index}`}
-                product={product}
-                variant="moreToLove"
-                onPress={() => handleProductPress(product)}
-                onLikePress={handleLike}
-                isLiked={isProductLiked(product)}
-                showLikeButton={true}
-                showDiscountBadge={true}
-                showRating={true}
-                cardWidth={FOR_YOU_CARD_WIDTH}
-              />
-            );
-          })}
-        </View>
-      </View>
+      <TouchableOpacity
+        style={styles.browseSubcatRow}
+        activeOpacity={0.75}
+        onPress={() => openProductDiscoveryForL2(item)}
+      >
+        <Text
+          style={styles.browseSubcatName}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {item.name}
+        </Text>
+        <Icon name="chevron-forward" size={20} color={COLORS.text.secondary} />
+      </TouchableOpacity>
     );
-  };
+  }, [openProductDiscoveryForL2, locale]);
 
-  // Use top categories for left column (from API)
-  const categoriesToDisplay = topCategories.map((cat: any) => ({
-    id: cat._id,
-    name: typeof cat.name === 'object' 
-      ? (cat.name[locale] || cat.name.en || cat.name.zh || 'Category')
-      : cat.name,
-    image: cat.imageUrl || '',
-  }));
+  /** Per-L1 block header on the right (title row), then L2 rows in that section. */
+  const renderL1SectionHeader = useCallback(({ section }: { section: any }) => (
+    <View style={styles.browseSectionHeader}>
+      <Text
+        style={styles.browseSectionHeaderText}
+        numberOfLines={1}
+        ellipsizeMode="tail"
+      >
+        {section.title}
+      </Text>
+    </View>
+  ), []);
 
-  // Transform child categories to recommended items format (from API)
-  const allRecommendedItems = childCategories.flatMap((level2: any) => {
-    const items: any[] = [];
-    
-    // Add level 2 category as an item
-    items.push({
-      id: level2._id,
-      name: typeof level2.name === 'object'
-        ? (level2.name[locale] || level2.name.en || level2.name.zh || 'Category')
-        : level2.name,
-      image: level2.imageUrl || '',
-      subsubcategories: (level2.children || []).map((level3: any) => ({
-        id: level3._id,
-        name: typeof level3.name === 'object'
-          ? (level3.name[locale] || level3.name.en || level3.name.zh || 'Category')
-          : level3.name,
-        externalId: level3.externalId,
-      })),
-    });
+  const renderCategoryBody = () => (
+    <View style={styles.mainContent}>
+      <View style={styles.leftColumn}>
+        {isLoadingTopCategories && categoriesToDisplay.length === 0 ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          </View>
+        ) : (
+          <FlatList
+            ref={leftCategoryListRef}
+            data={categoriesToDisplay}
+            renderItem={renderLevel1CategoryItem}
+            keyExtractor={(item) => `category-${item.id || item.name}`}
+            extraData={selectedCategory}
+            scrollEnabled
+            showsVerticalScrollIndicator={false}
+            style={styles.leftCategoryList}
+            {...(Platform.OS === 'android' ? { overScrollMode: 'never' as const } : {})}
+            onScrollToIndexFailed={(info) => {
+              const idx = info.index;
+              const n = categoriesToDisplay.length;
+              const viewPosition = getLeftListViewPosition(idx, n);
+              setTimeout(() => {
+                try {
+                  leftCategoryListRef.current?.scrollToIndex({
+                    index: idx,
+                    animated: false,
+                    viewPosition,
+                  });
+                } catch {
+                  /* retry once after measurement */
+                }
+              }, 120);
+            }}
+          />
+        )}
+      </View>
 
-    // Add level 3 categories as separate items
-    if (level2.children && Array.isArray(level2.children)) {
-      level2.children.forEach((level3: any) => {
-        items.push({
-          id: level3._id,
-          name: typeof level3.name === 'object'
-            ? (level3.name[locale] || level3.name.en || level3.name.zh || 'Category')
-            : level3.name,
-          image: level3.imageUrl || '',
-          isLevel3: true,
-          parentId: level2._id,
-        });
-      });
-    }
-
-    return items;
-  });
-  
-  // Show only first 9 subcategories as recommended
-  const recommendedItems = allRecommendedItems.slice(0, 9);
-  
-  // Check if there are more than 9 subcategories to show the "Show more" button
-  const hasMoreSubcategories = allRecommendedItems.length > 9;
+      <View style={styles.rightColumn}>
+        {sections.length === 0 && isLoadingAllL2 ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          </View>
+        ) : (
+          <View style={styles.rightColumnInner}>
+            <View style={styles.rightSectionListWrap}>
+              <SectionList
+                ref={sectionListRef}
+                style={styles.rightSectionList}
+                sections={sections}
+                keyExtractor={(item: any) => `l2-${item.l1Id ?? 'x'}-${item.id}`}
+                renderItem={renderL2Row}
+                renderSectionHeader={renderL1SectionHeader}
+                stickySectionHeadersEnabled
+                showsVerticalScrollIndicator={false}
+                getItemLayout={getItemLayout as any}
+                viewabilityConfig={rightViewabilityConfigRef.current}
+                onViewableItemsChanged={onRightViewableItemsChanged.current}
+                onScrollToIndexFailed={() => {
+                  const id = tapAlignCategoryIdRef.current ?? selectedCategory;
+                  if (!id) return;
+                  const idx = topCategories.findIndex((t: any) => t._id === id);
+                  if (idx < 0) return;
+                  setTimeout(() => performTargetScroll(idx), 80);
+                }}
+                onScrollBeginDrag={() => {
+                  tapAlignCategoryIdRef.current = null;
+                  skipRightAutoAlignRef.current = true;
+                }}
+                refreshControl={
+                  <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+                }
+                contentContainerStyle={styles.browseSectionListContent}
+              />
+            </View>
+          </View>
+        )}
+      </View>
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      
-      <View style={styles.mainContent}>
-        <View style={styles.leftColumn}>
-          <ScrollView 
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-            }
-          >
-            {isLoadingTopCategories && categoriesToDisplay.length === 0 ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color={COLORS.primary} />
-              </View>
-            ) : (
-              <FlatList
-                data={categoriesToDisplay}
-                renderItem={renderCategoryItem}
-                keyExtractor={(item) => `category-${item.id || item.name}`}
-                scrollEnabled={false}
-                showsVerticalScrollIndicator={false}
-                style={{minHeight: '100%'}}
-              />
-            )}
-          </ScrollView>
+      {!hideHeader && renderHeader()}
+      {isEmbeddedLandscapeHeader && (
+        <View style={styles.embeddedModalHeaderWrap}>
+          <View style={styles.embeddedModalHeader}>
+            <Text style={styles.embeddedModalTitle}>{t('navigation.category')}</Text>
+            <TouchableOpacity
+              hitSlop={BACK_NAVIGATION_HIT_SLOP}
+              onPress={onModalClose}
+              style={styles.embeddedModalClose}
+            >
+              <Icon name="close" size={22} color={COLORS.white} />
+            </TouchableOpacity>
+          </View>
+          {renderCompanyTabs({ hideAllTab: true, compactSpacing: true })}
         </View>
-        
-        <View style={styles.rightColumn}>
-          <ScrollView 
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-            }
-          >
-            {/* Recommended Section */}
-            <View style={styles.recommendedSection}>
-              <TouchableOpacity 
-                style={styles.recommendedHeader}
-                onPress={() => setShowRecommended(!showRecommended)}
-              >
-                <Text style={styles.recommendedTitle}>{t('home.recommended')}</Text>
-                <Icon 
-                  name={showRecommended ? "chevron-up" : "chevron-down"} 
-                  size={20} 
-                  color={COLORS.text.primary} 
-                />
-              </TouchableOpacity>
-              {showRecommended && (
-                <>
-                  <View style={styles.recommendedGrid}>
-                    {recommendedItems.map((item, index) => (
-                      <View key={`rec-${item.id || index}`}>
-                        {renderRecommendedItem({ item })}
-                      </View>
-                    ))}
-                  </View>
-                  {hasMoreSubcategories && (
-                    <TouchableOpacity
-                      style={styles.showMoreButton}
-                      onPress={() => {
-                        // Get the selected category to pass along
-                        const selectedCategoryData = categoriesToDisplay.find(cat => cat.id === selectedCategory);
-                        
-                        // Get all subcategories for the selected category
-                        const allSubcategories = allRecommendedItems;
-                        
-                        // Navigate to SubCategory screen to show all subcategories
-                        // Convert categoryId to number if it's a valid number string, otherwise keep as string or pass as is
-                        let categoryIdToPass: number | undefined;
-                        if (selectedCategory) {
-                          if (typeof selectedCategory === 'string') {
-                            const numValue = Number(selectedCategory);
-                            categoryIdToPass = isNaN(numValue) ? undefined : numValue;
-                          } else if (typeof selectedCategory === 'number') {
-                            categoryIdToPass = selectedCategory;
-                          }
-                        }
-                        
-                        navigation.navigate('SubCategory', { 
-                          categoryName: selectedCategoryData?.name || 'All Subcategories',
-                          categoryId: categoryIdToPass,
-                          subcategories: allSubcategories,
-                        });
-                      }}
-                    >
-                      <Text style={styles.showMoreText}>{t('category.showMore')}</Text>
-                      <Icon 
-                        name="chevron-forward" 
-                        size={16} 
-                        color={COLORS.primary} 
-                      />
-                    </TouchableOpacity>
-                  )}
-                </>
-              )}
-            </View>
-            
-            {/* For You Section */}
-            {renderForYouProducts()}
-          </ScrollView>
-        </View>
-      </View>
-      
+      )}
+      {renderCategoryBody()}
+
       <ImagePickerModal
         visible={imagePickerModalVisible}
         onClose={() => setImagePickerModalVisible(false)}
@@ -956,21 +948,46 @@ const styles = StyleSheet.create({
   },
   searchButton: {
     borderRadius: BORDER_RADIUS.full,
-    width: '90%',
+    flex: 1,
     height: 30,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerBackButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   mainContent: {
+    flex: 1,
     flexDirection: 'row',
-    minHeight: '100%',
-    paddingBottom: 100
+    paddingBottom: SPACING.lg,
   },
   leftColumn: {
-    width: 120,
+    width: 140,
+    minHeight: 0,
     backgroundColor: COLORS.gray[100],
   },
+  leftCategoryList: {
+    flex: 1,
+  },
   rightColumn: {
+    flex: 1,
+    minHeight: 0,
+  },
+  rightColumnInner: {
+    flex: 1,
+    minHeight: 0,
+  },
+  rightSectionListWrap: {
+    flex: 1,
+    minHeight: 0,
+    position: 'relative',
+  },
+  rightSectionList: {
     flex: 1,
   },
   categoryItem: {
@@ -984,7 +1001,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
   },
   categoryName: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.sizes.sm ,
     color: COLORS.text.primary,
     textAlign: 'left',
     fontWeight: '500',
@@ -993,113 +1010,172 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.red,
   },
-  recommendedSection: {
+  browseSubcatSection: {
     flex: 1,
     backgroundColor: COLORS.white,
-    marginBottom: SPACING.md,
-    borderBottomWidth: 5,
-    paddingHorizontal: SPACING.sm,
-    paddingBottom: SPACING.lg,
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[200],
+    minHeight: 0,
+  },
+  browseListHeaderOuter: {
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.xs,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
     borderBottomColor: COLORS.gray[200],
   },
-  recommendedHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: SPACING.sm,
+  browseSubcatHeader: {
+    marginBottom: SPACING.sm,
   },
-  recommendedTitle: {
-    fontSize: FONTS.sizes.lg,
+  browseSubcatTitle: {
+    fontSize: FONTS.sizes.lg ,
     fontWeight: '600',
     color: COLORS.text.primary,
   },
-  recommendedGrid: {
+  browseSubcatRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    height: ROW_HEIGHT,
+    paddingHorizontal: SPACING.sm,
     gap: SPACING.sm,
-    paddingBottom: SPACING.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.gray[200],
   },
-  recommendedItem: {
-    width: (width - 120 - SPACING.sm * 5) / 3,
-    alignItems: 'center',
-    padding: SPACING.sm,
-  },
-  recommendedImageContainer: {
-    width: '100%',
-    aspectRatio: 1,
-    borderRadius: 12,
-    backgroundColor: COLORS.gray[100],
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-    overflow: 'hidden',
-  },
-  recommendedImage: {
-    width: '100%',
-    height: '100%',
-  },
-  recommendedLogo: {
-    width: '60%',
-    height: '60%',
-  },
-  recommendedName: {
-    fontSize: FONTS.sizes.md,
+  browseSubcatName: {
+    flex: 1,
+    fontSize: FONTS.sizes.md ,
     color: COLORS.text.primary,
-    textAlign: 'center',
-    lineHeight: 18,
     fontWeight: '500',
   },
-  forYouSection: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    paddingBottom: SPACING.lg,
+  browseSubcatSkelText: {
+    flex: 1,
+    height: 14,
+    backgroundColor: COLORS.gray[200],
+    borderRadius: 4,
   },
-  forYouHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  browseSubcatEmpty: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
+    fontStyle: 'italic',
+  },
+  browseQuickJumpWrap: {
     marginBottom: SPACING.md,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.gray[200],
   },
-  forYouTitle: {
-    fontSize: FONTS.sizes.lg,
+  browseQuickJumpTitle: {
+    fontSize: FONTS.sizes.sm,
     fontWeight: '600',
     color: COLORS.text.primary,
+    marginBottom: SPACING.xs,
   },
-  forYouGrid: {
+  browseQuickJumpHint: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    marginBottom: SPACING.sm,
+  },
+  browseQuickJumpScroll: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    alignItems: 'stretch',
+    gap: SPACING.xs,
+    paddingRight: SPACING.md,
+  },
+  browseQuickJumpChip: {
+    maxWidth: 200,
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    backgroundColor: COLORS.gray[100],
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+  },
+  browseQuickJumpChipText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  browseSectionListContent: {
+    paddingBottom: SPACING.xl,
+  },
+  browseSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: SECTION_HEADER_HEIGHT,
+    paddingHorizontal: SPACING.sm,
+    backgroundColor: COLORS.gray[50],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.gray[200],
     gap: SPACING.sm,
-    paddingBottom: SPACING.lg * 2,
+  },
+  browseSectionHeaderText: {
+    flex: 1,
+    fontSize: FONTS.sizes.md,
+    fontWeight: '600',
+    color: COLORS.text.red,
+  },
+  browseLevel3Row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    gap: SPACING.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.gray[200],
+  },
+  browseLevel3RowText: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '400',
+  },
+  browseSectionSeparator: {
+    height: SPACING.sm,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingText: {
-    marginTop: SPACING.md,
-    fontSize: FONTS.sizes.sm,
-    color: COLORS.text.secondary,
-  },
-  showMoreButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.md,
-    marginTop: SPACING.sm,
-    gap: SPACING.xs,
-  },
-  showMoreText: {
-    fontSize: FONTS.sizes.md,
-    color: COLORS.primary,
-    fontWeight: '600',
-  },
   companyTabsContainer: {
     backgroundColor: COLORS.white,
     paddingVertical: SPACING.md,
+  },
+  companyTabsContainerCompact: {
+    // 10% of default spacing for tighter title-to-tabs gap in modal header.
+    paddingVertical: Math.max(1, Math.round(SPACING.md * 0.1)),
+  },
+  embeddedModalHeaderWrap: {
+    backgroundColor: COLORS.white,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.gray[200],
+  },
+  embeddedModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.red,
+    backgroundColor: 'rgb(255, 88, 3)',
+  },
+  embeddedModalTitle: {
+    fontSize: FONTS.sizes.lg,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  embeddedModalClose: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   companyTabs: {
     alignItems: 'center',

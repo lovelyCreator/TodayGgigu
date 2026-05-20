@@ -16,11 +16,13 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants';
+
+const BACK_NAVIGATION_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 import { RootStackParamList } from '../../types';
 import { usePlatformStore } from '../../store/platformStore';
 import { useAppSelector } from '../../store/hooks';
 import { useTranslation } from '../../hooks/useTranslation';
-import { Image } from 'react-native';
+import { Image, useWindowDimensions } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -35,6 +37,10 @@ interface SubSubCategory {
 }
 
 const SubCategoryScreen: React.FC = () => {
+  const { width: dynWidth, height: dynHeight } = useWindowDimensions();
+  const subCatIsTablet = Math.min(dynWidth, dynHeight) >= 600;
+  const subCatCols = subCatIsTablet ? (dynWidth > dynHeight ? 5 : 4) : 3;
+  const subCatTileWidth = (dynWidth - SPACING.md * 2 - SPACING.sm * (subCatCols - 1)) / subCatCols;
   const navigation = useNavigation<SubCategoryScreenNavigationProp>();
   const route = useRoute<SubCategoryScreenRouteProp>();
   const { categoryName, categoryId: categoryIdParam, subcategories: passedSubcategories } = route.params;
@@ -243,7 +249,7 @@ const SubCategoryScreen: React.FC = () => {
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <TouchableOpacity 
+      <TouchableOpacity hitSlop={BACK_NAVIGATION_HIT_SLOP} 
         style={styles.backButton}
         onPress={() => navigation.goBack()}
       >
@@ -282,11 +288,10 @@ const SubCategoryScreen: React.FC = () => {
     // Generate a safe key
     const key = item.id || `subsubcategory-${index}`;
     
-    // Check if this is the last item in a row (every 3rd item, or last item overall)
-    const isLastInRow = (index + 1) % 3 === 0;
+    const isLastInRow = (index + 1) % subCatCols === 0;
     const itemStyle = isLastInRow 
-      ? [styles.quickCategoryItem, { marginRight: 0 }]
-      : styles.quickCategoryItem;
+      ? [styles.quickCategoryItem, { width: subCatTileWidth, marginRight: 0 }]
+      : [styles.quickCategoryItem, { width: subCatTileWidth }];
     
     return (
       <TouchableOpacity
@@ -294,7 +299,7 @@ const SubCategoryScreen: React.FC = () => {
         style={itemStyle}
         onPress={() => handleSubSubCategorySelect(item)}
       >
-        <View style={styles.quickCategoryImageContainer}>
+        <View style={[styles.quickCategoryImageContainer, { width: subCatTileWidth, height: subCatTileWidth }]}>
           {item.image ? (
             <Image 
               source={{ uri: item.image }} 

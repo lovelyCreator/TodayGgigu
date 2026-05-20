@@ -22,7 +22,6 @@ import { inquiryApi } from '../../services/inquiryApi';
 import { useAppSelector } from '../../store/hooks';
 import { translations } from '../../i18n/translations';
 import SearchIcon from '../../assets/icons/SearchIcon';
-import ChatBubbleIcon from '../../assets/icons/ChatBubbleIcon';
 import { API_BASE_URL } from '../../constants';
 import { getStoredToken } from '../../services/authApi';
 import { buildSignatureHeaders } from '../../services/signature';
@@ -51,13 +50,47 @@ interface FormFile {
   updatedAt: string;
 }
 
-const MessageScreen: React.FC = () => {
+interface MessageScreenProps {
+  initialTabOverride?: TabType;
+  /** Profile tablet split panel */
+  embedded?: boolean;
+  onEmbeddedBack?: () => void;
+}
+
+const MessageScreen: React.FC<MessageScreenProps> = ({ initialTabOverride, onEmbeddedBack }) => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuth();
-  const { isConnected, unreadCount: orderUnreadCount, generalInquiryUnreadCount, getUnreadCounts, getGeneralInquiryUnreadCounts, onMessageReceived, onGeneralInquiryMessageReceived } = useSocket();
+  const {
+    isConnected,
+    unreadCount: orderUnreadCount,
+    generalInquiryUnreadCount,
+    getUnreadCounts,
+    getGeneralInquiryUnreadCounts,
+    markGeneralInquiryAsRead,
+    onMessageReceived,
+    onGeneralInquiryMessageReceived,
+  } = useSocket();
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
+
+  const t = (key: string) => {
+    const keys = key.split('.');
+    let value: any = translations[locale as keyof typeof translations];
+    for (const k of keys) { value = value?.[k]; }
+    if (typeof value === 'string') return value;
+    return undefined;
+  };
+
+  // Layout-first paint: render header + tab switcher immediately and defer
+  // the heavy FlatList content (inquiries / general / file downloads) to the
+  // next frame so the user sees the page composition first. Uses
+  // requestAnimationFrame instead of InteractionManager (see ProductDetail).
+  const [showHeavyContent, setShowHeavyContent] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShowHeavyContent(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   // Redirect to login if not authenticated
   useFocusEffect(
@@ -68,15 +101,7 @@ const MessageScreen: React.FC = () => {
     }, [isAuthenticated, navigation])
   );
 
-  const t = (key: string) => {
-    const keys = key.split('.');
-    let value: any = translations[locale as keyof typeof translations];
-    for (const k of keys) { value = value?.[k]; }
-    if (typeof value === 'string') return value;
-    return undefined;
-  };
-
-  const initialTab = route.params?.initialTab === 'general' ? 'general' : 'order';
+  const initialTab = initialTabOverride ?? (route.params?.initialTab === 'general' ? 'general' : 'order');
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
 
   // If navigated with orderId (from BuyList ? button), go directly to Chat
@@ -135,7 +160,7 @@ const MessageScreen: React.FC = () => {
         console.warn('[MessageScreen] Order inquiries failed or empty:', response.error);
       }
     } catch (e) {
-      console.error('[MessageScreen] fetchOrderInquiries error:', e);
+      if (__DEV__) console.warn('[MessageScreen.fetchOrderInquiries]', e);
     } finally {
       setOrderLoading(false);
     }
@@ -157,7 +182,7 @@ const MessageScreen: React.FC = () => {
         console.warn('[MessageScreen] General inquiries failed or empty:', response.error);
       }
     } catch (e) {
-      console.error('[MessageScreen] fetchGeneralInquiries error:', e);
+      if (__DEV__) console.warn('[MessageScreen.fetchGeneralInquiries]', e);
     } finally {
       setGeneralLoading(false);
     }
@@ -192,6 +217,11 @@ const MessageScreen: React.FC = () => {
 
   useFocusEffect(
     useCallback(() => {
+      const requestedTab = route.params?.initialTab;
+      if (requestedTab === 'order' || requestedTab === 'general' || requestedTab === 'fileDownload') {
+        setActiveTab(requestedTab);
+      }
+
       if (isAuthenticated) {
         fetchOrderInquiries();
         fetchGeneralInquiries();
@@ -202,7 +232,16 @@ const MessageScreen: React.FC = () => {
         }
       }
       fetchFormFiles();
-    }, [isAuthenticated, isConnected])
+    }, [
+      route.params?.initialTab,
+      isAuthenticated,
+      isConnected,
+      fetchOrderInquiries,
+      fetchGeneralInquiries,
+      fetchFormFiles,
+      getUnreadCounts,
+      getGeneralInquiryUnreadCounts,
+    ])
   );
 
   // Listen for real-time order inquiry messages and update per-item unread count
@@ -239,6 +278,67 @@ const MessageScreen: React.FC = () => {
     });
   }, [onMessageReceived, onGeneralInquiryMessageReceived]);
 
+  // When the user opens the Order inquiry tab, treat the list as viewed: mark
+  // each thread read (REST), zero local badges, refresh socket total for nav tab.
+  useEffect(() => {
+    if (!isAuthenticated || !showHeavyContent || activeTab !== 'order') return;
+    const unreadItems = orderInquiries.filter((i) => i.unreadCount > 0);
+    if (unreadItems.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      await Promise.all(
+        unreadItems.map((i) => inquiryApi.markAsRead(i.inquiryId).catch(() => {})),
+      );
+      if (cancelled) return;
+      setOrderInquiries((prev) =>
+        prev.map((inq) => (inq.unreadCount > 0 ? { ...inq, unreadCount: 0 } : inq)),
+      );
+      if (isConnected) getUnreadCounts();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    orderInquiries,
+    isAuthenticated,
+    showHeavyContent,
+    isConnected,
+    getUnreadCounts,
+  ]);
+
+  // When the user opens the 1:1 inquiry tab, mark each unread thread read via
+  // socket and refresh the general inquiry total unread count.
+  useEffect(() => {
+    if (!isAuthenticated || !showHeavyContent || activeTab !== 'general') return;
+    const unreadIds = generalInquiriesLocal
+      .filter((i: any) => (i.unreadCount || 0) > 0)
+      .map((i: any) => i._id as string);
+    if (unreadIds.length === 0) return;
+
+    unreadIds.forEach((id) => markGeneralInquiryAsRead(id));
+    setGeneralInquiriesLocal((prev: any[]) =>
+      prev.map((inq: any) =>
+        unreadIds.includes(inq._id) ? { ...inq, unreadCount: 0 } : inq,
+      ),
+    );
+
+    const t = setTimeout(() => {
+      if (isConnected) getGeneralInquiryUnreadCounts();
+    }, 450);
+    return () => clearTimeout(t);
+  }, [
+    activeTab,
+    generalInquiriesLocal,
+    isAuthenticated,
+    showHeavyContent,
+    isConnected,
+    markGeneralInquiryAsRead,
+    getGeneralInquiryUnreadCounts,
+  ]);
+
   const handleOrderRefresh = useCallback(async () => {
     setOrderRefreshing(true);
     await fetchOrderInquiries();
@@ -270,6 +370,8 @@ const MessageScreen: React.FC = () => {
       in_progress: 'inquiry.status.inProgress',
       pending: 'inquiry.status.pending',
       confirmed: 'inquiry.status.confirmed',
+      unconfirmed: 'inquiry.status.unconfirmed',
+      completed: 'inquiry.status.completed',
     };
     const key = statusKeyMap[status];
     return (key && t(key)) || status;
@@ -278,11 +380,13 @@ const MessageScreen: React.FC = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'open':
-      case 'pending': return COLORS.red;
+      case 'pending':
+      case 'unconfirmed': return COLORS.red;
       case 'in_progress': return '#FF8C00';
       case 'closed':
       case 'resolved':
-      case 'confirmed': return '#28A745';
+      case 'confirmed':
+      case 'completed': return '#28A745';
       default: return COLORS.gray[500];
     }
   };
@@ -307,13 +411,21 @@ const MessageScreen: React.FC = () => {
   // ═══════════════════════════════════════════════════════
   const renderHeader = () => (
     <View style={[styles.header, { paddingTop: insets.top + SPACING.xs }]}>
-      <Text style={styles.headerTitle}>{t('message')}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+        {onEmbeddedBack ? (
+          <TouchableOpacity onPress={onEmbeddedBack} accessibilityRole="button" accessibilityLabel="Back">
+            <Icon name="arrow-back" size={22} color={COLORS.black} />
+          </TouchableOpacity>
+        ) : null}
+        <Text style={[styles.headerTitle, !!onEmbeddedBack && { marginLeft: SPACING.sm }]}>문의</Text>
+      </View>
       <View style={styles.headerRight}>
-        <TouchableOpacity style={styles.headerIcon}>
+        <TouchableOpacity
+          style={styles.headerIcon}
+          onPress={() => navigation.navigate('Search')}
+          activeOpacity={0.7}
+        >
           <SearchIcon width={22} height={22} color={COLORS.black} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.headerIcon}>
-          <ChatBubbleIcon width={22} height={22} color={COLORS.black} />
         </TouchableOpacity>
       </View>
     </View>
@@ -605,9 +717,9 @@ const MessageScreen: React.FC = () => {
       {renderHeader()}
       {renderTabs()}
       <View style={styles.content}>
-        {activeTab === 'order' && renderOrderTab()}
-        {activeTab === 'general' && renderGeneralTab()}
-        {activeTab === 'fileDownload' && renderFileDownloadTab()}
+        {showHeavyContent && activeTab === 'order' && renderOrderTab()}
+        {showHeavyContent && activeTab === 'general' && renderGeneralTab()}
+        {showHeavyContent && activeTab === 'fileDownload' && renderFileDownloadTab()}
       </View>
     </View>
   );
@@ -619,7 +731,7 @@ const MessageScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background,
   },
 
   // Header
@@ -629,7 +741,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingBottom: SPACING.sm,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background,
   },
   headerTitle: {
     fontSize: FONTS.sizes.lg,
@@ -650,7 +762,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray[200],
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background,
   },
   tab: {
     flexDirection: 'row',

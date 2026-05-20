@@ -5,13 +5,13 @@ import type { ProfileSettingsMenuRowComponentProps } from '../profileSettingsSec
 /** 단가조사 */
 const UnitPriceSurveyMenuRow: React.FC<ProfileSettingsMenuRowComponentProps> = ({
   t,
-  showComingSoon,
+  navigation,
   isFirst,
   isLast,
 }) => (
   <ProfileSettingsMenuRowView
     title={t('profile.unitPriceSurvey')}
-    onPress={() => showComingSoon(t('profile.unitPriceSurvey'))}
+    onPress={() => navigation.navigate('UnitSurvey')}
     isFirst={isFirst}
     isLast={isLast}
   />

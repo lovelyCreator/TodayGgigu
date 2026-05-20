@@ -5,13 +5,13 @@ import type { ProfileSettingsMenuRowComponentProps } from '../profileSettingsSec
 /** 진행알림 */
 const ProgressNotificationMenuRow: React.FC<ProfileSettingsMenuRowComponentProps> = ({
   t,
-  showComingSoon,
+  navigation,
   isFirst,
   isLast,
 }) => (
   <ProfileSettingsMenuRowView
     title={t('profile.progressNotification')}
-    onPress={() => showComingSoon(t('profile.progressNotification'))}
+    onPress={() => navigation.navigate('ProgressNotification')}
     isFirst={isFirst}
     isLast={isLast}
   />
