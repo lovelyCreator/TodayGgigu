@@ -667,7 +667,7 @@ export const translations = {
     product: {
       addToCart: 'Add to cart',
       addingToCart: 'Adding...',
-      buyNow: 'Checkout',
+      buyNow: 'Buy Now',
       quantity: 'Quantity',
       color: 'Color',
       size: 'Size',
@@ -1479,6 +1479,7 @@ For return assistance, please contact our customer service team with your order 
       images: 'Images',
       // Address Book Screen
       addressBook: 'Address Book',
+      receivingAddress: 'Receiving Address',
       addAddress: 'Add Address',
       editAddress: 'Edit Address',
       deleteAddress: 'Delete Address',
@@ -1956,6 +1957,7 @@ Supports credit and check cards from various banks for recharging and payments.`
         },
         status: {
           all: 'All',
+          quotePending: 'Quote Pending',
           paymentPending: 'Payment Pending',
           manualProcurement: 'Manual Procurement',
           purchasing: 'Purchasing',
@@ -2082,7 +2084,14 @@ Supports credit and check cards from various banks for recharging and payments.`
       orderModal: {
         title: 'Order Details',
         depositPayment: 'Deposit Payment',
+        depositBalance: 'Available deposit',
         purchasePayment: 'Purchase',
+        selectRecipient: 'Select recipient address',
+        noAddress: 'No saved address. Please add one in Address Book.',
+        loginRequired: 'Please log in to place an order.',
+        orderFailed: 'Failed to load profile. Please try again.',
+        orderSubmitSuccess: 'Order placed successfully.',
+        orderSubmitFailed: 'Failed to place order.',
         shippingPayment: 'Shipping',
         manual: 'Manual',
         auto: 'Auto',
@@ -2481,7 +2490,7 @@ Supports credit and check cards from various banks for recharging and payments.`
     product: {
       addToCart: '加入购物车',
       addingToCart: '添加中...',
-      buyNow: '查看',
+      buyNow: '立即购买',
       quantity: '数量',
       color: '颜色',
       size: '尺寸',
@@ -3278,6 +3287,7 @@ Supports credit and check cards from various banks for recharging and payments.`
       images: '图片',
       // Address Book Screen
       addressBook: '地址簿',
+      receivingAddress: '收货地址',
       addAddress: '添加地址',
       editAddress: '编辑地址',
       deleteAddress: '删除地址',
@@ -3991,6 +4001,7 @@ Supports credit and check cards from various banks for recharging and payments.`
         },
         status: {
           all: '全部',
+          quotePending: '待报价',
           paymentPending: '待付款',
           manualProcurement: '人工采购',
           purchasing: '구매중',
@@ -4117,7 +4128,13 @@ Supports credit and check cards from various banks for recharging and payments.`
       orderModal: {
         title: '订单信息填写与确认',
         depositPayment: '预存款结算',
+        depositBalance: '可用预存款',
         purchasePayment: '采购结算',
+        selectRecipient: '选择收货地址',
+        noAddress: '没有保存的地址，请在地址簿中添加。',
+        orderFailed: '加载用户信息失败，请重试。',
+        orderSubmitSuccess: '订单已提交。',
+        orderSubmitFailed: '下单失败。',
         shippingPayment: '配送结算',
         manual: '手动',
         auto: '自动',
@@ -4605,7 +4622,7 @@ Supports credit and check cards from various banks for recharging and payments.`
     product: {
       addToCart: '장바구니 담기',
       addingToCart: '추가 중...',
-      buyNow: '점검',
+      buyNow: '바로 구매',
       quantity: '수량',
       color: '색상',
       size: '사이즈',
@@ -5490,6 +5507,7 @@ Supports credit and check cards from various banks for recharging and payments.`
       images: '이미지',
       // Address Book Screen
       addressBook: '주소록',
+      receivingAddress: '수령주소',
       addAddress: '주소 추가',
       editAddress: '주소 편집',
       deleteAddress: '주소 삭제',
@@ -6119,6 +6137,7 @@ Supports credit and check cards from various banks for recharging and payments.`
         },
         status: {
           all: '전체',
+          quotePending: '견적대기',
           paymentPending: '결제대기',
           manualProcurement: '수동구매',
           purchasing: '구매중',
@@ -6245,7 +6264,13 @@ Supports credit and check cards from various banks for recharging and payments.`
       orderModal: {
         title: '발주정보 작성 및 확인',
         depositPayment: '예치금결제',
+        depositBalance: '사용 가능 예치금',
         purchasePayment: '구매결제',
+        selectRecipient: '수령 주소 선택',
+        noAddress: '저장된 주소가 없습니다. 주소록에서 추가해 주세요.',
+        orderFailed: '회원 정보를 불러오지 못했습니다. 다시 시도해 주세요.',
+        orderSubmitSuccess: '주문이 완료되었습니다.',
+        orderSubmitFailed: '주문에 실패했습니다.',
         shippingPayment: '배송결제',
         manual: '수동',
         auto: '자동',

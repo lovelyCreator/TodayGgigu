@@ -49,6 +49,7 @@ const AddressBookScreen: React.FC = () => {
   // Form fields
   const [recipient, setRecipient] = useState('');
   const [contact, setContact] = useState('');
+  const [mainAddress, setMainAddress] = useState('');
   const [detailedAddress, setDetailedAddress] = useState('');
   const [zipCode, setZipCode] = useState('');
   const [personalCustomsCode, setPersonalCustomsCode] = useState('');
@@ -164,6 +165,7 @@ const AddressBookScreen: React.FC = () => {
   const resetForm = () => {
     setRecipient('');
     setContact('');
+    setMainAddress('');
     setDetailedAddress('');
     setZipCode('');
     setPersonalCustomsCode('');
@@ -184,6 +186,7 @@ const AddressBookScreen: React.FC = () => {
     // Pre-fill form with existing address data
     setRecipient(address.name || '');
     setContact(address.phone || '');
+    setMainAddress(address.city || '');
     setDetailedAddress(address.street || '');
     setZipCode(address.zipCode || '');
     setPersonalCustomsCode((address as any).personalCustomsCode || ''); // Not stored in Address type
@@ -204,6 +207,10 @@ const AddressBookScreen: React.FC = () => {
       showToast('Please enter contact number', 'error');
       return;
     }
+    if (!mainAddress.trim()) {
+      showToast('Please enter province/city/district', 'error');
+      return;
+    }
     if (!detailedAddress.trim()) {
       showToast('Please enter detailed address', 'error');
       return;
@@ -218,6 +225,7 @@ const AddressBookScreen: React.FC = () => {
       recipient: recipient.trim(),
       contact: contact.trim(),
       personalCustomsCode: personalCustomsCode.trim(),
+      mainAddress: mainAddress.trim(),
       detailedAddress: detailedAddress.trim(),
       zipCode: zipCode.trim(),
       defaultAddress: isDefaultAddress,
@@ -337,7 +345,7 @@ const AddressBookScreen: React.FC = () => {
       >
         <Icon name="arrow-back" size={20} color={COLORS.text.primary} />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>Shipping address</Text>
+      <Text style={styles.headerTitle}>{t('profile.receivingAddress')}</Text>
       <View style={styles.headerRight}>
         <TouchableOpacity style={styles.headerIconButton}>
           {/* <Icon name="search" size={24} color={COLORS.text.primary} /> */}
@@ -502,11 +510,14 @@ const AddressBookScreen: React.FC = () => {
                 {t('profile.addressModal.searchAddress')}
               </Text>
             </TouchableOpacity>
-            <View style={[styles.inputBox, styles.inputBoxSpacing]}>
-              <Text style={styles.inputPlaceholderStatic} numberOfLines={1}>
-                {t('profile.addressModal.selectRegion')}
-              </Text>
-            </View>
+            <TextInput
+              style={[styles.input, styles.inputBoxSpacing]}
+              placeholder={t('profile.addressModal.selectRegion')}
+              placeholderTextColor={COLORS.gray[400]}
+              value={mainAddress}
+              onChangeText={setMainAddress}
+              editable={!isAdding && !isUpdating}
+            />
 
             {/* Detail address */}
             <Text style={styles.fieldLabel}>
@@ -730,6 +741,12 @@ const AddressBookScreen: React.FC = () => {
                     
                     if (data.zonecode && data.roadAddress) {
                       setZipCode(data.zonecode);
+                      const region = [data.sido, data.sigungu, data.bname]
+                        .filter(Boolean)
+                        .join(' ');
+                      if (region) {
+                        setMainAddress(region);
+                      }
                       setDetailedAddress(data.roadAddress);
                       
                       showToast('Address selected successfully', 'success');

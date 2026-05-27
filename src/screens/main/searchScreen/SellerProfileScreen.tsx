@@ -26,6 +26,7 @@ import { useAddToWishlistMutation } from '../../../hooks/useAddToWishlistMutatio
 import { useDeleteFromWishlistMutation } from '../../../hooks/useDeleteFromWishlistMutation';
 import { useAuth } from '../../../context/AuthContext';
 import { useTranslation } from '../../../hooks/useTranslation';
+import { normalizeProductImageUrl } from '../../../utils/productImageUrl';
 import StarIcon from '../../../assets/icons/StarIcon';
 import StarHalfIcon from '../../../assets/icons/StarHalfIcon';
 
@@ -209,7 +210,7 @@ const SellerProfileScreen: React.FC = () => {
             externalId: item.item_id?.toString() || '',
             name: item.multi_language_info?.title || item.title || '',
             title: item.multi_language_info?.title || item.title || '',
-            image: item.main_image_url || '',
+            image: normalizeProductImageUrl(item.main_image_url || ''),
             price: parseFloat(item.price || 0),
             source: 'taobao',
           }));

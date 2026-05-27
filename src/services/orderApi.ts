@@ -1,6 +1,9 @@
 import { getStoredToken } from './authApi';
 
-import { API_BASE_URL } from '../constants';
+import { API_BASE_URL, CATEGORIES_BASE_URL } from '../constants';
+
+/** Orders list/create proxy (same host as categories-proxy) */
+const ORDERS_PROXY_BASE_URL = CATEGORIES_BASE_URL;
 import { buildSignatureHeaders } from './signature';
 
 export interface ApiResponse<T> {
@@ -34,6 +37,17 @@ export interface CreateOrderRequest {
   paymentMethod: 'deposit' | 'bank' | 'card';
   addressId: string;
   notes?: string;
+  orderMainInfo?: {
+    requestType?: string;
+    logisticsCenter?: string;
+    transferMethod?: string;
+    shippingMethod?: string;
+    customMethod?: string;
+  };
+  orderPaymentInfo?: {
+    dispatchPayment?: string;
+    shipPayment?: string;
+  };
 }
 
 /** Item shape for POST /orders/direct-purchase (from checkout selectedItems) */
@@ -130,6 +144,7 @@ export interface OrderItem {
   designatedShooting?: DesignatedShootingItem[];
   externalOrderId?: string;
   source?: string;
+  otherSite?: string;
 }
 
 export interface FirstTierCost {
@@ -206,13 +221,15 @@ export interface GetOrdersResponse {
   };
   platformCounts?: Record<string, number>;
   viewFilterCounts?: Record<string, number>;
+  requestTypeCounts?: Record<string, number>;
 }
 
-/** Query params for GET /orders */
+/** Query params for GET /orders-proxy */
 export type ViewFilterType = 'all' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed';
 export interface GetOrdersParams {
   page?: number;
   pageSize?: number;
+  lang?: string;
   search?: string;
   datePeriod?: string;
   platform?: string;
@@ -223,6 +240,102 @@ export interface GetOrdersParams {
   periodFrom?: string;
   periodTo?: string;
 }
+
+/** Map app locale to orders-proxy `lang` query param */
+export const mapLocaleToOrdersLang = (locale?: string): 'en' | 'ko' | 'zh' => {
+  if (locale === 'ko' || locale === 'kr') return 'ko';
+  if (locale === 'zh') return 'zh';
+  return 'en';
+};
+
+const deriveSourceFromOtherSite = (otherSite?: string): string => {
+  const site = (otherSite ?? '').toLowerCase();
+  if (site.includes('taobao')) return 'taobao';
+  if (site.includes('1688')) return '1688';
+  return '1688';
+};
+
+const deriveOrderStatusFromProxy = (raw: any): string => {
+  if (raw.orderStatus) return raw.orderStatus;
+  if (raw.progressStatus === 'P_QUOTE') return 'quote';
+  if (raw.paymentStatus === 'pending') return 'pending';
+  if (raw.shippingStatus === 'delivered') return 'completed';
+  return 'confirmed';
+};
+
+const normalizeProxyOrderItem = (item: any): OrderItem => {
+  const source = item.source || deriveSourceFromOtherSite(item.otherSite);
+  return {
+    id: String(item._id ?? item.id ?? ''),
+    offerId: String(item.offerId ?? ''),
+    specId: String(item.specId ?? ''),
+    skuId: String(item.skuId ?? ''),
+    subject: item.subject ?? '',
+    subjectTrans: item.subjectTrans,
+    subjectMultiLang: item.subjectMultiLang,
+    imageUrl: item.imageUrl ?? '',
+    promotionUrl: item.promotionUrl,
+    price: item.price ?? 0,
+    userPrice: item.userPrice,
+    quantity: item.quantity ?? 1,
+    subtotal: item.subtotal ?? (item.price ?? 0) * (item.quantity ?? 1),
+    skuAttributes: item.skuAttributes,
+    companyName: item.companyName ?? item.companyNameMultiLang ?? '',
+    categoryName: item.categoryName ?? item.categoryNameMultiLang,
+    sellerOpenId: item.sellerOpenId ?? '',
+    source,
+    otherSite: item.otherSite,
+  };
+};
+
+/** Normalize GET /orders-proxy document into app Order shape */
+export const normalizeProxyOrder = (raw: any): Order => {
+  const id = String(raw._id ?? raw.id ?? '');
+  const trackingNumbers = Array.isArray(raw.trackingNumbers) ? raw.trackingNumbers : [];
+  const items = (raw.items ?? []).map(normalizeProxyOrderItem);
+
+  return {
+    ...raw,
+    id,
+    _id: raw._id,
+    orderNumber: raw.orderNumber ?? '',
+    orderType: raw.orderType ?? 'General',
+    progressStatus: raw.progressStatus ?? '',
+    orderStatus: deriveOrderStatusFromProxy(raw),
+    shippingStatus: raw.shippingStatus ?? 'not_shipped',
+    warehouseStatus: raw.warehouseStatus ?? 'not_warehoused',
+    paymentStatus: raw.paymentStatus ?? 'pending',
+    paymentMethod: raw.paymentMethod ?? '',
+    firstTierCost: raw.firstTierCost,
+    secondTierCost: raw.secondTierCost,
+    orderPayments: raw.orderPayments,
+    paidAmount: raw.paidAmount,
+    totalAmount: raw.firstTierCost?.totalKRW ?? raw.totalAmount,
+    currency: raw.currency ?? 'KRW',
+    items,
+    shippingAddress: raw.shippingAddress,
+    transferMethod:
+      raw.transferMethod ??
+      raw.orderMainInfo?.transferMethod ??
+      raw.transfermethod ??
+      'ship',
+    warehouseCode: raw.warehouseCode,
+    trackingNumber: raw.trackingNumber ?? trackingNumbers[0],
+    trackingNumbers,
+    childOrders: raw.childOrders ?? [],
+    isParentOrder: raw.isParentOrder ?? false,
+    statusHistory: raw.statusHistory ?? [],
+    customerReturnRequest: raw.customerReturnRequest,
+    refundStatus: raw.refundStatus,
+    isRefundProcessing: raw.isRefundProcessing,
+    createdAt: raw.createdAt ?? '',
+    updatedAt: raw.updatedAt ?? '',
+    orderMainInfo: raw.orderMainInfo,
+    orderPaymentInfo: raw.orderPaymentInfo,
+    addressId: raw.addressId,
+    applicationCategory: raw.applicationCategory,
+  };
+};
 
 /** Order preview (POST /orders/preview) - for detail order */
 export interface OrderPreviewCargo {
@@ -274,20 +387,11 @@ export const orderApi = {
           ? { page: params, pageSize: pageSize ?? 10 }
           : { page: 1, pageSize: 10, ...params };
       const searchParams = new URLSearchParams();
-      if (p.page != null) searchParams.set('page', String(p.page));
-      if (p.pageSize != null) searchParams.set('pageSize', String(p.pageSize));
-      if (p.search) searchParams.set('search', p.search);
-      if (p.datePeriod) searchParams.set('datePeriod', p.datePeriod);
-      if (p.platform) searchParams.set('platform', p.platform);
-      if (p.viewFilter) searchParams.set('viewFilter', p.viewFilter);
-      if (p.progressStatus) searchParams.set('progressStatus', p.progressStatus);
-      if (p.hasSimplifiedClearance !== undefined) searchParams.set('hasSimplifiedClearance', String(p.hasSimplifiedClearance));
-      if (p.transferMethod) searchParams.set('transferMethod', p.transferMethod);
-      if (p.periodFrom) searchParams.set('periodFrom', p.periodFrom);
-      if (p.periodTo) searchParams.set('periodTo', p.periodTo);
+      searchParams.set('page', String(p.page ?? 1));
+      searchParams.set('pagesize', String(p.pageSize ?? 10));
+      searchParams.set('lang', mapLocaleToOrdersLang(p.lang));
       const query = searchParams.toString();
-      const url = `${API_BASE_URL}/orders${query ? `?${query}` : ''}`;
-      const signatureHeaders = await buildSignatureHeaders('GET', url);
+      const url = `${ORDERS_PROXY_BASE_URL}/orders-proxy?${query}`;
 
       const response = await fetch(url, {
         method: 'GET',
@@ -295,7 +399,6 @@ export const orderApi = {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true',
-          ...signatureHeaders,
         },
       });
 
@@ -313,21 +416,37 @@ export const orderApi = {
       if (!response.ok) {
         return {
           success: false,
-          error: responseData?.message || `Request failed with status ${response.status}`,
+          error:
+            responseData?.message ||
+            responseData?.error ||
+            `Request failed with status ${response.status}`,
         };
       }
 
-      if (responseData.status !== 'success') {
+      if (responseData.status && responseData.status !== 'success') {
         return {
           success: false,
-          error: responseData?.message || 'Failed to get orders',
+          error: responseData?.message || responseData?.error || 'Failed to get orders',
         };
       }
+
+      const rawData = responseData.data ?? responseData ?? {};
+      const normalizedOrders = (rawData.orders ?? []).map(normalizeProxyOrder);
 
       return {
         success: true,
         message: responseData.message || 'Orders retrieved successfully',
-        data: responseData.data,
+        data: {
+          orders: normalizedOrders,
+          pagination: rawData.pagination ?? {
+            page: p.page ?? 1,
+            pageSize: p.pageSize ?? 10,
+            total: normalizedOrders.length,
+            totalPages: 1,
+          },
+          requestTypeCounts: rawData.requestTypeCounts,
+          viewFilterCounts: rawData.viewFilterCounts,
+        },
       };
     } catch (error: any) {
       const errorMessage = error.message || 'An unexpected error occurred. Please try again.';
@@ -596,17 +715,15 @@ export const orderApi = {
         };
       }
 
-      const url = `${API_BASE_URL}/orders`;
+      const url = `${ORDERS_PROXY_BASE_URL}/orders-proxy`;
       console.log('🛒 CREATE ORDER REQUEST URL:', url);
       console.log('🛒 CREATE ORDER REQUEST BODY:', JSON.stringify(request, null, 2));
-      const signatureHeaders = await buildSignatureHeaders('POST', url, request);
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true',
-          ...signatureHeaders,
         },
         body: JSON.stringify(request),
       });
@@ -631,21 +748,24 @@ export const orderApi = {
       if (!response.ok) {
         return {
           success: false,
-          error: responseData?.message || `Request failed with status ${response.status}`,
+          error:
+            responseData?.message ||
+            responseData?.error ||
+            `Request failed with status ${response.status}`,
         };
       }
 
-      if (responseData.status !== 'success') {
+      if (responseData.status && responseData.status !== 'success') {
         return {
           success: false,
-          error: responseData?.message || 'Failed to create order',
+          error: responseData?.message || responseData?.error || 'Failed to create order',
         };
       }
 
       return {
         success: true,
         message: responseData.message || 'Order created successfully',
-        data: responseData.data,
+        data: responseData.data ?? responseData,
       };
     } catch (error: any) {
       console.error('🛒 CREATE ORDER ERROR:', error);

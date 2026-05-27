@@ -38,7 +38,6 @@ export const useProductDetailMutation = (
     setIsError(false);
     setError(null);
 
-    console.log("This is test log");
     try {
       const response = await productsApi.getProductDetail(productId, source, country);
       

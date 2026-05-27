@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   Dimensions,
 } from 'react-native';
 import Icon from './Icon';
@@ -14,22 +13,16 @@ import { Product } from '../types';
 import HeartPlusIcon from '../assets/icons/HeartPlusIcon';
 import FamilyStarIcon from '../assets/icons/FamilyStarIcon';
 import { formatPriceKRW } from '../utils/i18nHelpers';
+import { normalizeProductImageUrl } from '../utils/productImageUrl';
+import ProductImage from './ProductImage';
 
 const { width } = Dimensions.get('window');
 const GRID_CARD_WIDTH = (width - SPACING.sm * 2 - SPACING.sm) / 2;
 
-const getProductImageUri = (image?: string) => {
-  if (!image) {
-    return '';
-  }
-
-  return `${image}_200x200.jpg`;
-};
-
 const getPlatformBadgeLabel = (product: Product) =>
   String((product as any).source || (product as any).platform || '').toUpperCase();
 
-const ProductImage = React.memo(
+const ProductImageWithBadge = React.memo(
   ({
     uri,
     style,
@@ -40,14 +33,7 @@ const ProductImage = React.memo(
     badgeLabel: string;
   }) => (
     <View style={{ position: 'relative' }}>
-      {uri ? (
-        <Image
-          source={{ uri }}
-          style={style}
-          resizeMode="cover"
-          fadeDuration={0}
-        />
-      ) : null}
+      <ProductImage uri={uri} style={style} resizeMode="cover" />
 
       {badgeLabel ? (
         <View style={styles.platformBadge}>
@@ -101,7 +87,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
     (product.originalPrice && product.price 
       ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
       : 0);
-  const imageUri = getProductImageUri(product.image);
+  const imageUri = normalizeProductImageUrl(product.image);
   const platformBadgeLabel = getPlatformBadgeLabel(product);
 
   // New In variant - vertical card with image, discount, like button, and product info
@@ -120,7 +106,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
       >
         <View style={{ position: 'relative', width: cardW, height: cardW }}>
           {/* Product image */}
-          <ProductImage
+          <ProductImageWithBadge
             uri={imageUri}
             style={[styles.newInImage, { width: cardW, height: cardW }, imageStyle]}
             badgeLabel={platformBadgeLabel}
@@ -183,7 +169,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
         activeOpacity={0.9}
       >
         <View style={[styles.imageWrapper, isFullWidth && styles.fullWidthImageWrapper]}>
-          <ProductImage
+          <ProductImageWithBadge
             uri={imageUri}
             style={[styles.gridImage, { width: imageW, height: imageH }, isFullWidth && styles.fullWidthImage, imageStyle]}
             badgeLabel={platformBadgeLabel}
@@ -233,7 +219,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
         activeOpacity={0.9}
       >
         <View style={styles.imageWrapper}>
-          <ProductImage
+          <ProductImageWithBadge
             uri={imageUri}
             style={[styles.horizontalImage, { width: cardW, height: imageH }, imageStyle]}
             badgeLabel={platformBadgeLabel}
@@ -284,7 +270,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
       >
         <View style={{ position: 'relative' }}>
           <View style={{ position: 'relative', width: cardW, height: cardW }}>
-            <ProductImage
+            <ProductImageWithBadge
               uri={imageUri}
               style={[styles.moreToLoveImage, { width: cardW + 1, height: imageH }, imageStyle]}
               badgeLabel=""
@@ -361,7 +347,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
         activeOpacity={0.9}
       >
         <View style={{ position: 'relative', width: cardW, height: imageH }}>
-          <ProductImage
+          <ProductImageWithBadge
             uri={imageUri}
             style={[styles.simpleImage, { width: GRID_CARD_WIDTH, height: GRID_CARD_WIDTH }, imageStyle]}
             badgeLabel={platformBadgeLabel}
@@ -383,7 +369,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
       onPress={onPress}
     >
       <View style={styles.productImageContainer}>
-        <ProductImage
+        <ProductImageWithBadge
           uri={imageUri}
           style={[styles.productImage, imageStyle]}
           badgeLabel={platformBadgeLabel}

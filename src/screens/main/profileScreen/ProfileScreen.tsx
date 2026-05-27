@@ -36,6 +36,7 @@ import { useDeleteFromWishlistMutation } from '../../../hooks/useDeleteFromWishl
 import { usePlatformStore } from '../../../store/platformStore';
 import { formatPriceKRW, formatDepositBalance } from '../../../utils/i18nHelpers';
 import { useGetOrdersMutation } from '../../../hooks/useGetOrdersMutation';
+import { mapLocaleToOrdersLang } from '../../../services/orderApi';
 import HeadsetMicIcon from '../../../assets/icons/HeadsetMicIcon';
 import LocationIcon from '../../../assets/icons/LocationIcon';
 import SettingsIcon from '../../../assets/icons/SettingsIcon';
@@ -158,7 +159,7 @@ const ProfileScreen: React.FC = () => {
       fetchUnreadCounts();
 
       // Get order counts from API (fetch larger page size to calculate accurate counts)
-      getOrders({ page: 1, pageSize: 100 });
+      getOrders({ page: 1, pageSize: 100, lang: mapLocaleToOrdersLang(normalizedLocale) });
 
       // Set wishlist and viewed counts from API
       const fetchCounts = async () => {

@@ -18,6 +18,7 @@ import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../../constants';
+import ProductImage from '../../../components/ProductImage';
 import { RootStackParamList, Product, SearchFilters } from '../../../types';
 
 type SearchResultsScreenRouteProp = RouteProp<RootStackParamList, 'Search'>;
@@ -123,8 +124,8 @@ const SearchResultsScreen: React.FC = () => {
       }}
     >
       <View style={styles.productImageContainer}>
-        <Image
-          source={{ uri: item.image }}
+        <ProductImage
+          uri={item.image}
           style={styles.productImage}
           resizeMode="cover"
         />

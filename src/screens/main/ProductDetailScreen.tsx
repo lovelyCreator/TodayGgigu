@@ -37,6 +37,13 @@ import { useCheckoutDirectPurchaseMutation } from '../../hooks/useCheckoutDirect
 import { useTranslation } from '../../hooks/useTranslation';
 import { useToast } from '../../context/ToastContext';
 import { formatPriceKRW, getLocalizedText } from '../../utils/i18nHelpers';
+import {
+  isTaobaoPlatform,
+  normalizeProductImageUrl,
+  normalizeProductImageUrls,
+  pickTaobaoGalleryImages,
+} from '../../utils/productImageUrl';
+import ProductImage from '../../components/ProductImage';
 import { useWishlistStatus } from '../../hooks/useWishlistStatus';
 import { useAddToWishlistMutation } from '../../hooks/useAddToWishlistMutation';
 import { useDeleteFromWishlistMutation } from '../../hooks/useDeleteFromWishlistMutation';
@@ -486,8 +493,10 @@ const ProductDetailScreen: React.FC = () => {
           offerId: item.offerId?.toString() || item.externalId?.toString() || item.id?.toString() || '',
           name: item.name || item.title || '',
           description: item.description || '',
-          images: item.images || (item.image ? [item.image] : []),
-          image: item.image || item.images?.[0] || '',
+          images: normalizeProductImageUrls(
+            item.images?.length ? item.images : item.image ? [item.image] : [],
+          ),
+          image: normalizeProductImageUrl(item.image || item.images?.[0] || ''),
           price: item.price || 0,
           originalPrice: item.originalPrice || item.price || 0,
           category: item.category || { id: '', name: '', icon: '', image: '', subcategories: [] },
@@ -611,12 +620,12 @@ const ProductDetailScreen: React.FC = () => {
       //   source,
       // });
 
-      // Taobao product detail mapping
-      if (source === 'taobao' && data) {
+      // Taobao product detail mapping (use fetch source — route "source" can be stale)
+      const fetchSource = sourceRef.current;
+      if (isTaobaoPlatform(fetchSource) && data) {
         const taobao = data;
 
-        // Images from pic_urls
-        const images: string[] = Array.isArray(taobao.pic_urls) ? taobao.pic_urls : [];
+        const images = pickTaobaoGalleryImages(taobao);
 
         // Build map from sku_id to localized properties if multi_language_info.sku_properties exists
         const localizedSkuPropsMap: Record<string, any[]> = {};
@@ -647,7 +656,7 @@ const ProductDetailScreen: React.FC = () => {
             name,
             price,
             stock: sku.quantity || 0,
-            image: sku.pic_url || images[0] || '',
+            image: normalizeProductImageUrl(sku.pic_url || images[0] || ''),
             attributes: localizedProps,
             specId: sku.spec_id || skuId,
             skuId,
@@ -723,6 +732,7 @@ const ProductDetailScreen: React.FC = () => {
           subject: taobao.title || '',
           subjectTrans: taobao.multi_language_info?.title || taobao.title || '',
           promotionUrl: '',
+          source: 'taobao',
         };
 
         setProduct(mappedProduct);
@@ -990,12 +1000,13 @@ const ProductDetailScreen: React.FC = () => {
     // Use images array from API, or fallback to single image
     const apiImages = (currentProduct as any).images || [];
     if (apiImages.length > 0) {
-      return apiImages;
+      return normalizeProductImageUrls(apiImages);
     }
     
     // Fallback to single image if images array is empty
     if (currentProduct.image) {
-      return [currentProduct.image];
+      const uri = normalizeProductImageUrl(currentProduct.image);
+      return uri ? [uri] : [];
     }
     
     return [];
@@ -1240,8 +1251,8 @@ const ProductDetailScreen: React.FC = () => {
           onPress={() => handleRelatedProductPress(item)}
         >
           <View style={styles.simpleTaobaoCard}>
-            <Image
-              source={{ uri: (item as any).image }}
+            <ProductImage
+              uri={(item as any).image}
               style={styles.simpleTaobaoImage as any}
               resizeMode="cover"
             />
@@ -1786,11 +1797,10 @@ const ProductDetailScreen: React.FC = () => {
                 setImageViewerVisible(true);
               }}
             >
-              <Image
-                source={{ uri: img }}
+              <ProductImage
+                uri={img}
                 style={styles.productImage as any}
                 resizeMode="cover"
-                fadeDuration={300}
               />
             </TouchableOpacity>
           ))}
@@ -2046,8 +2056,8 @@ const ProductDetailScreen: React.FC = () => {
                   onPress={() => handleSelect(option.value)}
                 >
                   {option.image && (
-                    <Image
-                      source={{ uri: option.image }}
+                    <ProductImage
+                      uri={option.image}
                       style={[
                         styles.colorImage,
                         isSelected && styles.selectedColorImage,
@@ -2359,9 +2369,9 @@ const ProductDetailScreen: React.FC = () => {
               {descriptionImages.length > 0 && (
                 <View style={styles.descriptionImagesContainer}>
                   {descriptionImages.map((imgUrl: string, index: number) => (
-                    <Image
+                    <ProductImage
                       key={index}
-                      source={{ uri: imgUrl }}
+                      uri={imgUrl}
                       style={styles.descriptionImage as any}
                       resizeMode="contain"
                     />
@@ -2420,8 +2430,8 @@ const ProductDetailScreen: React.FC = () => {
                     }}
                   >
                     <View style={styles.simpleTaobaoCard}>
-                      <Image
-                        source={{ uri: (item as any).image }}
+                      <ProductImage
+                        uri={(item as any).image}
                         style={styles.simpleTaobaoImage as any}
                         resizeMode="cover"
                       />
@@ -2582,27 +2592,36 @@ const ProductDetailScreen: React.FC = () => {
             />
           </TouchableOpacity>
         </View>
-        <View style={{ flexDirection: 'row'}}>
+        <View style={styles.actionButtonsGroup}>
           <TouchableOpacity
-            style={[styles.addToCartButton, !canAddToCart && styles.disabledButton]}
+            style={[
+              styles.actionButton,
+              styles.addToCartButton,
+              !canAddToCart && styles.disabledButton,
+            ]}
             disabled={isAddingToCart}
             onPress={() => {
               handleAddToCart();
             }}
           >
-            {/* <Ionicons name="cart-outline" size={18} color={COLORS.black} /> */}
             {isAddingToCart ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.xs }}>
+              <View style={styles.actionButtonContent}>
                 <ActivityIndicator size="small" color={COLORS.black} />
                 <Text style={styles.addToCartText}>{t('product.addingToCart')}</Text>
               </View>
             ) : (
-              <Text style={styles.addToCartText}>{t('product.addToCart')}</Text>
+              <Text style={styles.addToCartText} numberOfLines={1}>
+                {t('product.addToCart')}
+              </Text>
             )}
           </TouchableOpacity>
-          
+
           <TouchableOpacity
-            style={[styles.buyNowButton, (!canAddToCart || isAddingToCartForBuyNow) && styles.disabledButton]}
+            style={[
+              styles.actionButton,
+              styles.buyNowButton,
+              (!canAddToCart || isAddingToCartForBuyNow) && styles.disabledButton,
+            ]}
             disabled={!canAddToCart || isAddingToCartForBuyNow}
             onPress={() => {
               if (!isAuthenticated) {
@@ -2634,7 +2653,16 @@ const ProductDetailScreen: React.FC = () => {
               handleBuyNow();
             }}
           >
-            <Text style={styles.buyNowText}>{t('product.buyNow')}</Text>
+            {isAddingToCartForBuyNow ? (
+              <View style={styles.actionButtonContent}>
+                <ActivityIndicator size="small" color={COLORS.white} />
+                <Text style={styles.buyNowText}>{t('product.buyNow')}</Text>
+              </View>
+            ) : (
+              <Text style={styles.buyNowText} numberOfLines={1}>
+                {t('product.buyNow')}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -2684,8 +2712,8 @@ const ProductDetailScreen: React.FC = () => {
           >
             {images.map((img: string, index: number) => (
               <View key={`fullscreen-${img}-${index}`} style={styles.fullScreenImageContainer}>
-                <Image
-                  source={{ uri: img }}
+                <ProductImage
+                  uri={img}
                   style={styles.fullScreenImage as any}
                   resizeMode="contain"
                 />
@@ -3634,42 +3662,55 @@ const styles = StyleSheet.create({
   mainActionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     gap: SPACING.sm,
   },
-  addToCartButton: {
-    // flex: 1,
+  actionButtonsGroup: {
+    flex: 1,
     flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    borderTopLeftRadius: BORDER_RADIUS.full, // Full round button
-    borderBottomLeftRadius: BORDER_RADIUS.full, // Full round button
-    borderWidth: 1,
-    borderColor: '#00000033',
-    // paddingVertical: SPACING.smmd,
+    marginLeft: SPACING.sm,
+  },
+  actionButton: {
+    flex: 1,
+    minHeight: 28,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  addToCartText: {
-    fontSize: FONTS.sizes.md,
-    fontWeight: '700',
-    color: COLORS.black,
-    letterSpacing: 0.5,
-    padding: SPACING.sm,
-  },
-  buyNowButton: {
-    // flex: 1,
-    backgroundColor: COLORS.red,
-    borderTopRightRadius: BORDER_RADIUS.full, // Full round button
-    borderBottomRightRadius: BORDER_RADIUS.full, // Full round button
-    justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#00000033',
   },
+  actionButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  addToCartButton: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: BORDER_RADIUS.full,
+    borderBottomLeftRadius: BORDER_RADIUS.full,
+    borderRightWidth: 0,
+  },
+  addToCartText: {
+    fontSize: FONTS.sizes.smmd,
+    fontWeight: '700',
+    color: COLORS.black,
+    letterSpacing: 0.3,
+    textAlign: 'center',
+  },
+  buyNowButton: {
+    backgroundColor: COLORS.red,
+    borderTopRightRadius: BORDER_RADIUS.full,
+    borderBottomRightRadius: BORDER_RADIUS.full,
+    borderLeftWidth: 0,
+  },
   buyNowText: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.sizes.smmd,
     fontWeight: '700',
     color: COLORS.white,
-    letterSpacing: 0.5,
-    padding: SPACING.sm,
+    letterSpacing: 0.3,
+    textAlign: 'center',
   },
   disabledButton: {
     opacity: 0.5,

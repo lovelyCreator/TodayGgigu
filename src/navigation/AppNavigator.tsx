@@ -196,10 +196,11 @@ const MainTabNavigator = () => {
   }, [shouldNavigateToProfile, navigation, clearNavigateToProfile]); // Depend on all required values
   
   // Calculate tab bar height and padding based on safe area insets
-  const baseTabBarHeight = 70;
-  const basePaddingBottom = 20;
-  const tabBarHeight = baseTabBarHeight + insets.bottom;
-  const paddingBottom = basePaddingBottom + insets.bottom;
+  const TAB_BAR_DOWN_OFFSET = 0;
+  const baseTabBarHeight = 45;
+  const basePaddingBottom = 15;
+  const tabBarHeight = baseTabBarHeight + insets.bottom - TAB_BAR_DOWN_OFFSET;
+  const paddingBottom = basePaddingBottom ;
   
   const LIVE_BUTTON_SIZE = 76;
   const LIVE_BUTTON_OVERHANG = 18;
@@ -315,21 +316,21 @@ const MainTabNavigator = () => {
         //       </View>
         //     )
         //   : undefined,
-        // tabBarActiveTintColor: COLORS.text.red,
-        // tabBarInactiveTintColor: COLORS.black,
-        // tabBarStyle: {
-        //   backgroundColor: COLORS.white,
-        //   borderTopColor: COLORS.borderLight,
-        //   borderTopWidth: 1,
-        //   height: tabBarHeight,
-        //   paddingBottom: paddingBottom,
-        //   paddingTop: 8,
-        //   shadowColor: COLORS.shadow,
-        //   shadowOffset: { width: 0, height: -4 },
-        //   shadowOpacity: 0.1,
-        //   shadowRadius: 8,
-        //   elevation: 8,
-        // },
+        tabBarActiveTintColor: COLORS.text.red,
+        tabBarInactiveTintColor: COLORS.black,
+        tabBarStyle: {
+          backgroundColor: COLORS.white,
+          borderTopColor: COLORS.borderLight,
+          borderTopWidth: 1,
+          height: tabBarHeight,
+          paddingBottom,
+          paddingTop: 8 + TAB_BAR_DOWN_OFFSET,
+          shadowColor: COLORS.shadow,
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.1,
+          shadowRadius: 8,
+          elevation: 8,
+        },
         tabBarLabelStyle: {
           fontSize: 12,
           marginTop: 4,

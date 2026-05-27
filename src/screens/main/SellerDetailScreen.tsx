@@ -22,6 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { translations } from '../../i18n/translations';
 import StarIcon from '../../assets/icons/StarIcon';
 import ArrowBackIcon from '../../assets/icons/ArrowBackIcon';
+import ProductImage from '../../components/ProductImage';
 
 const { width, height } = Dimensions.get('window');
 const PRODUCT_COLUMN_COUNT = 2;
@@ -138,8 +139,8 @@ const SellerDetailScreen: React.FC = () => {
       }}
     >
       <View style={styles.productImageContainer}>
-        <Image
-          source={{ uri: item.image || item.mainImageUrl }}
+        <ProductImage
+          uri={item.image || item.mainImageUrl}
           style={styles.productImage}
           resizeMode="cover"
         />

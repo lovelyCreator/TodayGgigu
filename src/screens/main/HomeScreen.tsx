@@ -41,9 +41,10 @@ import { useAddToWishlistMutation } from '../../hooks/useAddToWishlistMutation';
 import { useDeleteFromWishlistMutation } from '../../hooks/useDeleteFromWishlistMutation';
 import { useSocket } from '../../context/SocketContext';
 import { inquiryApi } from '../../services/inquiryApi';
-import { orderApi, Order, OrderItem } from '../../services/orderApi';
+import { orderApi, Order, OrderItem, mapLocaleToOrdersLang } from '../../services/orderApi';
 import Svg, { Circle, Path } from 'react-native-svg';
 const LogoImage = require('../../assets/images/logo.png');
+const KAKAO_CS_CHANNEL_URL = 'http://pf.kakao.com/_xlXLEX';
 
 /** Figma TG_Main_S393: 393×3140, gutter 16 → content 361. Group 76728: H 472, left 16 */
 const HOME_GUTTER = 16;
@@ -67,10 +68,69 @@ const GRID_CARD_WIDTH = (width - SPACING.md * 2 - SPACING.md) / 2;
 
 type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Main'>;
 
+const getHomeMemberDisplayName = (user: {
+  userName?: string;
+  users_id?: string;
+  name?: string;
+  email?: string;
+}) =>
+  user.userName?.trim() ||
+  user.users_id?.trim() ||
+  user.name?.trim() ||
+  user.email?.trim() ||
+  'User';
+
+const isValidMemberAvatarUri = (avatar?: string | null): boolean =>
+  !!avatar &&
+  typeof avatar === 'string' &&
+  avatar.trim() !== '' &&
+  !avatar.includes('via.placeholder.com');
+
+type MemberAvatarProps = {
+  uri?: string | null;
+  displayName: string;
+  size?: number;
+};
+
+const MemberAvatar: React.FC<MemberAvatarProps> = ({ uri, displayName, size = 48 }) => {
+  const [loadFailed, setLoadFailed] = useState(false);
+  useEffect(() => {
+    setLoadFailed(false);
+  }, [uri]);
+  const initial = (displayName.trim().charAt(0) || 'U').toUpperCase();
+  const avatarUri = isValidMemberAvatarUri(uri) && !loadFailed ? uri!.trim() : null;
+  const radius = size / 2;
+
+  if (!avatarUri) {
+    return (
+      <View
+        style={[
+          styles.uosAvatar,
+          styles.uosAvatarFallback,
+          { width: size, height: size, borderRadius: radius },
+        ]}
+      >
+        <Text style={[styles.uosAvatarFallbackText, { fontSize: Math.round(size * 0.42) }]}>
+          {initial}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri: avatarUri }}
+      style={[styles.uosAvatar, { width: size, height: size, borderRadius: radius }]}
+      onError={() => setLoadFailed(true)}
+    />
+  );
+};
+
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
 
   const { user, isGuest, isAuthenticated } = useAuth();
+  const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
 
   useEffect(() => {
@@ -80,7 +140,11 @@ const HomeScreen: React.FC = () => {
       return;
     }
     (async () => {
-      const res = await orderApi.getOrders({ page: 1, pageSize: 3 });
+      const res = await orderApi.getOrders({
+        page: 1,
+        pageSize: 3,
+        lang: mapLocaleToOrdersLang(locale),
+      });
       if (cancelled) return;
       if (res.success && res.data?.orders) {
         setRecentOrders(res.data.orders);
@@ -89,17 +153,12 @@ const HomeScreen: React.FC = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [isAuthenticated, isGuest, user?.id]);
-  
-  // import icon locally to avoid circular deps
+  }, [isAuthenticated, isGuest, user?.id, locale]);
 
   const { showToast } = useToast();
   
   // Use wishlist status hook to check if products are liked based on external IDs
   const { isProductLiked, refreshExternalIds, addExternalId, removeExternalId } = useWishlistStatus();
-  
-  // Get locale and platform
-  const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
   const { selectedPlatform, setSelectedPlatform } = usePlatformStore();
   
   // Add to wishlist mutation
@@ -781,6 +840,14 @@ const HomeScreen: React.FC = () => {
     Linking.openURL(tel).catch(() => {});
   }, []);
 
+  const openExternalUrl = useCallback(async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      showToast('Unable to open link', 'error');
+    }
+  }, [showToast]);
+
   const formatTrackingDate = (iso?: string) => {
     if (!iso) return '';
     const d = new Date(iso);
@@ -815,15 +882,23 @@ const HomeScreen: React.FC = () => {
 
   const getStatusText = (order: Order) => {
     const map: Record<string, { en: string; ko: string; zh: string }> = {
+      p_quote: { en: 'Quote pending', ko: '견적대기', zh: '待报价' },
       delivered: { en: 'Delivered', ko: '배송 완료', zh: '已签收' },
       shipped: { en: 'Shipped', ko: '발송됨', zh: '已发货' },
+      not_shipped: { en: 'Not shipped', ko: '미발송', zh: '未发货' },
       processing: { en: 'Processing', ko: '처리중', zh: '处理中' },
       pending: { en: 'Pending', ko: '대기중', zh: '待处理' },
+      quote: { en: 'Quote pending', ko: '견적대기', zh: '待报价' },
       paid: { en: 'Paid', ko: '결제완료', zh: '已支付' },
       cancelled: { en: 'Cancelled', ko: '취소됨', zh: '已取消' },
     };
-    const key = (order.shippingStatus || order.orderStatus || '').toLowerCase();
-    return map[key]?.[locale] || order.shippingStatus || order.orderStatus || '';
+    const key = (
+      order.progressStatus ||
+      order.shippingStatus ||
+      order.orderStatus ||
+      ''
+    ).toLowerCase();
+    return map[key]?.[locale] || order.progressStatus || order.shippingStatus || order.orderStatus || '';
   };
 
   const handleCopyTracking = (tracking?: string) => {
@@ -835,18 +910,11 @@ const HomeScreen: React.FC = () => {
   const renderUserOrderSummaryCard = () => {
     if (!isAuthenticated || isGuest || !user) return null;
 
-    const displayName = (user as any).userName || (user as any).users_id || user.name || user.email || 'User';
+    const displayName = getHomeMemberDisplayName(user as any);
     const memberLabel =
       locale === 'ko' ? '회원'
       : locale === 'zh' ? '会员'
       : 'Member';
-    const hasRealAvatar =
-      user.avatar &&
-      typeof user.avatar === 'string' &&
-      user.avatar.trim() !== '' &&
-      !user.avatar.includes('via.placeholder.com');
-    const avatarUri = hasRealAvatar ? user.avatar : null;
-    const avatarInitial = (displayName.trim().charAt(0) || 'U').toUpperCase();
 
     const primaryAddress: any =
       (user.addresses || []).find((a: any) => a.isDefault) ||
@@ -996,13 +1064,7 @@ const HomeScreen: React.FC = () => {
       <View style={styles.uosOuter}>
         {/* User header */}
         <View style={styles.uosUserHeader}>
-          {avatarUri ? (
-            <Image source={{ uri: avatarUri }} style={styles.uosAvatar} />
-          ) : (
-            <View style={[styles.uosAvatar, styles.uosAvatarFallback]}>
-              <Text style={styles.uosAvatarFallbackText}>{avatarInitial}</Text>
-            </View>
-          )}
+          <MemberAvatar uri={user.avatar} displayName={displayName} />
           <View style={styles.uosUserNameCol}>
             <Text style={styles.uosUserName} numberOfLines={1}>{displayName}</Text>
             <Text style={styles.uosUserMember}>{memberLabel}</Text>
@@ -1383,14 +1445,24 @@ const HomeScreen: React.FC = () => {
 
       <View style={styles.csQuickRow}>
         {([
-          {  title: 'home.csKakaoTitle', image: require('../../assets/icons/cs-kakao.png') },
+          {
+            title: 'home.csKakaoTitle',
+            image: require('../../assets/icons/cs-kakao.png'),
+            url: KAKAO_CS_CHANNEL_URL,
+          },
           { title: 'home.csWechatTitle', image: require('../../assets/icons/cs-wechat.png') },
           { title: 'home.csOneTitle', image: require('../../assets/icons/cs-one.png') },
-        ] as Array<{ bg: string; title: string; icon?: string; image?: any }>).map((q) => (
+        ] as Array<{ bg?: string; title: string; icon?: string; image?: any; url?: string }>).map((q) => (
           <TouchableOpacity
             key={q.title}
             style={styles.csQuickCol}
-            onPress={() => navigation.navigate('CustomerService' as never)}
+            onPress={() => {
+              if (q.url) {
+                openExternalUrl(q.url);
+              } else {
+                navigation.navigate('CustomerService' as never);
+              }
+            }}
             activeOpacity={0.88}
           >
             <View style={[styles.csQuickCircle, { backgroundColor: q.bg }]}>

@@ -760,35 +760,75 @@ export const getStoredUserData = async (): Promise<User | null> => {
   }
 };
 
-// Get profile API
+/** Map GET /v1/users/me `user` object into app User shape */
+export const mapProfileApiUserToUser = (
+  user: Record<string, any>,
+  existingUser?: Partial<User>,
+): Partial<User> => {
+  const mappedAddresses: Address[] = (user.addresses || []).map((addr: any) => ({
+    id: addr._id || addr.id || '',
+    type: (addr.customerClearanceType === 'business' || addr.customMethod === 'business'
+      ? 'work'
+      : 'home') as Address['type'],
+    name: addr.recipient || '',
+    street: addr.detailedAddress || '',
+    city: addr.mainAddress || '',
+    state: '',
+    zipCode: addr.zipCode || '',
+    country: '',
+    phone: addr.contact || '',
+    isDefault: addr.defaultAddress || false,
+  }));
+
+  return {
+    ...existingUser,
+    id: user._id || user.user_id || existingUser?.id || '',
+    memberId: user.userUniqueId || user.tjMemberId || user.users_id || existingUser?.memberId,
+    email: user.email || existingUser?.email || '',
+    name: user.userName || user.users_id || existingUser?.name || '',
+    phone: user.phone || existingUser?.phone,
+    birthday: user.birthday || existingUser?.birthday,
+    gender: user.gender || existingUser?.gender,
+    avatar: user.pictureUrl || existingUser?.avatar,
+    addresses: mappedAddresses.length > 0 ? mappedAddresses : existingUser?.addresses || [],
+    wishlist: user.wishlist || existingUser?.wishlist || [],
+    depositBalance: user.depositBalance ?? existingUser?.depositBalance ?? 0,
+    points: user.points ?? existingUser?.points ?? 0,
+    level: user.level || existingUser?.level,
+    referredCount: user.referredCount ?? existingUser?.referredCount ?? 0,
+    userUniqueId: user.userUniqueId || user.tjMemberId || existingUser?.userUniqueId,
+    userName: user.userName || existingUser?.userName,
+    notes: user.notes || existingUser?.notes,
+    searchKeywords: user.searchKeywords || existingUser?.searchKeywords || [],
+    googleId: user.googleId || existingUser?.googleId,
+    isBusiness: user.isBusinesser ?? user.isBusiness ?? existingUser?.isBusiness ?? false,
+    isEmailVerified: user.isEmailVerified ?? existingUser?.isEmailVerified ?? false,
+    authProvider: user.authProvider || existingUser?.authProvider || 'local',
+    referralCode: user.referralCode || existingUser?.referralCode,
+    lastLogin: user.lastLogin || existingUser?.lastLogin,
+    referredBy: user.referredBy || existingUser?.referredBy,
+    updatedAt: new Date(),
+  };
+};
+
+export const formatProfileAddressLabel = (addr: Record<string, any>): string => {
+  const parts = [addr.recipient, addr.mainAddress, addr.detailedAddress].filter(Boolean);
+  return parts.join(' · ') || addr.zipCode || '';
+};
+
+// Get profile API — GET /v1/users/me
 export interface GetProfileResponse {
   success: boolean;
   message?: string;
   statusCode?: number;
   data?: {
-    user: {
-      _id: string;
-      email: string;
-      user_id: string;
-      userName?: string;
-      userUniqueId?: string;
-      phone?: string;
-      isBusiness?: boolean;
-      isEmailVerified?: boolean;
-      authProvider?: string;
-      wishlist?: string[];
-      points?: number;
-      addresses?: any[];
-      createdAt?: string;
-      updatedAt?: string;
-      referralCode?: string;
-      lastLogin?: string;
-      birthday?: string;
-      gender?: string;
-      mainAddress?: string;
-      pictureUrl?: string;
-      [key: string]: any;
-    };
+    user: Record<string, any>;
+    token?: string;
+    refreshToken?: string;
+    expiresAt?: string;
+    wishlist?: string[];
+    cartCount?: number;
+    searchKeywords?: string[];
   };
   error?: string;
 }

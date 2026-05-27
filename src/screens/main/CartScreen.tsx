@@ -23,7 +23,15 @@ import {
 } from 'react-native-image-picker';
 import { requestPhotoLibraryPermission } from '../../utils/permissions';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useAuth } from '../../context/AuthContext';
+import { useCreateOrderMutation } from '../../hooks/useCreateOrderMutation';
 import { cartApi, CartItem, MultiLang } from '../../services/cartApi';
+import {
+  getProfile,
+  mapProfileApiUserToUser,
+  formatProfileAddressLabel,
+} from '../../services/authApi';
+import { formatPriceKRW } from '../../utils/i18nHelpers';
 
 interface ExtraService {
   id: string;
@@ -160,9 +168,22 @@ const mapCartItemToCard = (
   };
 };
 
+type ProfileAddress = {
+  _id: string;
+  recipient?: string;
+  mainAddress?: string;
+  detailedAddress?: string;
+  zipCode?: string;
+  contact?: string;
+  defaultAddress?: boolean;
+  customerClearanceType?: string;
+  customMethod?: string;
+};
+
 const CartScreen: React.FC = () => {
   const { t, locale } = useTranslation();
   const navigation = useNavigation<any>();
+  const { user, isGuest, isAuthenticated, updateUser } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState<number>(0);
   const [showPeriodMenu, setShowPeriodMenu] = useState(false);
@@ -201,6 +222,33 @@ const CartScreen: React.FC = () => {
   >('rocketPallet');
   const [businessInfoSelected, setBusinessInfoSelected] = useState('');
   const [recipientInfoSelected, setRecipientInfoSelected] = useState('');
+  const [profileAddresses, setProfileAddresses] = useState<ProfileAddress[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [depositBalance, setDepositBalance] = useState(0);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+
+  const { mutate: createOrder, isLoading: isSubmittingOrder } = useCreateOrderMutation({
+    onSuccess: () => {
+      setShowOrderModal(false);
+      Alert.alert(
+        t('cartOrder.alerts.notice'),
+        t('cartOrder.orderModal.orderSubmitSuccess'),
+        [
+          {
+            text: t('cartOrder.alerts.confirm'),
+            onPress: () => {
+              loadCart();
+              navigation.navigate('BuyList' as never);
+            },
+          },
+        ],
+      );
+    },
+    onError: (error) => {
+      Alert.alert(t('cartOrder.alerts.error'), error || t('cartOrder.orderModal.orderSubmitFailed'));
+    },
+  });
 
   const svcKey = (id: string) => id.replace(/^svc-/, '').replace(/-/g, '');
   const catKey = (id: string) => id.replace(/^cat-/, '');
@@ -470,6 +518,201 @@ const CartScreen: React.FC = () => {
 
   const totalQty = filteredCards.reduce((s, c) => s + c.quantity, 0);
   const grandTotal = filteredCards.reduce((s, c) => s + c.quantity * c.unitPrice, 0);
+  const checkedCards = cards.filter((c) => c.checked);
+  const checkedQty = checkedCards.reduce((s, c) => s + c.quantity, 0);
+  const checkedTotal = checkedCards.reduce((s, c) => s + c.quantity * c.unitPrice, 0);
+
+  const applyProfileFromApi = useCallback(
+    (apiUser: Record<string, any>) => {
+      const addresses: ProfileAddress[] = (apiUser.addresses || []).map((addr: any) => ({
+        _id: addr._id || addr.id || '',
+        recipient: addr.recipient,
+        mainAddress: addr.mainAddress,
+        detailedAddress: addr.detailedAddress,
+        zipCode: addr.zipCode,
+        contact: addr.contact,
+        defaultAddress: addr.defaultAddress,
+        customerClearanceType: addr.customerClearanceType || addr.customMethod,
+        customMethod: addr.customMethod || addr.customerClearanceType,
+      }));
+
+      setProfileAddresses(addresses);
+      setDepositBalance(apiUser.depositBalance ?? 0);
+
+      const defaultAddr =
+        addresses.find((a) => a.defaultAddress) || addresses[0] || null;
+
+      if (defaultAddr) {
+        setSelectedAddressId(defaultAddr._id);
+        setRecipientInfoSelected(formatProfileAddressLabel(defaultAddr));
+        const isBusiness =
+          defaultAddr.customerClearanceType === 'business' ||
+          defaultAddr.customMethod === 'business';
+        setCustomsMethod(isBusiness ? 'business' : 'personal');
+      } else {
+        setSelectedAddressId(null);
+        setRecipientInfoSelected('');
+      }
+
+      const businessLabel = apiUser.isBusinesser
+        ? `${apiUser.userName || apiUser.users_id || ''} (${apiUser.userUniqueId || apiUser.tjMemberId || ''})`
+        : t('cartOrder.orderModal.personal');
+      setBusinessInfoSelected(businessLabel);
+
+      updateUser(mapProfileApiUserToUser(apiUser, user || undefined));
+    },
+    [t, updateUser, user],
+  );
+
+  const showRecipientPicker = useCallback(() => {
+    if (profileAddresses.length === 0) {
+      Alert.alert(t('cartOrder.alerts.notice'), t('cartOrder.orderModal.noAddress'));
+      return;
+    }
+    Alert.alert(
+      t('cartOrder.orderModal.selectRecipient'),
+      undefined,
+      [
+        ...profileAddresses.map((addr) => ({
+          text: formatProfileAddressLabel(addr),
+          onPress: () => {
+            setSelectedAddressId(addr._id);
+            setRecipientInfoSelected(formatProfileAddressLabel(addr));
+            const isBusiness =
+              addr.customerClearanceType === 'business' || addr.customMethod === 'business';
+            setCustomsMethod(isBusiness ? 'business' : 'personal');
+          },
+        })),
+        { text: t('cartOrder.alerts.cancel'), style: 'cancel' as const },
+      ],
+    );
+  }, [profileAddresses, t]);
+
+  const handlePressOrderNow = useCallback(async () => {
+    if (checkedCards.length === 0) {
+      Alert.alert(
+        t('cartOrder.alerts.notice'),
+        t('cartOrder.alerts.noItemsSelected'),
+        [{ text: t('cartOrder.alerts.confirm') }],
+      );
+      return;
+    }
+
+    if (isGuest || !isAuthenticated) {
+      navigation.navigate('Auth' as never, { screen: 'Login' } as never);
+      return;
+    }
+
+    setProfileLoading(true);
+    try {
+      const res = await getProfile();
+      if (res.success && res.data?.user) {
+        applyProfileFromApi(res.data.user);
+        setShowOrderModal(true);
+      } else {
+        Alert.alert(
+          t('cartOrder.alerts.error'),
+          res.error || t('cartOrder.orderModal.orderFailed'),
+        );
+      }
+    } catch {
+      Alert.alert(t('cartOrder.alerts.error'), t('cartOrder.orderModal.orderFailed'));
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [
+    applyProfileFromApi,
+    checkedCards.length,
+    isAuthenticated,
+    isGuest,
+    navigation,
+    t,
+  ]);
+
+  const handleConfirmOrder = useCallback(async () => {
+    if (!selectedAddressId) {
+      Alert.alert(t('cartOrder.alerts.notice'), t('cartOrder.orderModal.noAddress'));
+      return;
+    }
+
+    const cartItemIds = checkedCards.map((c) => c.id);
+    if (cartItemIds.length === 0) {
+      Alert.alert(t('cartOrder.alerts.notice'), t('cartOrder.alerts.noItemsSelected'));
+      return;
+    }
+
+    const quantities: Record<string, number> = {};
+    checkedCards.forEach((c) => {
+      quantities[c.id] = c.quantity;
+    });
+
+    const orderTypeMap: Record<typeof applicationType, 'General' | 'VVIC' | 'Rocket'> = {
+      sea: 'General',
+      air: 'General',
+      rocket: 'Rocket',
+    };
+    const transferMethodMap: Record<typeof applicationType, 'air' | 'ship'> = {
+      sea: 'ship',
+      air: 'air',
+      rocket: 'ship',
+    };
+    const transferMethod = transferMethodMap[applicationType];
+
+    setCheckoutLoading(true);
+    try {
+      const checkoutRes = await cartApi.checkout(quantities);
+      if (!checkoutRes.success || !checkoutRes.data) {
+        Alert.alert(
+          t('cartOrder.alerts.error'),
+          checkoutRes.message || t('cartOrder.orderModal.orderSubmitFailed'),
+        );
+        return;
+      }
+
+      const checkoutData = checkoutRes.data;
+      const netExpectedTotalKRW = Math.round(
+        (checkoutData.productTotalKRW ?? 0) + (checkoutData.shippingTotalKRW ?? 0),
+      );
+
+      await createOrder({
+        cartItems: cartItemIds,
+        quantities,
+        netExpectedTotalKRW,
+        estimatedShippingCostBySeller: checkoutData.estimatedShippingCostBySeller,
+        orderType: orderTypeMap[applicationType],
+        transferMethod,
+        flow: 'general',
+        paymentMethod: 'deposit',
+        addressId: selectedAddressId,
+        orderMainInfo: {
+          requestType: 'Purchase agency',
+          logisticsCenter,
+          transferMethod,
+          shippingMethod,
+          customMethod: customsMethod,
+        },
+        orderPaymentInfo: {
+          dispatchPayment: purchasePayment,
+          shipPayment: shippingPayment,
+        },
+      });
+    } catch {
+      // onError alert handled by mutation
+    } finally {
+      setCheckoutLoading(false);
+    }
+  }, [
+    applicationType,
+    checkedCards,
+    createOrder,
+    customsMethod,
+    logisticsCenter,
+    purchasePayment,
+    selectedAddressId,
+    shippingMethod,
+    shippingPayment,
+    t,
+  ]);
 
   const renderCard = (card: CartCard) => {
     const subtotal = card.quantity * card.unitPrice;
@@ -771,10 +1014,22 @@ const CartScreen: React.FC = () => {
         </ScrollView>
 
         <View style={styles.summaryBar}>
-          <Text style={styles.summaryText}>{t('cartOrder.summary.totalQty')} {totalQty}</Text>
-          <Text style={styles.summaryTotal}>{t('cartOrder.summary.total')} ¥{grandTotal.toFixed(2)}</Text>
-          <TouchableOpacity style={styles.orderBtn} onPress={() => setShowOrderModal(true)}>
-            <Text style={styles.orderBtnText}>{t('cartOrder.summary.order')}</Text>
+          <Text style={styles.summaryText}>
+            {t('cartOrder.summary.totalQty')} {checkedQty > 0 ? checkedQty : totalQty}
+          </Text>
+          <Text style={styles.summaryTotal}>
+            {t('cartOrder.summary.total')} ¥{(checkedQty > 0 ? checkedTotal : grandTotal).toFixed(2)}
+          </Text>
+          <TouchableOpacity
+            style={[styles.orderBtn, profileLoading && styles.orderBtnDisabled]}
+            onPress={handlePressOrderNow}
+            disabled={profileLoading}
+          >
+            {profileLoading ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <Text style={styles.orderBtnText}>{t('cartOrder.summary.order')}</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -806,6 +1061,10 @@ const CartScreen: React.FC = () => {
                   <View style={styles.orderSectionBar} />
                   <Text style={styles.orderSectionTitle}>{t('cartOrder.orderModal.depositPayment')}</Text>
                 </View>
+
+                <Text style={styles.depositBalanceText}>
+                  {t('cartOrder.orderModal.depositBalance')}: {formatPriceKRW(depositBalance)}
+                </Text>
 
                 <View style={styles.orderFieldRow}>
                   <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.purchasePayment')}</Text>
@@ -930,28 +1189,17 @@ const CartScreen: React.FC = () => {
               <View style={styles.orderSection}>
                 <View style={styles.orderFieldRow}>
                   <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.businessInfo')}</Text>
-                  <TouchableOpacity
-                    style={styles.selectBtn}
-                    onPress={() =>
-                      setBusinessInfoSelected(businessInfoSelected ? '' : t('cartOrder.orderModal.defaultBusiness'))
-                    }
-                  >
-                    <Text style={styles.selectBtnText} numberOfLines={1}>
+                  <View style={styles.selectBtn}>
+                    <Text style={styles.selectBtnText} numberOfLines={2}>
                       {businessInfoSelected || t('cartOrder.orderModal.selectPlaceholder')}
                     </Text>
-                    <Icon name="chevron-forward" size={14} color={COLORS.gray[500]} />
-                  </TouchableOpacity>
+                  </View>
                 </View>
 
                 <View style={styles.orderFieldRow}>
                   <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.recipientInfo')}</Text>
-                  <TouchableOpacity
-                    style={styles.selectBtn}
-                    onPress={() =>
-                      setRecipientInfoSelected(recipientInfoSelected ? '' : t('cartOrder.orderModal.defaultRecipient'))
-                    }
-                  >
-                    <Text style={styles.selectBtnText} numberOfLines={1}>
+                  <TouchableOpacity style={styles.selectBtn} onPress={showRecipientPicker}>
+                    <Text style={styles.selectBtnText} numberOfLines={2}>
                       {recipientInfoSelected || t('cartOrder.orderModal.selectPlaceholder')}
                     </Text>
                     <Icon name="chevron-forward" size={14} color={COLORS.gray[500]} />
@@ -968,10 +1216,19 @@ const CartScreen: React.FC = () => {
                 <Text style={styles.modalCancelText}>{t('cartOrder.orderModal.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalFooterBtn, styles.modalConfirmBtn]}
-                onPress={() => setShowOrderModal(false)}
+                style={[
+                  styles.modalFooterBtn,
+                  styles.modalConfirmBtn,
+                  (isSubmittingOrder || checkoutLoading) && styles.orderBtnDisabled,
+                ]}
+                onPress={handleConfirmOrder}
+                disabled={isSubmittingOrder || checkoutLoading}
               >
-                <Text style={styles.modalConfirmText}>{t('cartOrder.orderModal.orderConfirm')}</Text>
+                {isSubmittingOrder || checkoutLoading ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : (
+                  <Text style={styles.modalConfirmText}>{t('cartOrder.orderModal.orderConfirm')}</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -2510,6 +2767,15 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
     fontWeight: '600',
+  },
+  depositBalanceText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
+    marginBottom: SPACING.sm,
+    fontWeight: '600',
+  },
+  orderBtnDisabled: {
+    opacity: 0.6,
   },
 });
 

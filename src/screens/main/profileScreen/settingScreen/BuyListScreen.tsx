@@ -60,7 +60,7 @@ import CartIcon from '../../../../assets/icons/CartIcon';
 import EditIcon from '../../../../assets/icons/EditIcon';
 import { WebView } from 'react-native-webview';
 import Clipboard from '@react-native-clipboard/clipboard';
-import { orderApi } from '../../../../services/orderApi';
+import { orderApi, mapLocaleToOrdersLang } from '../../../../services/orderApi';
 
 type BuyListScreenNavigationProp = StackNavigationProp<RootStackParamList, 'BuyList'>;
 type BuyListScreenRouteProp = RouteProp<RootStackParamList, 'BuyList'>;
@@ -76,6 +76,7 @@ interface OrderItem {
   itemId?: string; // MongoDB _id from API
   subtotal: number;
   source?: string;
+  otherSite?: string;
   specId?: string;
   skuId?: string;
   skuAttributes?: {
@@ -102,6 +103,13 @@ interface Order {
   inquiryId?: string; // Inquiry ID if inquiry exists for this order
   unreadCount?: number; // Unread message count for this inquiry
   shippingAddress?: any; // Address information
+  transferMethod?: string;
+  firstTierCost?: any;
+  trackingNumbers?: string[];
+  createdAt?: string;
+  paymentMethod?: string;
+  paymentStatus?: string;
+  orderMainInfo?: any;
 }
 
 interface StoreGroup {
@@ -154,7 +162,7 @@ const STATUS_GROUPS = [
     key: 'purchase_agency',
     title: '발주관리',
     titleKey: 'pages.orders.groups.purchaseAgency',
-    statuses: ['BUY_PAY_WAIT', 'BUYING_MANUAL', 'BUYING_PROBLEM', 'BUY_FINAL_DONE'],
+    statuses: ['P_QUOTE', 'BUY_PAY_WAIT', 'BUYING_MANUAL', 'BUYING_PROBLEM', 'BUY_FINAL_DONE'],
   },
   {
     key: 'warehouse',
@@ -181,6 +189,7 @@ const PROGRESS_STATUS_META: Record<string, {
   group: Order['statusGroup'];
   translationKey: string;
 }> = {
+  P_QUOTE: { tab: 'category', group: 'purchase_agency', translationKey: 'pages.orders.status.quotePending' },
   BUY_PAY_WAIT: { tab: 'unpaid', group: 'purchase_agency', translationKey: 'pages.orders.status.paymentPending' },
   BUY_PAY_DONE: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.paymentComplete' },
   BUYING_MANUAL: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.purchasing' },
@@ -761,7 +770,9 @@ const BuyListScreen = () => {
             itemId: item._id || item.id || '',
             subtotal: item.subtotal ?? (item.price * (item.quantity || 1) || 0),
             skuAttributes: item.skuAttributes || [],
-            source: item.source || '1688',
+            source:
+              item.source ||
+              (String(item.otherSite ?? '').includes('taobao') ? 'taobao' : '1688'),
             specId: item.specId || '',
             skuId: String(item.skuId ?? ''),
           })),
@@ -776,6 +787,9 @@ const BuyListScreen = () => {
           warehouseCode: order.warehouseCode,
           createdAt: order.createdAt,
           paidAmount: order.paidAmount,
+          paymentStatus: order.paymentStatus,
+          orderMainInfo: order.orderMainInfo,
+          applicationCategory: order.applicationCategory,
         };
       });
       setOrders(mappedOrders);
@@ -825,33 +839,12 @@ const BuyListScreen = () => {
   getOrdersRef.current = getOrders;
 
   const fetchOrders = useCallback(() => {
-    const hasSimplifiedClearance =
-      selectedCustomsMethod === '간이통관' ? true :
-      selectedCustomsMethod === '일반통관' ? false :
-      undefined;
-
-    const transferMethod =
-      selectedTransportMethod === '항공' ? 'air' :
-      selectedTransportMethod === '선박' ? 'ship' :
-      undefined;
-
-    const formatDate = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
     getOrdersRef.current({
       page: 1,
-      pageSize: 20,
-      search: filters.orderNumber || undefined,
-      datePeriod: 'last_6_months',
-      platform: filterPlatform || undefined,
-      viewFilter: 'all',
-      progressStatus: selectedProgressStatus || undefined,
-      hasSimplifiedClearance,
-      transferMethod: transferMethod as 'air' | 'ship' | undefined,
-      periodFrom: selectedStartDate ? formatDate(selectedStartDate) : undefined,
-      periodTo: selectedEndDate ? formatDate(selectedEndDate) : undefined,
+      pageSize: 10,
+      lang: mapLocaleToOrdersLang(locale),
     });
-  }, [filters.orderNumber, filterPlatform, selectedProgressStatus, selectedCustomsMethod, selectedTransportMethod, selectedStartDate, selectedEndDate]);
+  }, [locale]);
 
   const fetchOrdersRef = useRef(fetchOrders);
   fetchOrdersRef.current = fetchOrders;
@@ -1352,6 +1345,27 @@ const BuyListScreen = () => {
   const filteredOrders = useMemo(
     () => {
       let result = orders;
+      if (filters.orderNumber.trim()) {
+        const q = filters.orderNumber.trim().toLowerCase();
+        result = result.filter(order =>
+          order.orderNumber?.toLowerCase().includes(q),
+        );
+      }
+      if (filterPlatform) {
+        result = result.filter(order =>
+          order.items?.some(item => {
+            const site = String((item as any).otherSite ?? item.source ?? '').toLowerCase();
+            if (filterPlatform === 'taobao') return site.includes('taobao');
+            if (filterPlatform === '1688') return site.includes('1688');
+            return true;
+          }),
+        );
+      }
+      if (selectedTransportMethod === '항공') {
+        result = result.filter(order => order.transferMethod === 'air');
+      } else if (selectedTransportMethod === '선박') {
+        result = result.filter(order => order.transferMethod === 'ship');
+      }
       // Filter by active tab (status group key)
       if (activeTab !== 'all') {
         result = result.filter(order => order.statusGroup === activeTab);
@@ -1362,7 +1376,14 @@ const BuyListScreen = () => {
       }
       return result;
     },
-    [activeTab, orders, selectedProgressStatus],
+    [
+      activeTab,
+      orders,
+      selectedProgressStatus,
+      filters.orderNumber,
+      filterPlatform,
+      selectedTransportMethod,
+    ],
   );
 
   const groupedOrdersForCategory = useMemo(() => {

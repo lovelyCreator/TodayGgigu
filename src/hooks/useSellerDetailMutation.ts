@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { productsApi } from '../services/productsApi';
+import { normalizeProductImageUrl } from '../utils/productImageUrl';
 
 interface UseSellerDetailMutationOptions {
   onSuccess?: (data: any) => void;
@@ -62,10 +63,10 @@ export const useSellerDetailMutation = (
             id: item.item_id?.toString() || '',
             externalId: item.item_id?.toString() || '',
             title: item.multi_language_info?.title || item.title || '',
-            image: item.main_image_url || '',
+            image: normalizeProductImageUrl(item.main_image_url || ''),
             price: parseFloat(item.price || '0'),
             source: 'taobao',
-            mainImageUrl: item.main_image_url || '',
+            mainImageUrl: normalizeProductImageUrl(item.main_image_url || ''),
             shopName: item.shop_name || '',
           }));
 

@@ -14,9 +14,35 @@ import { uploadToCloudinary, uploadVideoToCloudinary } from './cloudinary';
 
 import { API_BASE_URL, CATEGORIES_BASE_URL } from '../constants';
 import { buildSignatureHeaders } from './signature';
+import { normalizeProductImageUrl } from '../utils/productImageUrl';
 
 // In-memory cache for category tree (clears on app restart)
 const categoryTreeCache: Record<string, CategoriesTreeResponse> = {};
+
+/**
+ * Map the app's generic sort values to Taobao Global's accepted `sort` codes.
+ * Taobao only accepts a fixed set of codes; passing values like `popularity`
+ * or `rating` makes the API reject the request with "参数不合法：sort".
+ * Returns `undefined` for unsupported values so the caller omits `sort`
+ * entirely and the API falls back to its default (relevance) ordering.
+ *
+ * Taobao codes: `_sale` (sales high→low), `bid` (price low→high),
+ * `_bid` (price high→low).
+ */
+const mapTaobaoSort = (sort?: string): string | undefined => {
+  switch (sort) {
+    case 'price_low':
+      return 'bid';
+    case 'price_high':
+      return '_bid';
+    case 'rating':
+    case 'high_sales':
+      return '_sale';
+    // popularity / newest / best_match / low_sales / undefined -> default
+    default:
+      return undefined;
+  }
+};
 
 // Products API
 export const productsApi = {
@@ -312,7 +338,9 @@ export const productsApi = {
           id: item.item_id?.toString() || '',
           title: title,
           titleOriginal: originalTitle,
-          image: item.main_image_url || item.image || '',
+          image: normalizeProductImageUrl(
+            item.main_image_url || item.multi_language_info?.main_image_url || item.image || '',
+          ),
           price: finalPrice,
           originalPrice: originalPrice,
           wholesalePrice: finalPrice,
@@ -411,11 +439,15 @@ export const productsApi = {
           language,
         });
 
-        // Add sort parameter if provided
-        if (sort) {
-          taobaoParams.append('sorce', sort); // Note: API uses 'sorce' parameter name
+        // Add sort parameter if provided.
+        // Taobao Global only accepts specific sort codes; the app's generic
+        // values (popularity/rating/newest/...) trigger "参数不合法：sort".
+        // Map what we can and omit the rest so the API falls back to default.
+        const taobaoSort = mapTaobaoSort(sort);
+        if (taobaoSort) {
+          taobaoParams.append('sort', taobaoSort);
         }
-        
+
         // Add seller ID if provided
         if (sellerOpenId) {
           taobaoParams.append('shop_id', sellerOpenId);
@@ -500,7 +532,9 @@ export const productsApi = {
             // Use localized title if available, otherwise fallback to original title
             title: item.multi_language_info?.title || item.title || '',
             titleOriginal: item.title || '',
-            image: item.main_image_url || '',
+            image: normalizeProductImageUrl(
+              item.main_image_url || item.multi_language_info?.main_image_url || '',
+            ),
             price: price,
             originalPrice: price,
             wholesalePrice: price,
@@ -1274,11 +1308,14 @@ export const productsApi = {
         language,
       });
 
-      // Add sort parameter if provided (using 'sorce' as per API specification)
-      if (sortBy) {
-        taobaoParams.append('sorce', sortBy);
+      // Add sort parameter if provided. Map the app's generic values to
+      // Taobao's accepted codes; omit unsupported ones to avoid
+      // "参数不合法：sort".
+      const taobaoSort = mapTaobaoSort(sortBy);
+      if (taobaoSort) {
+        taobaoParams.append('sort', taobaoSort);
       }
-      
+
       // Add filter parameter if there are filters
       if (filterString) {
         taobaoParams.append('filter', filterString);
@@ -1324,7 +1361,9 @@ export const productsApi = {
           id: item.item_id?.toString() || '',
           title: item.multi_language_info?.title || item.title || '',
           titleOriginal: item.title || '',
-          image: item.main_image_url || '',
+          image: normalizeProductImageUrl(
+            item.main_image_url || item.multi_language_info?.main_image_url || '',
+          ),
           price: price,
           originalPrice: price,
           wholesalePrice: price,
