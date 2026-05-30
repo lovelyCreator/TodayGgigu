@@ -60,7 +60,16 @@ import CartIcon from '../../../../assets/icons/CartIcon';
 import EditIcon from '../../../../assets/icons/EditIcon';
 import { WebView } from 'react-native-webview';
 import Clipboard from '@react-native-clipboard/clipboard';
-import { orderApi, mapLocaleToOrdersLang } from '../../../../services/orderApi';
+import {
+  orderApi,
+  mapLocaleToOrdersLang,
+  normalizeProgressStatus,
+  resolvePurchaseAgencyProgressStatus,
+} from '../../../../services/orderApi';
+import {
+  computeProgressStatusCounts,
+  computeStatusGroupCounts,
+} from '../../../../utils/orderCounts';
 
 type BuyListScreenNavigationProp = StackNavigationProp<RootStackParamList, 'BuyList'>;
 type BuyListScreenRouteProp = RouteProp<RootStackParamList, 'BuyList'>;
@@ -214,8 +223,34 @@ const PROGRESS_STATUS_META: Record<string, {
   USER_REFUND_COMPLETED: { tab: 'refunds', group: 'error', translationKey: 'pages.orders.status.userRefundComplete' },
 };
 
+/** Canonical progress status for list filtering (handles P_PENDING → BUY_PAY_WAIT, etc.) */
+const getCanonicalOrderProgressStatus = (order: {
+  progressStatus?: string | null;
+  paymentStatus?: string | null;
+  firstTierCost?: ApiOrder['firstTierCost'];
+}): string =>
+  resolvePurchaseAgencyProgressStatus({
+    progressStatus: order.progressStatus,
+    paymentStatus: order.paymentStatus,
+    firstTierCost: order.firstTierCost,
+  });
+
+const orderMatchesProgressStatus = (order: Order, selected: string): boolean =>
+  getCanonicalOrderProgressStatus(order) === normalizeProgressStatus(selected);
+
+const orderBelongsToStatusGroup = (order: Order, groupKey: string): boolean => {
+  const group = STATUS_GROUPS.find((g) => g.key === groupKey);
+  if (!group) return order.statusGroup === groupKey;
+  const canonical = getCanonicalOrderProgressStatus(order);
+  return (group.statuses as readonly string[]).includes(canonical);
+};
+
 const mapOrderStatusMeta = (order: ApiOrder): Pick<Order, 'status' | 'statusGroup' | 'statusTranslationKey' | 'progressStatus'> => {
-  const progressStatus = order.progressStatus || '';
+  const progressStatus = resolvePurchaseAgencyProgressStatus({
+    progressStatus: order.progressStatus,
+    paymentStatus: order.paymentStatus,
+    firstTierCost: order.firstTierCost,
+  });
   const directMeta = PROGRESS_STATUS_META[progressStatus];
   if (directMeta) {
     return {
@@ -253,11 +288,22 @@ const mapOrderStatusMeta = (order: ApiOrder): Pick<Order, 'status' | 'statusGrou
     };
   }
 
+  const fallbackNormalized = normalizeProgressStatus(order.progressStatus);
+  const fallbackMeta = PROGRESS_STATUS_META[fallbackNormalized];
+  if (fallbackMeta) {
+    return {
+      status: fallbackMeta.tab,
+      statusGroup: fallbackMeta.group,
+      statusTranslationKey: fallbackMeta.translationKey,
+      progressStatus: fallbackNormalized,
+    };
+  }
+
   return {
     status: 'category',
     statusGroup: 'other',
-    statusTranslationKey: progressStatus || 'pages.orders.status.noOrderInfo',
-    progressStatus,
+    statusTranslationKey: 'pages.orders.status.noOrderInfo',
+    progressStatus: fallbackNormalized || progressStatus,
   };
 };
 
@@ -345,6 +391,14 @@ const BuyListScreen = () => {
   });
   const [orders, setOrders] = useState<Order[]>([]);
   const [viewFilterCounts, setViewFilterCounts] = useState<Record<string, number>>({});
+  /** Snapshot for navigation badges — unfiltered fetch so counts stay accurate while filtering the list */
+  const [countOrders, setCountOrders] = useState<
+    Array<{
+      progressStatus: string;
+      paymentStatus?: string;
+      firstTierCost?: Order['firstTierCost'];
+    }>
+  >([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
@@ -382,6 +436,7 @@ const BuyListScreen = () => {
     onSuccess: () => {
       showToast(t('home.orderCancelled'), 'success');
       fetchOrdersRef.current();
+      fetchOrderCountsRef.current?.();
     },
     onError: (err) => {
       showToast(err || t('buyList.failedToCancelOrder'), 'error');
@@ -839,22 +894,109 @@ const BuyListScreen = () => {
   getOrdersRef.current = getOrders;
 
   const fetchOrders = useCallback(() => {
+    const hasSimplifiedClearance =
+      selectedCustomsMethod === '간이통관' ? true :
+      selectedCustomsMethod === '일반통관' ? false :
+      undefined;
+
+    const transferMethod =
+      selectedTransportMethod === '항공' ? 'air' :
+      selectedTransportMethod === '선박' ? 'ship' :
+      undefined;
+
+    const formatDate = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const searchQuery = (filters.orderNumber || orderSearchText || '').trim();
+
     getOrdersRef.current({
       page: 1,
-      pageSize: 10,
+      pageSize: 50,
       lang: mapLocaleToOrdersLang(locale),
+      search: searchQuery || undefined,
+      datePeriod: 'last_6_months',
+      platform: filterPlatform || undefined,
+      viewFilter: 'all',
+      // Status filters are applied client-side so API codes like P_PENDING still match BUY_PAY_WAIT
+      hasSimplifiedClearance,
+      transferMethod: transferMethod as 'air' | 'ship' | undefined,
+      periodFrom: selectedStartDate ? formatDate(selectedStartDate) : undefined,
+      periodTo: selectedEndDate ? formatDate(selectedEndDate) : undefined,
     });
-  }, [locale]);
+  }, [
+    locale,
+    filters.orderNumber,
+    orderSearchText,
+    filterPlatform,
+    selectedCustomsMethod,
+    selectedTransportMethod,
+    selectedStartDate,
+    selectedEndDate,
+  ]);
 
   const fetchOrdersRef = useRef(fetchOrders);
   fetchOrdersRef.current = fetchOrders;
+
+  const fetchOrderCounts = useCallback(async () => {
+    if (isGuest || !user) return;
+    try {
+      const response = await orderApi.getOrders({
+        page: 1,
+        pageSize: 100,
+        lang: mapLocaleToOrdersLang(locale),
+        viewFilter: 'all',
+        datePeriod: 'last_6_months',
+      });
+      if (response.success && response.data?.orders) {
+        setCountOrders(
+          response.data.orders.map((order) => ({
+            progressStatus: resolvePurchaseAgencyProgressStatus({
+              progressStatus: order.progressStatus,
+              paymentStatus: order.paymentStatus,
+              firstTierCost: order.firstTierCost,
+            }),
+            paymentStatus: order.paymentStatus,
+            firstTierCost: order.firstTierCost,
+          })),
+        );
+        if (response.data.viewFilterCounts) {
+          setViewFilterCounts(response.data.viewFilterCounts);
+        }
+      }
+    } catch {
+      // counts are non-blocking
+    }
+  }, [isGuest, user, locale]);
+
+  const fetchOrderCountsRef = useRef(fetchOrderCounts);
+  fetchOrderCountsRef.current = fetchOrderCounts;
+
+  const progressStatusCounts = useMemo(
+    () => computeProgressStatusCounts(countOrders),
+    [countOrders],
+  );
+
+  const statusGroupCounts = useMemo(
+    () => computeStatusGroupCounts(countOrders, STATUS_GROUPS),
+    [countOrders],
+  );
 
   // Fetch orders from API when tab, filters, or platform change (not on every render)
   useEffect(() => {
     if (!isGuest && user) {
       fetchOrders();
+      fetchOrderCounts();
     }
-  }, [fetchOrders, isGuest, user]);
+  }, [fetchOrders, fetchOrderCounts, isGuest, user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isGuest && user) {
+        fetchOrdersRef.current();
+        fetchOrderCountsRef.current();
+      }
+    }, [isGuest, user]),
+  );
 
   // Ensure socket is connected
   useEffect(() => {
@@ -1368,11 +1510,13 @@ const BuyListScreen = () => {
       }
       // Filter by active tab (status group key)
       if (activeTab !== 'all') {
-        result = result.filter(order => order.statusGroup === activeTab);
+        result = result.filter(order => orderBelongsToStatusGroup(order, activeTab));
       }
-      // Further filter by selected progress status
+      // Further filter by selected progress status (canonical codes)
       if (selectedProgressStatus) {
-        result = result.filter(order => order.progressStatus === selectedProgressStatus);
+        result = result.filter(order =>
+          orderMatchesProgressStatus(order, selectedProgressStatus),
+        );
       }
       return result;
     },
@@ -1391,7 +1535,9 @@ const BuyListScreen = () => {
       const statusSections = group.statuses
         .map((progressStatus) => {
           const meta = PROGRESS_STATUS_META[progressStatus];
-          const sectionOrders = filteredOrders.filter(order => order.progressStatus === progressStatus);
+          const sectionOrders = filteredOrders.filter(order =>
+            orderMatchesProgressStatus(order, progressStatus),
+          );
           return {
             progressStatus,
             title: meta ? meta.translationKey : progressStatus,
@@ -1419,17 +1565,10 @@ const BuyListScreen = () => {
     );
   };
 
-  // Helper function to count orders in a status group by filtering filteredOrders
-  const getGroupOrderCount = (groupKey: string): number => {
-    const group = STATUS_GROUPS.find(g => g.key === groupKey);
-    if (!group) return 0;
-    return filteredOrders.filter(order => {
-      for (const status of group.statuses) {
-        if (status === order.progressStatus) return true;
-      }
-      return false;
-    }).length;
-  };
+  const getGroupOrderCount = (groupKey: string): number => statusGroupCounts[groupKey] ?? 0;
+
+  const getProgressStatusCount = (progressStatus: string): number =>
+    progressStatusCounts[progressStatus] ?? 0;
 
   const renderCategoryStatusFilters = () => {
     const groups = STATUS_GROUPS;
@@ -1492,10 +1631,16 @@ const BuyListScreen = () => {
                   <TouchableOpacity
                     key={ps}
                     style={[styles.groupDropdownItem, selectedProgressStatus === ps && styles.groupDropdownItemActive]}
-                    onPress={() => { setSelectedProgressStatus(ps); setExpandedStatusGroup(null); }}
+                    onPress={() => {
+                      setActiveTab(currentGroup!.key);
+                      setSelectedProgressStatus(ps);
+                      setExpandedStatusGroup(null);
+                    }}
                   >
                     <Text style={[styles.groupDropdownText, selectedProgressStatus === ps && styles.groupDropdownTextActive]}>
                       {t(meta?.translationKey || ps)}
+                      {' '}
+                      <Text style={styles.groupDropdownCount}>({getProgressStatusCount(ps)})</Text>
                     </Text>
                   </TouchableOpacity>
                 );
@@ -3013,6 +3158,11 @@ const styles = StyleSheet.create({
   },
   groupDropdownTextActive: {
     color: COLORS.red,
+    fontWeight: '600',
+  },
+  groupDropdownCount: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
     fontWeight: '600',
   },
   dropdownModalOverlay: {

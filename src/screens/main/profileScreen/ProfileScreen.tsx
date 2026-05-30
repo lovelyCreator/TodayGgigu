@@ -28,7 +28,7 @@ import { useGeneralInquiry } from '../../../hooks/useGeneralInquiry';
 import { inquiryApi } from '../../../services/inquiryApi';
 import { wishlistApi } from '../../../services/wishlistApi';
 import { productsApi } from '../../../services/productsApi';
-import { NotificationBadge, ProductCard } from '../../../components';
+import { MemberAvatar, NotificationBadge, ProductCard } from '../../../components';
 import { useRecommendationsMutation } from '../../../hooks/useRecommendationsMutation';
 import { useWishlistStatus } from '../../../hooks/useWishlistStatus';
 import { useAddToWishlistMutation } from '../../../hooks/useAddToWishlistMutation';
@@ -37,6 +37,7 @@ import { usePlatformStore } from '../../../store/platformStore';
 import { formatPriceKRW, formatDepositBalance } from '../../../utils/i18nHelpers';
 import { useGetOrdersMutation } from '../../../hooks/useGetOrdersMutation';
 import { mapLocaleToOrdersLang } from '../../../services/orderApi';
+import { mergeProfileOrderCounts } from '../../../utils/orderCounts';
 import HeadsetMicIcon from '../../../assets/icons/HeadsetMicIcon';
 import LocationIcon from '../../../assets/icons/LocationIcon';
 import SettingsIcon from '../../../assets/icons/SettingsIcon';
@@ -99,22 +100,10 @@ const ProfileScreen: React.FC = () => {
   const [viewedCount, setViewedCount] = useState(0);
   const [viewedFirstImage, setViewedFirstImage] = useState<string>('');
 
-  // Get orders hook for counts — use viewFilterCounts from API
+  // Order counts for My Orders — API viewFilterCounts with client-side fallback
   const { mutate: getOrders } = useGetOrdersMutation({
     onSuccess: (data) => {
-      if (data.viewFilterCounts) {
-        const vfc = data.viewFilterCounts;
-        setOrderCounts({
-          unpaid: vfc.unpaid ?? 0,
-          to_be_shipped: vfc.to_be_shipped ?? 0,
-          shipped: vfc.shipped ?? 0,
-          processed: vfc.processed ?? 0,
-          shipping_delay: vfc.shipping_delay ?? 0,
-          error: vfc.error ?? 0,
-          refunds: vfc.refunds ?? 0,
-          problemProducts: (vfc.error ?? 0) + (vfc.shipping_delay ?? 0),
-        });
-      }
+      setOrderCounts(mergeProfileOrderCounts(data.orders ?? [], data.viewFilterCounts));
     },
   });
   
@@ -362,13 +351,55 @@ const ProfileScreen: React.FC = () => {
   });
 
   // Store fetchRecommendations in ref to prevent dependency issues
-  // Use useLayoutEffect to update ref synchronously before other effects run
   useLayoutEffect(() => {
     fetchRecommendationsRef.current = fetchRecommendations;
   }, [fetchRecommendations]);
 
-  // "More to Love" recommendations section is disabled — API returns internal server error.
-  // The fetch effects below are disabled to prevent unnecessary API calls.
+  // Load more recommendations when page offset changes (infinite scroll)
+  useEffect(() => {
+    if (isRecommendationsRefreshingRef.current || isLoadingMoreRecommendationsRef.current) {
+      return;
+    }
+    if (recommendationsOffset > 1 && fetchRecommendationsRef.current && recommendationsHasMore) {
+      isLoadingMoreRecommendationsRef.current = true;
+      const outMemberId = user?.id?.toString() || 'dferg0001';
+      const platform = '1688';
+      currentRecommendationsPageRef.current = recommendationsOffset;
+      fetchRecommendationsRef
+        .current(normalizedLocale, outMemberId, recommendationsOffset, 20, platform)
+        .finally(() => {
+          isLoadingMoreRecommendationsRef.current = false;
+        });
+    }
+  }, [recommendationsOffset, normalizedLocale, user?.id, recommendationsHasMore]);
+
+  // Initial fetch for "products worth viewing" at bottom of account page
+  useEffect(() => {
+    if (!fetchRecommendationsRef.current) return;
+    const outMemberId = user?.id?.toString() || 'dferg0001';
+    const platform = '1688';
+    const fetchKey = `${normalizedLocale}-${outMemberId}-${platform}`;
+    if (!hasInitialFetchRef.current || hasInitialFetchRef.current !== fetchKey) {
+      hasInitialFetchRef.current = fetchKey;
+      setRecommendationsOffset(1);
+      setRecommendationsHasMore(true);
+      setRecommendationsProducts([]);
+      currentRecommendationsPageRef.current = 1;
+      fetchRecommendationsRef.current(normalizedLocale, outMemberId, 1, 20, platform);
+    }
+  }, [normalizedLocale, user?.id, fetchRecommendations]);
+
+  const loadMoreRecommendations = useCallback(() => {
+    if (
+      isLoadingMoreRecommendationsRef.current ||
+      isRecommendationsRefreshingRef.current ||
+      !recommendationsHasMore ||
+      recommendationsLoading
+    ) {
+      return;
+    }
+    setRecommendationsOffset((prev) => prev + 1);
+  }, [recommendationsHasMore, recommendationsLoading]);
 
   // Toggle wishlist function
   const toggleWishlist = async (product: Product) => {
@@ -552,12 +583,10 @@ const ProfileScreen: React.FC = () => {
         <Text style={styles.explanationText}>{t('profile.vipVoucherMessage')}</Text>
         <Text style={styles.explanationButtonText}>{t('profile.claimNow')}</Text> */}
       <View style={styles.headerUserInfo}>
-        <Image
-          source={
-            user?.avatar && typeof user.avatar === 'string' && user.avatar.trim() !== ''
-              ? { uri: user.avatar } 
-              : require('../../../assets/images/avatar.png')
-          }
+        <MemberAvatar
+          uri={typeof user?.avatar === 'string' ? user.avatar : null}
+          displayName={user?.name || t('profile.user')}
+          size={48}
           style={styles.headerAvatar}
         />
         <View style={styles.headerUserText}>
@@ -1009,46 +1038,87 @@ const ProfileScreen: React.FC = () => {
   };
 
   const renderMoreToLove = () => {
-    // Use recommendations API data for "More to Love"
     const productsToDisplay = recommendationsProducts;
-    // Show loading state if fetching
+    const sectionTitle = t('profile.worthViewingProducts');
+
     if (recommendationsLoading && productsToDisplay.length === 0) {
       return (
         <View style={styles.moreToLoveSection}>
-          <Text style={styles.sectionTitle}>{t('home.moreToLove')}</Text>
+          <Text style={styles.sectionTitle}>{sectionTitle}</Text>
           <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={COLORS.primary} />
             <Text style={styles.loadingText}>{t('profile.loading')}</Text>
           </View>
         </View>
       );
     }
-    
-    // Show error state if there's an error
+
     if (recommendationsError && productsToDisplay.length === 0) {
-      return null; // Don't show error, just return null
+      return (
+        <View style={styles.moreToLoveSection}>
+          <Text style={styles.sectionTitle}>{sectionTitle}</Text>
+          <View style={styles.loadingContainer}>
+            <Text style={styles.errorDetailText}>
+              {t('profile.failedToLoadRecommendations')}
+            </Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => {
+                hasInitialFetchRef.current = null;
+                setRecommendationsOffset(1);
+                setRecommendationsHasMore(true);
+                setRecommendationsProducts([]);
+                currentRecommendationsPageRef.current = 1;
+                const outMemberId = user?.id?.toString() || 'dferg0001';
+                fetchRecommendationsRef.current?.(
+                  normalizedLocale,
+                  outMemberId,
+                  1,
+                  20,
+                  '1688',
+                );
+              }}
+            >
+              <Text style={styles.retryButtonText}>{t('helpCenter.retry')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
     }
-    
+
     if (!Array.isArray(productsToDisplay) || productsToDisplay.length === 0) {
       return null;
     }
-    
+
     return (
       <View style={styles.moreToLoveSection}>
-        <Text style={styles.sectionTitle}>{t('home.moreToLove')}</Text>
+        <Text style={styles.sectionTitle}>{sectionTitle}</Text>
         <FlatList
           data={productsToDisplay}
           renderItem={renderMoreToLoveItem}
           keyExtractor={(item, index) => `moretolove-${item.id?.toString() || index}-${index}`}
           numColumns={2}
           scrollEnabled={false}
-          nestedScrollEnabled={true}
+          nestedScrollEnabled
           columnWrapperStyle={styles.productRow}
-          removeClippedSubviews={true}
+          removeClippedSubviews
           maxToRenderPerBatch={10}
           windowSize={5}
           initialNumToRender={10}
           updateCellsBatchingPeriod={50}
-          ListFooterComponent={renderMoreToLoveFooter}
+          ListFooterComponent={() => {
+            if (recommendationsLoading && productsToDisplay.length > 0) {
+              return renderMoreToLoveFooter();
+            }
+            if (!recommendationsHasMore && productsToDisplay.length > 0) {
+              return (
+                <View style={styles.endOfListContainer}>
+                  <Text style={styles.endOfListText}>{t('profile.noMoreProducts')}</Text>
+                </View>
+              );
+            }
+            return renderMoreToLoveFooter();
+          }}
         />
       </View>
     );
@@ -1068,14 +1138,11 @@ const ProfileScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         onScroll={(event) => {
           const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-          
-          // Check if user has scrolled near the bottom (within 200px)
-          const scrollPosition = contentOffset.y;
-          const scrollHeight = contentSize.height;
-          const screenHeight = layoutMeasurement.height;
-          const distanceFromBottom = scrollHeight - scrollPosition - screenHeight;
-          
-          // "More to Love" infinite scroll disabled — section removed
+          const distanceFromBottom =
+            contentSize.height - contentOffset.y - layoutMeasurement.height;
+          if (distanceFromBottom < 200) {
+            loadMoreRecommendations();
+          }
         }}
         scrollEventThrottle={16}
       >
@@ -1083,7 +1150,7 @@ const ProfileScreen: React.FC = () => {
         {isAuthenticated && renderStatsSection()}
         {isAuthenticated && renderMenuItems()}
         {isAuthenticated && renderQuickAccessSection()}
-        {/* {renderMoreToLove()} */}
+        {renderMoreToLove()}
       </ScrollView>
     </SafeAreaView>
   );

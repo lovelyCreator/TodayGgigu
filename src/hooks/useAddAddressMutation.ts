@@ -6,6 +6,8 @@ import { useGetProfileMutation } from './useGetProfileMutation';
 interface UseAddAddressMutationOptions {
   onSuccess?: (data: AddressesResponse) => void;
   onError?: (error: string) => void;
+  /** When true, skips the extra getProfile() after a successful add (caller refreshes locally). */
+  skipProfileRefetch?: boolean;
 }
 
 interface UseAddAddressMutationResult {
@@ -43,9 +45,10 @@ export const useAddAddressMutation = (
         setData(response.data);
         setIsSuccess(true);
         
-        // Refresh user profile to get updated addresses
-        fetchProfile();
-        
+        if (!options?.skipProfileRefetch) {
+          fetchProfile();
+        }
+
         options?.onSuccess?.(response.data);
       } else {
         const errorMessage = response.error || 'Failed to add address';

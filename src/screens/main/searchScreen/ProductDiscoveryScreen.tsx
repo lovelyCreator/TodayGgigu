@@ -187,14 +187,12 @@ const ProductDiscoveryScreen: React.FC = () => {
       // Coming from a specific subcategory with subsubcategories
       // Ensure names are in the correct locale
       const localizedSubSubCategories = passedSubSubCategories.map((subSubCat: any) => {
-        // If name is an object with zh, en, ko, extract the correct locale
         if (subSubCat.name && typeof subSubCat.name === 'object') {
           return {
             ...subSubCat,
-            name: subSubCat.name[locale] || subSubCat.name.en || subSubCat.name
+            name: subSubCat.name[locale] || subSubCat.name.en || subSubCat.name,
           };
         }
-        // If it's already a string, use it as is
         return subSubCat;
       });
       setDisplaySubSubCategories(localizedSubSubCategories);

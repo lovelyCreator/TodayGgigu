@@ -6,6 +6,7 @@ export { default as LoadingSpinner } from './LoadingSpinner';
 export { default as ProductCard } from './ProductCard';
 export { default as Button } from './Button';
 export { default as AddressSearchModal} from './AddressSearchModal';
+export { default as AddNewAddressModal } from './AddNewAddressModal';
 export { default as TextInput} from './TextInput';
 export { default as Text } from './Text';
 export { default as CouponModal } from './CouponModal';
@@ -22,6 +23,7 @@ export { default as SortModal } from './SortModal';
 
 // More reusable components
 export { default as NotificationBadge } from './NotificationBadge';
+export { default as MemberAvatar } from './MemberAvatar';
 export { default as Icon } from './Icon';
 export { default as PlatformMenu } from './PlatformMenu';
 export { default as SearchButton } from './SearchButton';

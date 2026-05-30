@@ -15,8 +15,7 @@ import {
 } from 'react-native';
 import Icon from './Icon';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../constants';
-import { useAppSelector } from '../store/hooks';
-import { translations } from '../i18n/translations';
+import { useTranslation } from '../hooks/useTranslation';
 
 const { height } = Dimensions.get('window');
 
@@ -31,23 +30,13 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
   onClose,
   onConfirm,
 }) => {
-  const locale = useAppSelector((state) => state.i18n.locale) as 'en' | 'ko' | 'zh';
+  const { t } = useTranslation();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
   const slideAnim = useRef(new Animated.Value(height)).current;
   const panY = useRef(new Animated.Value(0)).current;
   const isDismissing = useRef(false);
-  
-  // Translation function
-  const t = (key: string) => {
-    const keys = key.split('.');
-    let value: any = translations[locale as keyof typeof translations];
-    for (const k of keys) {
-      value = value?.[k];
-    }
-    return value || key;
-  };
 
   useEffect(() => {
     if (visible) {
@@ -111,7 +100,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
 
   const handleConfirmDelete = async () => {
     if (!password) {
-      Alert.alert(t('common.error'), t('profile.enterPasswordError'));
+      Alert.alert(t('common.error'), t('profile.accountDeletion.enterPasswordError'));
       return;
     }
 
@@ -166,36 +155,36 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
           </View>
 
           {/* Title */}
-          <Text style={styles.title}>{t('profile.deleteAccountTitle')}</Text>
+          <Text style={styles.title}>{t('profile.accountDeletion.modalTitle')}</Text>
 
           {/* Description */}
           <Text style={styles.description}>
-            {t('profile.deleteAccountDescription')}
+            {t('profile.accountDeletion.modalDescription')}
           </Text>
 
           {/* Warning List */}
           <View style={styles.warningList}>
             <View style={styles.warningItem}>
               <Icon name="close-circle" size={18} color="#FF6B9D" />
-              <Text style={styles.warningText}>{t('profile.allDataLost')}</Text>
+              <Text style={styles.warningText}>{t('profile.accountDeletion.allDataLost')}</Text>
             </View>
             <View style={styles.warningItem}>
               <Icon name="close-circle" size={18} color="#FF6B9D" />
-              <Text style={styles.warningText}>{t('profile.orderHistoryDeleted')}</Text>
+              <Text style={styles.warningText}>{t('profile.accountDeletion.orderHistoryDeleted')}</Text>
             </View>
             <View style={styles.warningItem}>
               <Icon name="close-circle" size={18} color="#FF6B9D" />
-              <Text style={styles.warningText}>{t('profile.cannotRecoverAccount')}</Text>
+              <Text style={styles.warningText}>{t('profile.accountDeletion.cannotRecoverAccount')}</Text>
             </View>
           </View>
 
           {/* Password Input */}
           <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>{t('profile.enterPasswordToConfirm')}</Text>
+            <Text style={styles.inputLabel}>{t('profile.accountDeletion.enterPasswordToConfirm')}</Text>
             <View style={styles.inputWrapper}>
               <TextInput
                 style={styles.input}
-                placeholder={t('profile.passwordPlaceholder')}
+                placeholder={t('profile.accountDeletion.passwordPlaceholder')}
                 placeholderTextColor={COLORS.text.secondary}
                 value={password}
                 onChangeText={setPassword}
@@ -225,7 +214,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
               onPress={handleClose}
               disabled={isDeleting}
             >
-              <Text style={styles.cancelButtonText}>{t('profile.cancel')}</Text>
+              <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -239,7 +228,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
               {isDeleting ? (
                 <ActivityIndicator size="small" color={COLORS.white} />
               ) : (
-                <Text style={styles.deleteButtonText}>{t('profile.delete')}</Text>
+                <Text style={styles.deleteButtonText}>{t('common.delete')}</Text>
               )}
             </TouchableOpacity>
           </View>

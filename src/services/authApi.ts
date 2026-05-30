@@ -844,7 +844,11 @@ export const getProfile = async (): Promise<GetProfileResponse> => {
       };
     }
     
-    const profileUrls = [`${API_BASE_URL}/v1/users/me`, `${API_BASE_URL}/users/profile`];
+    const apiBase = API_BASE_URL.replace(/\/+$/, '');
+    const usersMeUrl = apiBase.endsWith('/v1')
+      ? `${apiBase}/users/me`
+      : `${apiBase}/v1/users/me`;
+    const profileUrls = [usersMeUrl, `${apiBase}/users/profile`];
     let response: Response | null = null;
     let responseText = '';
     let responseData: any;

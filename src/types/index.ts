@@ -313,11 +313,20 @@ export type PerformanceDataParams = {
   orderConversionRate: number;
 };
 
+export type CartScreenParams = {
+  fromBuyNow?: boolean;
+  /** Open order create/confirm modal once cart is ready (product detail Order flow) */
+  openOrderModal?: boolean;
+  cartResponse?: { cart?: { items?: unknown[] } };
+  selectCartItemId?: string;
+  offerId?: string;
+};
+
 export type MainTabParamList = {
   Home: undefined;
   Category: undefined;
   Message: undefined;
-  Cart: undefined;
+  Cart: CartScreenParams | undefined;
   Profile: undefined;
 };
 

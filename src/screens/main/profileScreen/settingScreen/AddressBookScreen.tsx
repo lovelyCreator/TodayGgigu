@@ -23,7 +23,7 @@ import { RootStackParamList, Address } from '../../../../types';
 import { useAuth } from '../../../../context/AuthContext';
 import { useAddAddressMutation } from '../../../../hooks/useAddAddressMutation';
 import { useUpdateAddressMutation } from '../../../../hooks/useUpdateAddressMutation';
-import { addressApi } from '../../../../services/addressApi';
+import { addressApi, buildAddressSubmitBody, formatAddressApiErrorMessage } from '../../../../services/addressApi';
 import { useToast } from '../../../../context/ToastContext';
 import { useTranslation } from '../../../../hooks/useTranslation';
 
@@ -54,7 +54,14 @@ const AddressBookScreen: React.FC = () => {
   const [zipCode, setZipCode] = useState('');
   const [personalCustomsCode, setPersonalCustomsCode] = useState('');
   const [note, setNote] = useState('');
-  
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const showSaveError = (message: string) => {
+    const formatted = formatAddressApiErrorMessage(message, message) || message;
+    setSaveError(formatted);
+    showToast(formatted, 'error', 6000);
+  };
+
   // Check if we came from shipping settings
   const fromShippingSettings = route.params?.fromShippingSettings || false;
   
@@ -103,6 +110,7 @@ const AddressBookScreen: React.FC = () => {
   // Add address mutation
   const { mutate: addAddress, isLoading: isAdding } = useAddAddressMutation({
     onSuccess: (data) => {
+      setSaveError(null);
       showToast('Address added successfully', 'success');
       setAddressModalVisible(false);
       resetForm();
@@ -127,13 +135,14 @@ const AddressBookScreen: React.FC = () => {
       }
     },
     onError: (error) => {
-      showToast(error || 'Failed to add address', 'error');
+      showSaveError(error || 'Failed to add address');
     },
   });
 
   // Update address mutation
   const { mutate: updateAddress, isLoading: isUpdating } = useUpdateAddressMutation({
     onSuccess: (data) => {
+      setSaveError(null);
       showToast('Address updated successfully', 'success');
       setAddressModalVisible(false);
       resetForm();
@@ -158,7 +167,7 @@ const AddressBookScreen: React.FC = () => {
       }
     },
     onError: (error) => {
-      showToast(error || 'Failed to update address', 'error');
+      showSaveError(error || 'Failed to update address');
     },
   });
 
@@ -174,6 +183,7 @@ const AddressBookScreen: React.FC = () => {
     setIsDefaultAddress(false);
     setEditingAddress(null);
     setAddressType('personal');
+    setSaveError(null);
   };
 
   const handleAddAddress = () => {
@@ -198,39 +208,23 @@ const AddressBookScreen: React.FC = () => {
   };
 
   const handleSaveAddress = () => {
-    // Validation
-    if (!recipient.trim()) {
-      showToast('Please enter recipient name', 'error');
-      return;
-    }
-    if (!contact.trim()) {
-      showToast('Please enter contact number', 'error');
-      return;
-    }
-    if (!mainAddress.trim()) {
-      showToast('Please enter province/city/district', 'error');
-      return;
-    }
-    if (!detailedAddress.trim()) {
-      showToast('Please enter detailed address', 'error');
-      return;
-    }
-    if (!zipCode.trim()) {
-      showToast('Please enter postal code', 'error');
+    const detail = detailedAddress.trim();
+    if (!detail || detail.length < 2) {
+      showSaveError(t('profile.addressModal.detailRequired'));
       return;
     }
 
-    const addressData = {
-      customerClearanceType: addressType === 'business' ? 'business' : 'individual',
-      recipient: recipient.trim(),
-      contact: contact.trim(),
-      personalCustomsCode: personalCustomsCode.trim(),
-      mainAddress: mainAddress.trim(),
-      detailedAddress: detailedAddress.trim(),
-      zipCode: zipCode.trim(),
+    const addressData = buildAddressSubmitBody({
+      addressType,
+      recipient,
+      contact,
+      mainAddress,
+      detailedAddress: detail,
+      zipCode,
+      personalCustomsCode,
       defaultAddress: isDefaultAddress,
-      note: note.trim() || undefined,
-    };
+      note,
+    });
 
     if (editingAddress && editingAddress.id) {
       // Update existing address
@@ -642,12 +636,21 @@ const AddressBookScreen: React.FC = () => {
             </TouchableOpacity>
           </ScrollView>
 
+          {saveError ? (
+            <View style={styles.saveErrorBanner}>
+              <Text style={styles.saveErrorText}>{saveError}</Text>
+            </View>
+          ) : null}
+
           {/* Fixed footer */}
           <View style={styles.addressModalFooter}>
             <TouchableOpacity
               style={styles.modalCancelButton}
               activeOpacity={0.7}
-              onPress={() => setAddressModalVisible(false)}
+              onPress={() => {
+                setSaveError(null);
+                setAddressModalVisible(false);
+              }}
             >
               <Text style={styles.modalCancelButtonText}>
                 {t('profile.addressModal.cancel')}
@@ -1139,6 +1142,19 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   // Footer
+  saveErrorBanner: {
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: '#EF4444',
+  },
+  saveErrorText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.white,
+    lineHeight: 18,
+  },
   addressModalFooter: {
     flexDirection: 'row',
     justifyContent: 'flex-end',

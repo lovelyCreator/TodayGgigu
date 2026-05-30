@@ -60,6 +60,22 @@ export function normalizeProductImageUrl(image?: string | null): string {
   return uri;
 }
 
+/** True when two product image URLs refer to the same asset (ignores 1688 thumb suffixes). */
+export function productImageUrlsMatch(
+  a?: string | null,
+  b?: string | null,
+): boolean {
+  const na = normalizeProductImageUrl(a || '');
+  const nb = normalizeProductImageUrl(b || '');
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const baseKey = (u: string) =>
+    u.replace(/_\d+x\d+(?:\.\w+)?$/i, '').replace(/\?.*$/, '');
+  const ba = baseKey(na);
+  const bb = baseKey(nb);
+  return ba === bb || ba.includes(bb) || bb.includes(ba);
+}
+
 export function normalizeProductImageUrls(images: unknown[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];

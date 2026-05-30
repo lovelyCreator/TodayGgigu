@@ -62,6 +62,8 @@ export interface CartItemSkuAttribute {
 
 export interface CartItem {
   offerId: number;
+  source?: string;
+  productId?: number | string;
   categoryId?: number;
   subject: string;
   subjectTrans?: string;

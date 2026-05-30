@@ -20,6 +20,7 @@ import { CustomSwitchProps, RootStackParamList, Address } from '../../../../type
 import { AddressSearchModal } from '../../../../components';
 import { useAuth } from '../../../../context/AuthContext';
 import { useAddAddressMutation } from '../../../../hooks/useAddAddressMutation';
+import { buildAddressSubmitBody } from '../../../../services/addressApi';
 
 type AddNewAddressScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AddNewAddress'>;
 type AddNewAddressScreenRouteProp = RouteProp<RootStackParamList, 'AddNewAddress'>;
@@ -97,22 +98,23 @@ const AddNewAddressScreen: React.FC = () => {
   };
 
   const handleSaveAddress = () => {
-    if (!formData.recipient || !formData.contact || !formData.personalCustomsCode || !formData.detailedAddress || !formData.zipCode) {
-      Alert.alert('Missing Information', 'Please fill in all required fields.');
+    const detail = formData.detailedAddress.trim();
+    if (!detail || detail.length < 2) {
+      Alert.alert('Missing Information', 'Please enter detailed address (at least 2 characters).');
       return;
     }
 
-    // Create the address data according to API structure
-    const addressData = {
-      customerClearanceType: isStoreAddress ? 'business' : 'individual',
+    const addressData = buildAddressSubmitBody({
+      addressType: isStoreAddress ? 'business' : 'personal',
       recipient: formData.recipient,
       contact: formData.contact,
-      personalCustomsCode: formData.personalCustomsCode,
-      detailedAddress: formData.detailedAddress,
+      mainAddress: '',
+      detailedAddress: detail,
       zipCode: formData.zipCode,
+      personalCustomsCode: formData.personalCustomsCode,
       defaultAddress: isPrimary,
-      note: formData.note || undefined,
-    };
+      note: formData.note,
+    });
 
     // Call the create address mutation
     createAddress(addressData);

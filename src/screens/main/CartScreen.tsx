@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,12 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
+  InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect, RouteProp } from '@react-navigation/native';
 import Icon from '../../components/Icon';
+import AddNewAddressModal from '../../components/AddNewAddressModal';
 import { COLORS, FONTS, SPACING } from '../../constants';
 import {
   launchImageLibrary,
@@ -25,18 +27,23 @@ import { requestPhotoLibraryPermission } from '../../utils/permissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../context/AuthContext';
 import { useCreateOrderMutation } from '../../hooks/useCreateOrderMutation';
+import { buildCreateOrderLineItems } from '../../services/orderApi';
 import { cartApi, CartItem, MultiLang } from '../../services/cartApi';
 import {
   getProfile,
-  mapProfileApiUserToUser,
   formatProfileAddressLabel,
 } from '../../services/authApi';
 import { formatPriceKRW } from '../../utils/i18nHelpers';
+import { CartScreenParams, MainTabParamList } from '../../types';
+import { fetchAdditionalServices } from '../../services/additionalServicesApi';
+import { mapAdditionalServicesToCategories } from '../../utils/additionalServices';
 
 interface ExtraService {
   id: string;
   name: string;
   icon?: string;
+  iconUrl?: string;
+  imageUrl?: string;
   price?: string;
   description?: string;
   required?: boolean;
@@ -44,7 +51,6 @@ interface ExtraService {
 
 interface ServiceCategory {
   id: string;
-  title: string;
   required?: boolean;
   items: ExtraService[];
 }
@@ -52,6 +58,8 @@ interface ServiceCategory {
 interface CartCard {
   id: string;
   index: string;
+  offerId: string;
+  source: string;
   companyName: string;
   productName: string;
   productImage: string | null;
@@ -74,52 +82,6 @@ const TIME_PERIODS: Array<{ labelKey: 'all' | 'h1' | 'h24' | 'd7'; value: number
   { labelKey: 'h24', value: 24 * 60 * 60 * 1000 },
   { labelKey: 'd7', value: 7 * 24 * 60 * 60 * 1000 },
 ];
-
-const SERVICE_CATEGORIES: ServiceCategory[] = [
-  {
-    id: 'cat-origin',
-    title: '원산지 작업',
-    required: true,
-    items: [
-      { id: 'svc-bongje', name: '봉제', icon: 'cut-outline', price: '¥0.2/PCS', description: '원산지 라벨 봉제 작업' },
-      { id: 'svc-hangtag', name: '행택', icon: 'pricetag-outline', price: '¥0.1/PCS', description: '행택 부착 작업' },
-      { id: 'svc-sticker', name: '스티커', icon: 'pricetags-outline', price: '¥0.1/PCS', description: '스티커 부착 작업' },
-      { id: 'svc-dojang', name: '도장', icon: 'ribbon-outline', price: '¥0.2/PCS', description: '도장 작업' },
-    ],
-  },
-  {
-    id: 'cat-package',
-    title: '패키지 작업',
-    items: [
-      { id: 'svc-opp', name: 'OPP포장', icon: 'bag-outline', price: '¥0.3/PCS', description: '가로+세로 80cm 이상일 경우 0.5위안\n이 비용 표준은 참고일 뿐, 구체적인 비용은 견적을 기준으로 한다' },
-      { id: 'svc-aircap', name: '에어캡/뽁뽁이 포장', icon: 'apps-outline', price: '¥0.5/PCS', description: '에어캡 포장 서비스' },
-      { id: 'svc-jungpo', name: '중포포장', icon: 'file-tray-outline', price: '¥0.8/PCS', description: '중포 포장 서비스' },
-      { id: 'svc-bundle', name: '번들포장', icon: 'layers-outline', price: '¥0.6/PCS', description: '번들 포장 서비스' },
-      { id: 'svc-pkgmake', name: '패키지 제작', icon: 'cube-outline', price: '견적', description: '패키지 제작 (별도 견적)' },
-      { id: 'svc-itemsticker', name: '상품스티커', icon: 'bookmark-outline', price: '¥0.1/PCS', description: '상품 스티커 부착' },
-    ],
-  },
-  {
-    id: 'cat-carton',
-    title: '카톤박스 및 패킹',
-    items: [
-      { id: 'svc-carton-change', name: '카톤박스 갈이', icon: 'swap-horizontal-outline', price: '¥2/BOX', description: '카톤박스 교체' },
-      { id: 'svc-pallet', name: '파렛트 작업', icon: 'grid-outline', price: '¥30/PLT', description: '파렛트 작업' },
-      { id: 'svc-madae', name: '마대포장', icon: 'briefcase-outline', price: '¥3/BOX', description: '마대 포장' },
-      { id: 'svc-carton-make', name: '카톤박스 제작', icon: 'construct-outline', price: '견적', description: '카톤박스 제작 (별도 견적)' },
-    ],
-  },
-  {
-    id: 'cat-inspect',
-    title: '검수방식',
-    items: [
-      { id: 'svc-insp-full', name: '전수검수', icon: 'search-outline', price: '¥0.5/PCS', description: '모든 상품 1:1 검수' },
-      { id: 'svc-insp-sample', name: '샘플검수', icon: 'eye-outline', price: '¥30/LOT', description: '샘플 단위 검수' },
-    ],
-  },
-];
-
-const ALL_SERVICES: ExtraService[] = SERVICE_CATEGORIES.flatMap((c) => c.items);
 
 // Pick the string for the active locale from a multi-language field, with fallbacks.
 const pickLang = (
@@ -146,9 +108,12 @@ const mapCartItemToCard = (
     item.skuInfo?.price ||
     item.skuInfo?.consignPrice ||
     '0';
+  const offerId = String(item.offerId ?? (item as { productId?: string | number }).productId ?? '');
   return {
-    id: item._id || String(item.offerId),
+    id: item._id || offerId,
     index: String(index + 1).padStart(3, '0'),
+    offerId,
+    source: item.source || '1688',
     companyName: pickLang(item.companyName, locale),
     productName:
       pickLang(item.subjectMultiLang, locale) ||
@@ -183,7 +148,24 @@ type ProfileAddress = {
 const CartScreen: React.FC = () => {
   const { t, locale } = useTranslation();
   const navigation = useNavigation<any>();
-  const { user, isGuest, isAuthenticated, updateUser } = useAuth();
+  const route = useRoute<RouteProp<MainTabParamList, 'Cart'>>();
+  const { isGuest, isAuthenticated } = useAuth();
+
+  const navigateToProductDetail = useCallback(
+    (card: CartCard) => {
+      const productId = card.offerId || card.id;
+      if (!productId) {
+        return;
+      }
+      navigation.navigate('ProductDetail', {
+        productId,
+        offerId: productId,
+        source: card.source || '1688',
+        country: locale,
+      });
+    },
+    [locale, navigation],
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState<number>(0);
   const [showPeriodMenu, setShowPeriodMenu] = useState(false);
@@ -192,9 +174,10 @@ const CartScreen: React.FC = () => {
   const [showServiceModal, setShowServiceModal] = useState(false);
   const [extraServices, setExtraServices] = useState<ExtraService[]>([]);
   const [pendingServices, setPendingServices] = useState<ExtraService[]>([]);
-  const [detailService, setDetailService] = useState<ExtraService | null>(
-    ALL_SERVICES.find((s) => s.id === 'svc-opp') || null,
-  );
+  const [serviceCategories, setServiceCategories] = useState<ServiceCategory[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [servicesError, setServicesError] = useState<string | null>(null);
+  const [detailService, setDetailService] = useState<ExtraService | null>(null);
   const [otherRequests, setOtherRequests] = useState('');
   const [modalPhotoUri, setModalPhotoUri] = useState<string | null>(null);
 
@@ -211,6 +194,7 @@ const CartScreen: React.FC = () => {
 
   // Order modal state
   const [showOrderModal, setShowOrderModal] = useState(false);
+  const [showAddNewAddressModal, setShowAddNewAddressModal] = useState(false);
   const [purchasePayment, setPurchasePayment] = useState<'manual' | 'auto'>('manual');
   const [shippingPayment, setShippingPayment] = useState<'manual' | 'auto'>('manual');
   const [showPaymentTooltip, setShowPaymentTooltip] = useState(false);
@@ -227,6 +211,11 @@ const CartScreen: React.FC = () => {
   const [depositBalance, setDepositBalance] = useState(0);
   const [profileLoading, setProfileLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  /** Product-detail Buy Now: open order modal after cart item is selected */
+  const pendingBuyNowOrderRef = useRef(false);
+  const buyNowOrderModalOpenedRef = useRef(false);
+  /** setParams after Buy Now retriggers useFocusEffect — skip one loadCart that would clear selection */
+  const skipLoadCartOnceRef = useRef(false);
 
   const { mutate: createOrder, isLoading: isSubmittingOrder } = useCreateOrderMutation({
     onSuccess: () => {
@@ -250,10 +239,38 @@ const CartScreen: React.FC = () => {
     },
   });
 
-  const svcKey = (id: string) => id.replace(/^svc-/, '').replace(/-/g, '');
   const catKey = (id: string) => id.replace(/^cat-/, '');
-  const tServiceName = (id: string) => t(`cartOrder.serviceModal.services.${svcKey(id)}`);
   const tCategoryTitle = (id: string) => t(`cartOrder.serviceModal.categories.${catKey(id)}`);
+
+  const loadAdditionalServices = useCallback(async () => {
+    setServicesLoading(true);
+    setServicesError(null);
+    const res = await fetchAdditionalServices();
+    setServicesLoading(false);
+    if (!res.success || !res.data) {
+      setServicesError(res.message || t('cartOrder.serviceModal.loadFailed'));
+      return;
+    }
+    const categories = mapAdditionalServicesToCategories(
+      res.data,
+      locale,
+      t('cartOrder.serviceModal.quote'),
+    );
+    setServiceCategories(categories);
+    const allItems = categories.flatMap((c) => c.items);
+    setDetailService((prev) => {
+      if (prev) {
+        const match = allItems.find((s) => s.id === prev.id);
+        if (match) return match;
+      }
+      return allItems[0] ?? null;
+    });
+    setPendingServices((prev) =>
+      prev
+        .map((p) => allItems.find((s) => s.id === p.id))
+        .filter((s): s is ExtraService => !!s),
+    );
+  }, [locale, t]);
 
   const [cards, setCards] = useState<CartCard[]>([]);
   const [cartLoading, setCartLoading] = useState(true);
@@ -303,10 +320,70 @@ const CartScreen: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locale]);
 
-  // Reload whenever the screen mounts or the UI language changes.
-  useEffect(() => {
-    loadCart();
-  }, [loadCart]);
+  const applyCartFromBuyNowResponse = useCallback(
+    (
+      cartResponse: CartScreenParams['cartResponse'],
+      selectCartItemId?: string,
+      offerId?: string,
+      openOrderModal = true,
+    ) => {
+      const items = (cartResponse?.cart?.items || []) as CartItem[];
+      const mappedCards = items.map((item, idx) => {
+        const mapped = mapCartItemToCard(item, idx, locale);
+        const matchesId =
+          selectCartItemId &&
+          (mapped.id === selectCartItemId ||
+            item._id === selectCartItemId);
+        const matchesOffer =
+          offerId && item.offerId?.toString() === offerId.toString();
+        return {
+          ...mapped,
+          checked: Boolean(matchesId || matchesOffer),
+        };
+      });
+
+      if (openOrderModal && !mappedCards.some((c) => c.checked) && mappedCards.length > 0) {
+        mappedCards[mappedCards.length - 1].checked = true;
+      }
+
+      setCards(mappedCards);
+      setCartError(null);
+      setCartLoading(false);
+      if (openOrderModal) {
+        pendingBuyNowOrderRef.current = true;
+        buyNowOrderModalOpenedRef.current = false;
+      }
+    },
+    [locale],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const params = route.params;
+      if (params?.fromBuyNow && params?.cartResponse) {
+        applyCartFromBuyNowResponse(
+          params.cartResponse,
+          params.selectCartItemId,
+          params.offerId,
+          params.openOrderModal !== false,
+        );
+        skipLoadCartOnceRef.current = true;
+        navigation.setParams({
+          fromBuyNow: undefined,
+          openOrderModal: undefined,
+          cartResponse: undefined,
+          selectCartItemId: undefined,
+          offerId: undefined,
+        });
+        return;
+      }
+      if (skipLoadCartOnceRef.current) {
+        skipLoadCartOnceRef.current = false;
+        return;
+      }
+      loadCart();
+    }, [applyCartFromBuyNowResponse, loadCart, navigation, route.params]),
+  );
 
   const formatElapsed = (ms: number): string => {
     const sec = Math.max(0, Math.floor(ms / 1000));
@@ -381,10 +458,11 @@ const CartScreen: React.FC = () => {
     setCards((prev) => prev.map((c) => (c.expanded ? { ...c, expanded: false } : c)));
   };
 
-  const openServiceModal = () => {
+  const openServiceModal = useCallback(() => {
     setPendingServices(extraServices);
     setShowServiceModal(true);
-  };
+    void loadAdditionalServices();
+  }, [extraServices, loadAdditionalServices]);
 
   const closeServiceModal = () => {
     setShowServiceModal(false);
@@ -506,6 +584,35 @@ const CartScreen: React.FC = () => {
     });
   };
 
+  const renderExtraServiceBar = () => (
+    <View style={[styles.extraBar, styles.extraBarInOrderModal]}>
+      <Text style={styles.extraLabel}>{t('cartOrder.extraServiceBar.title')}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.extraChipsScroll}
+        contentContainerStyle={styles.extraChipsContent}
+      >
+        {extraServices.length === 0 ? (
+          <Text style={styles.extraPlaceholder}>{t('cartOrder.extraServiceBar.placeholder')}</Text>
+        ) : (
+          extraServices.map((s) => (
+            <View key={s.id} style={styles.extraChip}>
+              <Text style={styles.extraChipText}>{s.name}</Text>
+              <TouchableOpacity onPress={() => toggleExtraService(s)}>
+                <Icon name="close" size={10} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
+          ))
+        )}
+      </ScrollView>
+      <TouchableOpacity style={styles.extraSelectBtn} onPress={openServiceModal}>
+        <Icon name="add" size={12} color={COLORS.white} />
+        <Text style={styles.extraSelectBtnText}>{t('cartOrder.extraServiceBar.selectBtn')}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   const filteredCards = cards.filter((c) => {
     if (searchQuery && !c.productName.toLowerCase().includes(searchQuery.toLowerCase())) {
       return false;
@@ -519,8 +626,15 @@ const CartScreen: React.FC = () => {
   const totalQty = filteredCards.reduce((s, c) => s + c.quantity, 0);
   const grandTotal = filteredCards.reduce((s, c) => s + c.quantity * c.unitPrice, 0);
   const checkedCards = cards.filter((c) => c.checked);
+  const hasSelectedCards = checkedCards.length > 0;
   const checkedQty = checkedCards.reduce((s, c) => s + c.quantity, 0);
   const checkedTotal = checkedCards.reduce((s, c) => s + c.quantity * c.unitPrice, 0);
+  const isOrderNowEnabled = hasSelectedCards && !profileLoading;
+
+  const showOrderModalRef = useRef(showOrderModal);
+  showOrderModalRef.current = showOrderModal;
+
+  const orderProfileRefreshInFlightRef = useRef(false);
 
   const applyProfileFromApi = useCallback(
     (apiUser: Record<string, any>) => {
@@ -558,15 +672,41 @@ const CartScreen: React.FC = () => {
         ? `${apiUser.userName || apiUser.users_id || ''} (${apiUser.userUniqueId || apiUser.tjMemberId || ''})`
         : t('cartOrder.orderModal.personal');
       setBusinessInfoSelected(businessLabel);
-
-      updateUser(mapProfileApiUserToUser(apiUser, user || undefined));
+      // Order modal uses local state only — avoid updateUser() here to prevent
+      // auth/socket/focus-effect loops from repeated profile refetches.
     },
-    [t, updateUser, user],
+    [t],
   );
+
+  const refreshOrderProfile = useCallback(async () => {
+    if (isGuest || !isAuthenticated || orderProfileRefreshInFlightRef.current) return;
+    orderProfileRefreshInFlightRef.current = true;
+    try {
+      const res = await getProfile();
+      if (res.success && res.data?.user) {
+        applyProfileFromApi(res.data.user);
+      }
+    } catch {
+      /* profile refresh optional */
+    } finally {
+      orderProfileRefreshInFlightRef.current = false;
+    }
+  }, [applyProfileFromApi, isAuthenticated, isGuest]);
+
+  const refreshOrderProfileRef = useRef(refreshOrderProfile);
+  refreshOrderProfileRef.current = refreshOrderProfile;
+
+  /** Refresh when screen gains focus (e.g. back from Address Book), not when callbacks change. */
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      if (!showOrderModalRef.current) return;
+      void refreshOrderProfileRef.current();
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const showRecipientPicker = useCallback(() => {
     if (profileAddresses.length === 0) {
-      Alert.alert(t('cartOrder.alerts.notice'), t('cartOrder.orderModal.noAddress'));
       return;
     }
     Alert.alert(
@@ -588,6 +728,41 @@ const CartScreen: React.FC = () => {
     );
   }, [profileAddresses, t]);
 
+  const handleUseNewAddress = useCallback(() => {
+    setShowAddNewAddressModal(true);
+  }, []);
+
+  const handleManageAddresses = useCallback(() => {
+    navigation.navigate('AddressBook' as never, { fromShippingSettings: true } as never);
+  }, [navigation]);
+
+  const openOrderInfoModal = useCallback(async () => {
+    if (isGuest || !isAuthenticated) {
+      navigation.navigate('Auth' as never, { screen: 'Login' } as never);
+      return false;
+    }
+
+    setProfileLoading(true);
+    try {
+      const res = await getProfile();
+      if (res.success && res.data?.user) {
+        applyProfileFromApi(res.data.user);
+        setShowOrderModal(true);
+        return true;
+      }
+      Alert.alert(
+        t('cartOrder.alerts.error'),
+        res.error || t('cartOrder.orderModal.orderFailed'),
+      );
+      return false;
+    } catch {
+      Alert.alert(t('cartOrder.alerts.error'), t('cartOrder.orderModal.orderFailed'));
+      return false;
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [applyProfileFromApi, isAuthenticated, isGuest, navigation, t]);
+
   const handlePressOrderNow = useCallback(async () => {
     if (checkedCards.length === 0) {
       Alert.alert(
@@ -598,36 +773,36 @@ const CartScreen: React.FC = () => {
       return;
     }
 
-    if (isGuest || !isAuthenticated) {
-      navigation.navigate('Auth' as never, { screen: 'Login' } as never);
+    await openOrderInfoModal();
+  }, [checkedCards.length, openOrderInfoModal, t]);
+
+  /** After product-detail Buy Now: keep item checked and open order modal once */
+  useEffect(() => {
+    if (!pendingBuyNowOrderRef.current || buyNowOrderModalOpenedRef.current) {
+      return;
+    }
+    if (cartLoading || profileLoading) {
+      return;
+    }
+    if (!cards.some((c) => c.checked)) {
       return;
     }
 
-    setProfileLoading(true);
-    try {
-      const res = await getProfile();
-      if (res.success && res.data?.user) {
-        applyProfileFromApi(res.data.user);
-        setShowOrderModal(true);
-      } else {
-        Alert.alert(
-          t('cartOrder.alerts.error'),
-          res.error || t('cartOrder.orderModal.orderFailed'),
-        );
-      }
-    } catch {
-      Alert.alert(t('cartOrder.alerts.error'), t('cartOrder.orderModal.orderFailed'));
-    } finally {
-      setProfileLoading(false);
-    }
-  }, [
-    applyProfileFromApi,
-    checkedCards.length,
-    isAuthenticated,
-    isGuest,
-    navigation,
-    t,
-  ]);
+    buyNowOrderModalOpenedRef.current = true;
+    pendingBuyNowOrderRef.current = false;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        void openOrderInfoModal();
+      }, 300);
+    });
+
+    return () => {
+      task.cancel();
+      if (timer) clearTimeout(timer);
+    };
+  }, [cards, cartLoading, openOrderInfoModal, profileLoading]);
 
   const handleConfirmOrder = useCallback(async () => {
     if (!selectedAddressId) {
@@ -674,9 +849,25 @@ const CartScreen: React.FC = () => {
         (checkoutData.productTotalKRW ?? 0) + (checkoutData.shippingTotalKRW ?? 0),
       );
 
+      const orderLineItems = buildCreateOrderLineItems(
+        cartItemIds,
+        quantities,
+        checkoutData.selectedItems ?? [],
+        checkedCards.map((c) => ({
+          id: c.id,
+          offerId: c.offerId,
+          productName: c.productName,
+          productImage: c.productImage,
+          source: c.source,
+          quantity: c.quantity,
+        })),
+        locale,
+      );
+
       await createOrder({
         cartItems: cartItemIds,
         quantities,
+        items: orderLineItems,
         netExpectedTotalKRW,
         estimatedShippingCostBySeller: checkoutData.estimatedShippingCostBySeller,
         orderType: orderTypeMap[applicationType],
@@ -711,6 +902,7 @@ const CartScreen: React.FC = () => {
     selectedAddressId,
     shippingMethod,
     shippingPayment,
+    locale,
     t,
   ]);
 
@@ -757,13 +949,19 @@ const CartScreen: React.FC = () => {
         <View style={styles.cardMiddle}>
           {/* Left: image + info */}
           <View style={styles.middleLeft}>
-            {card.productImage ? (
-              <Image source={{ uri: card.productImage }} style={styles.productImage} />
-            ) : (
-              <View style={[styles.productImage, styles.productImagePlaceholder]}>
-                <Icon name="cube-outline" size={22} color={COLORS.gray[400]} />
-              </View>
-            )}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => navigateToProductDetail(card)}
+              style={styles.productImagePressable}
+            >
+              {card.productImage ? (
+                <Image source={{ uri: card.productImage }} style={styles.productImage} />
+              ) : (
+                <View style={[styles.productImage, styles.productImagePlaceholder]}>
+                  <Icon name="cube-outline" size={22} color={COLORS.gray[400]} />
+                </View>
+              )}
+            </TouchableOpacity>
             <View style={styles.productInfo}>
               <View style={styles.productNameBox}>
                 <Text style={styles.productName} numberOfLines={1}>
@@ -858,6 +1056,7 @@ const CartScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.topSection}>
       {/* PAGE TITLE */}
       <View style={styles.pageHeader}>
         <Icon name="cart-outline" size={22} color={COLORS.secondary} />
@@ -918,63 +1117,36 @@ const CartScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* 부가서비스 bar — directly under the header */}
-      <View style={styles.extraBar}>
-        <Text style={styles.extraLabel}>{t('cartOrder.extraServiceBar.title')}</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.extraChipsScroll}
-          contentContainerStyle={styles.extraChipsContent}
+      <View style={styles.tabsRow}>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'past' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('past')}
         >
-          {extraServices.length === 0 ? (
-            <Text style={styles.extraPlaceholder}>{t('cartOrder.extraServiceBar.placeholder')}</Text>
-          ) : (
-            extraServices.map((s) => (
-              <View key={s.id} style={styles.extraChip}>
-                <Text style={styles.extraChipText}>{tServiceName(s.id)}</Text>
-                <TouchableOpacity onPress={() => toggleExtraService(s)}>
-                  <Icon name="close" size={10} color={COLORS.primary} />
-                </TouchableOpacity>
-              </View>
-            ))
-          )}
-        </ScrollView>
-        <TouchableOpacity style={styles.extraSelectBtn} onPress={openServiceModal}>
-          <Icon name="add" size={12} color={COLORS.white} />
-          <Text style={styles.extraSelectBtnText}>{t('cartOrder.extraServiceBar.selectBtn')}</Text>
+          <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>
+            {t('cartOrder.tabs.past')}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'bundles' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('bundles')}
+        >
+          <Text style={[styles.tabText, activeTab === 'bundles' && styles.tabTextActive]}>
+            {t('cartOrder.tabs.bundles')}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'offline' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('offline')}
+        >
+          <Text style={[styles.tabText, activeTab === 'offline' && styles.tabTextActive]}>
+            {t('cartOrder.tabs.offline')}
+          </Text>
         </TouchableOpacity>
       </View>
+      </View>
 
-      {/* BODY — see-through */}
+      {/* BODY — cart list */}
       <View style={styles.body}>
-        <View style={styles.tabsRow}>
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'past' && styles.tabBtnActive]}
-            onPress={() => setActiveTab('past')}
-          >
-            <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>
-              {t('cartOrder.tabs.past')}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'bundles' && styles.tabBtnActive]}
-            onPress={() => setActiveTab('bundles')}
-          >
-            <Text style={[styles.tabText, activeTab === 'bundles' && styles.tabTextActive]}>
-              {t('cartOrder.tabs.bundles')}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'offline' && styles.tabBtnActive]}
-            onPress={() => setActiveTab('offline')}
-          >
-            <Text style={[styles.tabText, activeTab === 'offline' && styles.tabTextActive]}>
-              {t('cartOrder.tabs.offline')}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         <ScrollView
           style={styles.cardsList}
           contentContainerStyle={styles.cardsContent}
@@ -1021,9 +1193,14 @@ const CartScreen: React.FC = () => {
             {t('cartOrder.summary.total')} ¥{(checkedQty > 0 ? checkedTotal : grandTotal).toFixed(2)}
           </Text>
           <TouchableOpacity
-            style={[styles.orderBtn, profileLoading && styles.orderBtnDisabled]}
+            style={[
+              styles.orderBtn,
+              hasSelectedCards && styles.orderBtnEnabled,
+              !isOrderNowEnabled && styles.orderBtnDisabled,
+            ]}
             onPress={handlePressOrderNow}
-            disabled={profileLoading}
+            disabled={!isOrderNowEnabled}
+            activeOpacity={hasSelectedCards ? 0.85 : 1}
           >
             {profileLoading ? (
               <ActivityIndicator size="small" color={COLORS.white} />
@@ -1198,13 +1375,69 @@ const CartScreen: React.FC = () => {
 
                 <View style={styles.orderFieldRow}>
                   <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.recipientInfo')}</Text>
-                  <TouchableOpacity style={styles.selectBtn} onPress={showRecipientPicker}>
+                  <View style={styles.selectBtn}>
                     <Text style={styles.selectBtnText} numberOfLines={2}>
                       {recipientInfoSelected || t('cartOrder.orderModal.selectPlaceholder')}
                     </Text>
-                    <Icon name="chevron-forward" size={14} color={COLORS.gray[500]} />
-                  </TouchableOpacity>
+                  </View>
                 </View>
+
+                <View style={styles.deliveryAddressSection}>
+                  <View style={styles.deliveryAddressHeader}>
+                    <Text style={styles.deliveryAddressTitle}>
+                      {t('cartOrder.orderModal.deliveryAddressConfirm')}
+                    </Text>
+                    <View style={styles.deliveryAddressActions}>
+                      <TouchableOpacity
+                        style={styles.deliveryAddressActionBtn}
+                        onPress={handleUseNewAddress}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.deliveryAddressIconCircle}>
+                          <Icon name="add" size={14} color={COLORS.gray[700]} />
+                        </View>
+                        <Text style={styles.deliveryAddressActionText}>
+                          {t('cartOrder.orderModal.useNewAddress')}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deliveryAddressActionBtn}
+                        onPress={handleManageAddresses}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.deliveryAddressIconCircle}>
+                          <Icon name="create-outline" size={14} color={COLORS.gray[700]} />
+                        </View>
+                        <Text style={styles.deliveryAddressActionText}>
+                          {t('cartOrder.orderModal.manageAddresses')}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {profileAddresses.length === 0 ? (
+                    <View style={styles.deliveryAddressEmptyBox}>
+                      <Text style={styles.deliveryAddressEmptyText}>
+                        {t('cartOrder.orderModal.noRegisteredReceivingAddress')}
+                      </Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.deliveryAddressFilledBox}
+                      onPress={showRecipientPicker}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.deliveryAddressFilledText} numberOfLines={3}>
+                        {recipientInfoSelected || t('cartOrder.orderModal.selectPlaceholder')}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              {/* 부가서비스 — same selection as cart page */}
+              <View style={styles.orderExtraServiceSection}>
+                {renderExtraServiceBar()}
               </View>
             </ScrollView>
 
@@ -1234,6 +1467,14 @@ const CartScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      <AddNewAddressModal
+        visible={showAddNewAddressModal}
+        onClose={() => setShowAddNewAddressModal(false)}
+        onSuccess={() => {
+          void refreshOrderProfile();
+        }}
+      />
 
       {/* 라벨설정 MODAL */}
       <Modal
@@ -1471,14 +1712,24 @@ const CartScreen: React.FC = () => {
               {/* TOP — product/service detail (middle section) */}
               <View style={styles.detailSection}>
                 <View style={styles.detailImageWrap}>
-                  {detailService ? (
-                    <Icon name={(detailService.icon as any) || 'cube-outline'} size={72} color={PRIMARY} />
+                  {detailService?.imageUrl ? (
+                    <Image
+                      source={{ uri: detailService.imageUrl }}
+                      style={styles.detailServiceImage}
+                      resizeMode="contain"
+                    />
+                  ) : detailService?.iconUrl ? (
+                    <Image
+                      source={{ uri: detailService.iconUrl }}
+                      style={styles.detailServiceIconImage}
+                      resizeMode="contain"
+                    />
                   ) : (
                     <Icon name="cube-outline" size={72} color={COLORS.gray[300]} />
                   )}
                 </View>
                 <Text style={styles.detailName}>
-                  {detailService ? tServiceName(detailService.id) : t('cartOrder.serviceModal.selectPrompt')}
+                  {detailService?.name || t('cartOrder.serviceModal.selectPrompt')}
                 </Text>
                 {detailService?.price ? (
                   <Text style={styles.detailPriceRow}>
@@ -1530,53 +1781,85 @@ const CartScreen: React.FC = () => {
 
               {/* BOTTOM — service categories (left section) */}
               <View style={styles.categoriesSection}>
-                {SERVICE_CATEGORIES.map((cat) => (
-                  <View key={cat.id} style={styles.categoryBlock}>
-                    <Text style={styles.categoryTitle}>
-                      {tCategoryTitle(cat.id)}
-                      {cat.required ? (
-                        <Text style={styles.categoryRequired}> {t('cartOrder.serviceModal.required')}</Text>
-                      ) : null}
+                {servicesLoading ? (
+                  <View style={styles.servicesLoadingWrap}>
+                    <ActivityIndicator size="small" color={PRIMARY} />
+                    <Text style={styles.servicesLoadingText}>
+                      {t('cartOrder.serviceModal.loading')}
                     </Text>
-                    <View style={styles.categoryGrid}>
-                      {cat.items.map((svc) => {
-                        const selected = pendingServices.some((s) => s.id === svc.id);
-                        const focused = detailService?.id === svc.id;
-                        return (
-                          <TouchableOpacity
-                            key={svc.id}
-                            style={[
-                              styles.serviceTile,
-                              selected && styles.serviceTileSelected,
-                              focused && !selected && styles.serviceTileFocused,
-                            ]}
-                            onPress={() => togglePendingService(svc)}
-                          >
-                            <Icon
-                              name={(svc.icon as any) || 'cube-outline'}
-                              size={24}
-                              color={selected ? PRIMARY : COLORS.text.primary}
-                            />
-                            {selected && (
-                              <View style={styles.serviceTileCheck}>
-                                <Icon name="checkmark" size={10} color={COLORS.white} />
-                              </View>
-                            )}
-                            <Text
-                              style={[
-                                styles.serviceTileText,
-                                selected && styles.serviceTileTextSelected,
-                              ]}
-                              numberOfLines={2}
-                            >
-                              {tServiceName(svc.id)}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
                   </View>
-                ))}
+                ) : servicesError ? (
+                  <View style={styles.servicesErrorWrap}>
+                    <Text style={styles.servicesErrorText}>{servicesError}</Text>
+                    <TouchableOpacity
+                      style={styles.servicesRetryBtn}
+                      onPress={() => void loadAdditionalServices()}
+                    >
+                      <Text style={styles.servicesRetryText}>
+                        {t('cartOrder.serviceModal.retry')}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  serviceCategories.map((cat) => (
+                    <View key={cat.id} style={styles.categoryBlock}>
+                      <Text style={styles.categoryTitle}>
+                        {tCategoryTitle(cat.id)}
+                        {cat.required ? (
+                          <Text style={styles.categoryRequired}>
+                            {' '}
+                            {t('cartOrder.serviceModal.required')}
+                          </Text>
+                        ) : null}
+                      </Text>
+                      <View style={styles.categoryGrid}>
+                        {cat.items.map((svc) => {
+                          const selected = pendingServices.some((s) => s.id === svc.id);
+                          const focused = detailService?.id === svc.id;
+                          return (
+                            <TouchableOpacity
+                              key={svc.id}
+                              style={[
+                                styles.serviceTile,
+                                selected && styles.serviceTileSelected,
+                                focused && !selected && styles.serviceTileFocused,
+                              ]}
+                              onPress={() => togglePendingService(svc)}
+                            >
+                              {svc.iconUrl ? (
+                                <Image
+                                  source={{ uri: svc.iconUrl }}
+                                  style={styles.serviceTileIcon}
+                                  resizeMode="contain"
+                                />
+                              ) : (
+                                <Icon
+                                  name="cube-outline"
+                                  size={24}
+                                  color={selected ? PRIMARY : COLORS.text.primary}
+                                />
+                              )}
+                              {selected && (
+                                <View style={styles.serviceTileCheck}>
+                                  <Icon name="checkmark" size={10} color={COLORS.white} />
+                                </View>
+                              )}
+                              <Text
+                                style={[
+                                  styles.serviceTileText,
+                                  selected && styles.serviceTileTextSelected,
+                                ]}
+                                numberOfLines={2}
+                              >
+                                {svc.name}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  ))
+                )}
               </View>
             </ScrollView>
 
@@ -1608,7 +1891,10 @@ const PRIMARY_SOFT = 'rgba(255, 85, 0, 0.10)';
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.white,
+  },
+  topSection: {
+    backgroundColor: COLORS.white,
   },
   // PAGE TITLE
   pageHeader: {
@@ -1779,6 +2065,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginLeft: 3,
   },
+  orderExtraServiceSection: {
+    marginTop: SPACING.md,
+    paddingTop: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
+  },
+  extraBarInOrderModal: {
+    borderBottomWidth: 0,
+    paddingHorizontal: 0,
+    backgroundColor: 'transparent',
+  },
   // MODAL
   modalOverlay: {
     flex: 1,
@@ -1829,6 +2126,49 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
+    overflow: 'hidden',
+  },
+  detailServiceImage: {
+    width: '100%',
+    height: '100%',
+  },
+  detailServiceIconImage: {
+    width: 96,
+    height: 96,
+  },
+  servicesLoadingWrap: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  servicesLoadingText: {
+    marginTop: 8,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.gray[500],
+  },
+  servicesErrorWrap: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  servicesErrorText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.gray[600],
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  servicesRetryBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: PRIMARY,
+  },
+  servicesRetryText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.white,
+    fontWeight: '700',
+  },
+  serviceTileIcon: {
+    width: 28,
+    height: 28,
   },
   detailName: {
     fontSize: FONTS.sizes.md,
@@ -2037,21 +2377,23 @@ const styles = StyleSheet.create({
   // BODY
   body: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: COLORS.background,
   },
   tabsRow: {
     flexDirection: 'row',
     paddingHorizontal: SPACING.md,
     paddingTop: 12,
     paddingBottom: 8,
-    backgroundColor: 'transparent',
+    backgroundColor: COLORS.white,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[100],
   },
   tabBtn: {
     flex: 1,
     paddingVertical: 10,
     marginHorizontal: 4,
     borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    backgroundColor: COLORS.gray[100],
     borderWidth: 1,
     borderColor: COLORS.gray[200],
     alignItems: 'center',
@@ -2175,12 +2517,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  productImagePressable: {
+    marginRight: 10,
+  },
   productImage: {
     width: 52,
     height: 52,
     borderRadius: 10,
     backgroundColor: COLORS.gray[100],
-    marginRight: 10,
   },
   productImagePlaceholder: {
     alignItems: 'center',
@@ -2458,6 +2802,12 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
     elevation: 3,
+  },
+  orderBtnEnabled: {
+    backgroundColor: PRIMARY,
+    shadowOpacity: 0.55,
+    shadowRadius: 12,
+    elevation: 6,
   },
   orderBtnText: {
     fontSize: FONTS.sizes.sm,
@@ -2768,6 +3118,78 @@ const styles = StyleSheet.create({
     color: COLORS.text.primary,
     fontWeight: '600',
   },
+  deliveryAddressSection: {
+    marginTop: 14,
+  },
+  deliveryAddressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    marginBottom: 10,
+    gap: 8,
+  },
+  deliveryAddressTitle: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '800',
+    color: COLORS.text.primary,
+    flexShrink: 0,
+  },
+  deliveryAddressActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+  },
+  deliveryAddressActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 10,
+  },
+  deliveryAddressIconCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: COLORS.gray[200],
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 5,
+  },
+  deliveryAddressActionText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  deliveryAddressEmptyBox: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: COLORS.gray[300],
+    borderRadius: 8,
+    paddingVertical: 28,
+    paddingHorizontal: 14,
+    minHeight: 72,
+    justifyContent: 'center',
+  },
+  deliveryAddressEmptyText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.gray[400],
+  },
+  deliveryAddressFilledBox: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: COLORS.gray[300],
+    borderRadius: 8,
+    paddingVertical: 20,
+    paddingHorizontal: 14,
+    minHeight: 72,
+    justifyContent: 'center',
+  },
+  deliveryAddressFilledText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
   depositBalanceText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
@@ -2775,7 +3197,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   orderBtnDisabled: {
-    opacity: 0.6,
+    backgroundColor: COLORS.gray[400],
+    opacity: 0.85,
+    shadowOpacity: 0,
+    elevation: 0,
   },
 });
 

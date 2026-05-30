@@ -395,6 +395,7 @@ const MessageScreen: React.FC<MessageScreenProps> = ({ initialTabOverride, onEmb
     if (!status) return '';
     const map: Record<string, string> = {
       'BUY_PAY_WAIT': 'message.progressStatus.paymentPending',
+      'P_PENDING': 'message.progressStatus.paymentPending',
       'BUY_PAY_DONE': 'message.progressStatus.purchaseInProgress',
       'BUYING_MANUAL': 'message.progressStatus.buyingInProgress',
       'WH_ARRIVE_EXPECTED': 'message.progressStatus.shippingPending',

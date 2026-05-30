@@ -29,7 +29,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { RootStackParamList, Product, Story } from '../../types';
 
-import { SearchButton, NotificationBadge, ImagePickerModal } from '../../components';
+import { SearchButton, NotificationBadge, ImagePickerModal, MemberAvatar } from '../../components';
 import { usePlatformStore } from '../../store/platformStore';
 import { useAppSelector } from '../../store/hooks';
 import { translations } from '../../i18n/translations';
@@ -79,52 +79,6 @@ const getHomeMemberDisplayName = (user: {
   user.name?.trim() ||
   user.email?.trim() ||
   'User';
-
-const isValidMemberAvatarUri = (avatar?: string | null): boolean =>
-  !!avatar &&
-  typeof avatar === 'string' &&
-  avatar.trim() !== '' &&
-  !avatar.includes('via.placeholder.com');
-
-type MemberAvatarProps = {
-  uri?: string | null;
-  displayName: string;
-  size?: number;
-};
-
-const MemberAvatar: React.FC<MemberAvatarProps> = ({ uri, displayName, size = 48 }) => {
-  const [loadFailed, setLoadFailed] = useState(false);
-  useEffect(() => {
-    setLoadFailed(false);
-  }, [uri]);
-  const initial = (displayName.trim().charAt(0) || 'U').toUpperCase();
-  const avatarUri = isValidMemberAvatarUri(uri) && !loadFailed ? uri!.trim() : null;
-  const radius = size / 2;
-
-  if (!avatarUri) {
-    return (
-      <View
-        style={[
-          styles.uosAvatar,
-          styles.uosAvatarFallback,
-          { width: size, height: size, borderRadius: radius },
-        ]}
-      >
-        <Text style={[styles.uosAvatarFallbackText, { fontSize: Math.round(size * 0.42) }]}>
-          {initial}
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <Image
-      source={{ uri: avatarUri }}
-      style={[styles.uosAvatar, { width: size, height: size, borderRadius: radius }]}
-      onError={() => setLoadFailed(true)}
-    />
-  );
-};
 
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
@@ -1064,7 +1018,7 @@ const HomeScreen: React.FC = () => {
       <View style={styles.uosOuter}>
         {/* User header */}
         <View style={styles.uosUserHeader}>
-          <MemberAvatar uri={user.avatar} displayName={displayName} />
+          <MemberAvatar uri={user.avatar} displayName={displayName} style={styles.uosAvatar} />
           <View style={styles.uosUserNameCol}>
             <Text style={styles.uosUserName} numberOfLines={1}>{displayName}</Text>
             <Text style={styles.uosUserMember}>{memberLabel}</Text>

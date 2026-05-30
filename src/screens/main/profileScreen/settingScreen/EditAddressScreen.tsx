@@ -20,6 +20,7 @@ import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../../../cons
 import { RootStackParamList, Address, CustomSwitchProps } from '../../../../types';
 import { useAuth } from '../../../../context/AuthContext';
 import { useUpdateAddressMutation } from '../../../../hooks/useUpdateAddressMutation';
+import { buildAddressSubmitBody } from '../../../../services/addressApi';
 import { useDeleteAddressMutation } from '../../../../hooks/useDeleteAddressMutation';
 
 type EditAddressScreenNavigationProp = StackNavigationProp<RootStackParamList, 'EditAddress'>;
@@ -114,22 +115,23 @@ const EditAddressScreen: React.FC = () => {
   });
 
   const handleSaveAddress = () => {
-    if (!formData.recipient || !formData.contact || !formData.personalCustomsCode || !formData.detailedAddress || !formData.zipCode) {
-      Alert.alert('Missing Information', 'Please fill in all required fields.');
+    const detail = formData.detailedAddress.trim();
+    if (!detail || detail.length < 2) {
+      Alert.alert('Missing Information', 'Please enter detailed address (at least 2 characters).');
       return;
     }
 
-    // Create the address data according to API structure
-    const addressData = {
-      customerClearanceType: isStoreAddress ? 'business' : 'individual',
+    const addressData = buildAddressSubmitBody({
+      addressType: isStoreAddress ? 'business' : 'personal',
       recipient: formData.recipient,
       contact: formData.contact,
-      personalCustomsCode: formData.personalCustomsCode,
-      detailedAddress: formData.detailedAddress,
+      mainAddress: '',
+      detailedAddress: detail,
       zipCode: formData.zipCode,
+      personalCustomsCode: formData.personalCustomsCode,
       defaultAddress: isPrimary,
-      note: formData.note || undefined,
-    };
+      note: formData.note,
+    });
 
     // Call the update address mutation
     updateAddress(address.id, addressData);

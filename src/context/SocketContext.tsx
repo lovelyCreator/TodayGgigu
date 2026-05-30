@@ -131,7 +131,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       setIsConnecting(false);
       setIsConnected(false);
     }
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated]);
 
   // Disconnect socket
   const disconnect = useCallback(() => {
@@ -680,9 +680,11 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     socket.removeAllListeners('note:deleted');
   }, []);
 
-  // Connect on mount and when auth state changes
+  const userId = user?.id ?? user?.email ?? null;
+
+  // Connect on mount and when auth identity changes (not every profile field update).
   useEffect(() => {
-    if (isAuthenticated && user) {
+    if (isAuthenticated && userId) {
       connect();
     } else {
       disconnect();
@@ -694,7 +696,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         removeListeners();
       }
     };
-  }, [isAuthenticated, user, connect, disconnect, removeListeners]);
+  }, [isAuthenticated, userId, connect, disconnect, removeListeners]);
 
 
   // Event handler registration (for custom callbacks)

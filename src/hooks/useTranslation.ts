@@ -1,19 +1,15 @@
+import { useCallback } from 'react';
 import { useAppSelector } from '../store/hooks';
-import { translations } from '../i18n/translations';
+import { translate, normalizeLocale, type AppLocale } from '../i18n/translate';
 
 export const useTranslation = () => {
-  const locale = useAppSelector((state) => state.i18n?.locale || 'ko');
+  const rawLocale = useAppSelector((state) => state.i18n?.locale);
+  const locale = normalizeLocale(rawLocale);
 
-  const t = (key: string): string => {
-    const keys = key.split('.');
-    let value: any = translations[locale as keyof typeof translations] || translations.ko;
-    
-    for (const k of keys) {
-      value = value?.[k];
-    }
-    
-    return value || key;
-  };
+  const t = useCallback(
+    (key: string, params?: Record<string, string>) => translate(key, locale, params),
+    [locale],
+  );
 
-  return { t, locale };
+  return { t, locale: locale as AppLocale };
 };

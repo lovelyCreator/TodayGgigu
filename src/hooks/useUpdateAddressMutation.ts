@@ -5,6 +5,7 @@ import { useGetProfileMutation } from './useGetProfileMutation';
 interface UseUpdateAddressMutationOptions {
   onSuccess?: (data: AddressesResponse) => void;
   onError?: (error: string) => void;
+  skipProfileRefetch?: boolean;
 }
 
 interface UseUpdateAddressMutationResult {
@@ -41,9 +42,10 @@ export const useUpdateAddressMutation = (
         setData(response.data);
         setIsSuccess(true);
         
-        // Refresh user profile to get updated addresses
-        fetchProfile();
-        
+        if (!options?.skipProfileRefetch) {
+          fetchProfile();
+        }
+
         options?.onSuccess?.(response.data);
       } else {
         const errorMessage = response.error || 'Failed to update address';

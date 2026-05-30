@@ -8,7 +8,6 @@ import {
   TouchableOpacity,
   Dimensions,
   FlatList,
-  SafeAreaView,
   Modal,
   StatusBar,
   Share,
@@ -33,7 +32,7 @@ import { useProductDetailMutation } from '../../hooks/useProductDetailMutation';
 import { useRelatedRecommendationsMutation } from '../../hooks/useRelatedRecommendationsMutation';
 import { useSearchProductsMutation } from '../../hooks/useSearchProductsMutation';
 import { useAddToCartMutation } from '../../hooks/useAddToCartMutation';
-import { useCheckoutDirectPurchaseMutation } from '../../hooks/useCheckoutDirectPurchaseMutation';
+import { AddToCartRequest } from '../../services/cartApi';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useToast } from '../../context/ToastContext';
 import { formatPriceKRW, getLocalizedText } from '../../utils/i18nHelpers';
@@ -42,12 +41,12 @@ import {
   normalizeProductImageUrl,
   normalizeProductImageUrls,
   pickTaobaoGalleryImages,
+  productImageUrlsMatch,
 } from '../../utils/productImageUrl';
 import ProductImage from '../../components/ProductImage';
 import { useWishlistStatus } from '../../hooks/useWishlistStatus';
 import { useAddToWishlistMutation } from '../../hooks/useAddToWishlistMutation';
 import { useDeleteFromWishlistMutation } from '../../hooks/useDeleteFromWishlistMutation';
-import { useGetCartMutation } from '../../hooks/useGetCartMutation';
 import { productsApi } from '../../services/productsApi';
 import HeartPlusIcon from '../../assets/icons/HeartPlusIcon';
 import FamilyStarIcon from '../../assets/icons/FamilyStarIcon';
@@ -74,6 +73,57 @@ import SearchImageIcon from '../../assets/icons/SearchImageIcon';
 
 const { width } = Dimensions.get('window');
 const IMAGE_HEIGHT = 400;
+
+const COLOR_VARIATION_PATTERN = /color|colour|颜色|색상|色彩|顏色/i;
+
+const isColorVariationType = (name: string): boolean =>
+  COLOR_VARIATION_PATTERN.test(name);
+
+/** SKU swatch for a specific variation value (e.g. color), normalized like the main gallery */
+const pickSkuImageForVariation = (
+  variant: any,
+  typeName: string,
+  value: string,
+): string => {
+  const typeLower = typeName.toLowerCase().trim();
+  const attrs = variant.attributes || variant.skuAttributes || [];
+  const matchingAttr = attrs.find((a: any) => {
+    const attrName = String(
+      a.attributeNameTrans || a.attributeName || a.prop_name || '',
+    )
+      .toLowerCase()
+      .trim();
+    const attrValue = String(
+      a.valueTrans || a.value || a.value_name || a.value_desc || '',
+    ).trim();
+    const nameMatches =
+      attrName === typeLower ||
+      (Boolean(attrName && typeLower) &&
+        (attrName.includes(typeLower) || typeLower.includes(attrName)));
+    return nameMatches && attrValue === value;
+  });
+  const candidate =
+    matchingAttr?.skuImageUrl ||
+    matchingAttr?.image ||
+    (isColorVariationType(typeName)
+      ? attrs.find((a: any) => a.skuImageUrl)?.skuImageUrl
+      : undefined) ||
+    variant.image;
+  return normalizeProductImageUrl(candidate || '');
+};
+
+const pickVariantRowImage = (sku: any, galleryFirst: string): string => {
+  const attrs = sku.skuAttributes || sku.attributes || [];
+  const colorAttr = attrs.find((a: any) =>
+    COLOR_VARIATION_PATTERN.test(
+      String(a.attributeNameTrans || a.attributeName || a.prop_name || ''),
+    ),
+  );
+  const anySkuImage = attrs.find((a: any) => a.skuImageUrl);
+  return normalizeProductImageUrl(
+    colorAttr?.skuImageUrl || anySkuImage?.skuImageUrl || galleryFirst,
+  );
+};
 
 const ProductDetailScreen: React.FC = () => {
   const route = useRoute<any>();
@@ -114,6 +164,21 @@ const ProductDetailScreen: React.FC = () => {
   // Scroll-based header animation
   const scrollY = useRef(new Animated.Value(0)).current;
   const HEADER_SCROLL_THRESHOLD = 80;
+  const headerBg = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_THRESHOLD],
+    outputRange: ['rgba(255,255,255,0)', COLORS.white],
+    extrapolate: 'clamp',
+  });
+  const searchBarOpacity = scrollY.interpolate({
+    inputRange: [HEADER_SCROLL_THRESHOLD * 0.5, HEADER_SCROLL_THRESHOLD],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  const cameraIconOpacity = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_THRESHOLD * 0.5],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
 
   // Image search state
   const [similarSearchVisible, setSimilarSearchVisible] = useState(false);
@@ -121,6 +186,7 @@ const ProductDetailScreen: React.FC = () => {
   const [similarSearchUri, setSimilarSearchUri] = useState<string>('');
   const [isFetchingBase64, setIsFetchingBase64] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const imageGalleryScrollRef = useRef<ScrollView>(null);
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [selectedVariations, setSelectedVariations] = useState<Record<string, string>>({});
@@ -182,11 +248,8 @@ const ProductDetailScreen: React.FC = () => {
   
   // Add to cart mutation (for Add to Cart button)
   const { mutate: addToCart, isLoading: isAddingToCart } = useAddToCartMutation({
-    onSuccess: (data) => {
-      // console.log('Product added to cart successfully:', data);
+    onSuccess: () => {
       showToast(t('product.addedToCart'), 'success');
-      // Navigate to cart screen
-      navigation.navigate('Cart');
     },
     onError: (error) => {
       // console.error('Failed to add product to cart:', error);
@@ -194,71 +257,6 @@ const ProductDetailScreen: React.FC = () => {
     },
   });
   
-  // Get cart mutation to fetch cart after adding product (for Buy Now - navigates to Payment)
-  const { mutate: fetchCart } = useGetCartMutation({
-    onSuccess: (data) => {
-      // console.log('Cart fetched after Buy Now:', data);
-      // Find the cart item we just added
-      const cartData = data?.cart;
-      const cartItems = cartData?.items || [];
-      
-      // Find the item that matches our product
-      const productIdForUrl = product?.offerId || product?.id || productId || offerId || '';
-      const addedCartItem = cartItems.find((item: any) => 
-        item.offerId?.toString() === productIdForUrl.toString() ||
-        item.productId?.toString() === productIdForUrl.toString()
-      );
-      
-      if (!addedCartItem) {
-        showToast(t('product.failedToFindCartItem'), 'error');
-        return;
-      }
-      
-      // Format the item for Payment screen (similar to CartScreen)
-      const price = parseFloat(addedCartItem.skuInfo?.price || addedCartItem.skuInfo?.consignPrice || addedCartItem.price || product?.price || '0');
-      const productQuantity = quantity;
-      
-      // Extract color and size from variations
-      const variations = (addedCartItem.skuInfo?.skuAttributes || []).map((attr: any) => ({
-        name: attr.attributeNameTrans || attr.attributeName || '',
-        value: attr.valueTrans || attr.value || '',
-      }));
-      
-      const colorVariation = variations.find((v: any) =>
-        v.name.toLowerCase().includes('color') || v.name.toLowerCase().includes('colour')
-      );
-      const sizeVariation = variations.find((v: any) =>
-        v.name.toLowerCase().includes('size')
-      );
-      
-      const paymentItem = {
-        id: addedCartItem.id || addedCartItem._id || productIdForUrl.toString(),
-        _id: addedCartItem._id, // Cart item ID from backend
-        name: product?.name || product?.subjectTrans || product?.subject || addedCartItem.subjectTrans || '',
-        color: colorVariation?.value || selectedVariations[Object.keys(selectedVariations).find(k => k.toLowerCase().includes('color')) || ''] || undefined,
-        size: sizeVariation?.value || selectedVariations[Object.keys(selectedVariations).find(k => k.toLowerCase().includes('size')) || ''] || undefined,
-        price: price,
-        quantity: productQuantity,
-        image: product?.images?.[0] || product?.image || addedCartItem.imageUrl || '',
-      };
-      
-      const totalAmount = price * productQuantity;
-      
-      // Navigate directly to Payment page (like CartScreen does)
-      navigation.navigate('Payment', {
-        items: [paymentItem],
-        totalAmount: totalAmount,
-        fromCart: false, // Indicate this is from Buy Now, not cart
-        selectedAddress: user?.addresses?.find(addr => addr.isDefault) || user?.addresses?.[0],
-      });
-    },
-    onError: (error) => {
-      // console.error('Failed to fetch cart after Buy Now:', error);
-      showToast(t('product.failedToProceed'), 'error');
-    },
-  });
-
-  // Direct purchase checkout (Buy Now) - POST /cart/checkout/direct-purchase, then navigate to Payment with response
   const resolveText = (value: unknown): string => {
     if (value == null) return '';
     if (typeof value === 'string') return value;
@@ -269,47 +267,36 @@ const ProductDetailScreen: React.FC = () => {
     return String(value);
   };
 
-  const { mutate: checkoutDirectPurchase, isLoading: isAddingToCartForBuyNow } = useCheckoutDirectPurchaseMutation({
-    onSuccess: (data) => {
-      if (!data.selectedItems || data.selectedItems.length === 0) {
-        showToast(t('product.failedToProceed'), 'error');
-        return;
-      }
-      const paymentItems = data.selectedItems.map((item: any) => ({
-        id: item._id,
-        _id: item._id,
-        offerId: item.offerId,
-        name: resolveText(item.subjectMultiLang ?? item.subjectTrans ?? item.subject) || '',
-        price: item.previewFinalUnitPriceKRW ?? parseFloat(item.skuInfo?.price || '0'),
-        quantity: item.quantity,
-        image: item.imageUrl,
-        source: item.source,
-        skuInfo: item.skuInfo,
-        companyName: resolveText(item.companyName) || '',
-        sellerOpenId: item.sellerOpenId,
-      }));
-      const totalAmount = data.productTotalKRW ?? paymentItems.reduce((sum: number, i: any) => sum + (i.price * i.quantity), 0);
-      navigation.navigate('Payment', {
-        items: paymentItems,
-        totalAmount,
-        fromCart: false,
-        estimatedShippingCost: data.estimatedShippingCost ?? 0,
-        estimatedShippingCostBySeller: data.estimatedShippingCostBySeller ?? {},
-        checkoutData: {
-          productTotalKRW: data.productTotalKRW,
-          shippingTotalKRW: data.shippingTotalKRW,
-          estimatedShippingCost: data.estimatedShippingCost,
-          estimatedShippingCostBySeller: data.estimatedShippingCostBySeller,
-          availableCoupons: data.availableCoupons,
-          availablePoints: data.availablePoints,
-          transportationMethods: data.transportationMethods,
-          additionalServicePrices: data.additionalServicePrices,
-          serviceFeePercentage: data.serviceFeePercentage,
-          estimatedRuralCost: data.estimatedRuralCost,
+  const navigateToCartAfterBuyNow = useCallback(
+    (cartResponse: { cart?: { items?: any[] } }) => {
+      const cartItems = cartResponse?.cart?.items || [];
+      const productIdForUrl = product?.offerId || product?.id || productId || offerId || '';
+      const addedCartItem =
+        cartItems.find(
+          (item: any) =>
+            item.offerId?.toString() === productIdForUrl.toString() ||
+            item.productId?.toString() === productIdForUrl.toString(),
+        ) || (cartItems.length > 0 ? cartItems[cartItems.length - 1] : undefined);
+
+      navigation.navigate('Main', {
+        screen: 'Cart',
+        params: {
+          fromBuyNow: true,
+          openOrderModal: true,
+          cartResponse,
+          selectCartItemId: addedCartItem?._id,
+          offerId: productIdForUrl.toString(),
         },
-        directPurchaseItems: data.selectedItems,
-        selectedAddress: user?.addresses?.find(addr => addr.isDefault) || user?.addresses?.[0],
-      });
+      } as never);
+    },
+    [navigation, offerId, product, productId],
+  );
+
+  const { mutate: addToCartForBuyNow, isLoading: isBuyingNow } = useAddToCartMutation({
+    onSuccess: (data) => {
+      showToast(t('product.addedToCart'), 'success');
+      const cartPayload = data?.cart ? data : { cart: data };
+      navigateToCartAfterBuyNow(cartPayload);
     },
     onError: (error) => {
       showToast(error || t('product.failedToProceed'), 'error');
@@ -751,8 +738,9 @@ const ProductDetailScreen: React.FC = () => {
         const apiProduct = data.product;
         
         // Extract images from productImage.images
-        const images = apiProduct.productImage?.images || [];
-        
+        const images = normalizeProductImageUrls(apiProduct.productImage?.images || []);
+        const galleryFirst = images[0] || '';
+
         // Map SKUs to variants
         const rawVariants = (apiProduct.productSkuInfos || []).map((sku: any) => ({
           id: sku.skuId?.toString() || '',
@@ -761,7 +749,7 @@ const ProductDetailScreen: React.FC = () => {
           ).join(' / ') || '',
           price: parseFloat(sku.price || sku.consignPrice || 0),
           stock: sku.amountOnSale || 0,
-          image: sku.skuAttributes?.[0]?.skuImageUrl || images[0] || '',
+          image: pickVariantRowImage(sku, galleryFirst),
           attributes: sku.skuAttributes || [],
           specId: sku.specId || '',
           skuId: sku.skuId?.toString() || '',
@@ -1019,7 +1007,11 @@ const ProductDetailScreen: React.FC = () => {
     if (!product) return [];
     
     const variationTypesMap = new Map<string, Map<string, { value: string; image?: string; [key: string]: any }>>();
-    
+    const galleryFirst =
+      getApiProductImages(product)[0] ||
+      normalizeProductImageUrl((product as any).image) ||
+      '';
+
     // Get source to determine filtering logic
     const currentSource = (product as any).source || routeSource || selectedPlatform || '1688';
     
@@ -1077,13 +1069,26 @@ const ProductDetailScreen: React.FC = () => {
           
           const optionsMap = variationTypesMap.get(typeName)!;
           
-          // Only add if value doesn't exist (remove duplicates)
+          let imageUri = pickSkuImageForVariation(variant, typeName, value);
+          if (!imageUri && isColorVariationType(typeName)) {
+            imageUri = galleryFirst;
+          }
+          if (!imageUri) {
+            imageUri = normalizeProductImageUrl(variant.image || '') || galleryFirst;
+          }
+
           if (!optionsMap.has(value)) {
             optionsMap.set(value, {
-              value: value,
-              image: variant.image || undefined,
+              value,
+              image: imageUri || undefined,
               ...variant,
             });
+          } else {
+            const existing = optionsMap.get(value)!;
+            const existingUri = normalizeProductImageUrl(existing.image || '');
+            if (!existingUri && imageUri) {
+              optionsMap.set(value, { ...existing, image: imageUri, ...variant });
+            }
           }
         });
       });
@@ -1106,7 +1111,7 @@ const ProductDetailScreen: React.FC = () => {
     });
     
     return variationTypes;
-  }, [product, routeSource, selectedPlatform, selectedVariations]);
+  }, [product, routeSource, selectedPlatform, getApiProductImages]);
 
   // Check if all variation types are selected
   // IMPORTANT: This must be defined before early return to avoid hooks order issues
@@ -1132,6 +1137,100 @@ const ProductDetailScreen: React.FC = () => {
     
     return true; // All variations are selected
   }, [getVariationTypes, selectedVariations, selectedColor, selectedSize]);
+
+  /** Gallery list; prepends selected color SKU image when it is not already in the API gallery */
+  const displayGalleryImages = useMemo(() => {
+    const base = getApiProductImages(product);
+    if (!product) return base;
+
+    const variationTypes = getVariationTypes();
+    const colorType = variationTypes.find((vt) => isColorVariationType(vt.name));
+    if (!colorType) return base;
+
+    const colorKey = colorType.name.toLowerCase();
+    const selected =
+      selectedVariations[colorKey] ||
+      (selectedColor && isColorVariationType('color') ? selectedColor : null);
+    if (!selected) return base;
+
+    const option = colorType.options.find((o) => o.value === selected);
+    const galleryFirst = base[0] || '';
+    const colorUri =
+      normalizeProductImageUrl(option?.image || '') || galleryFirst;
+    if (!colorUri) return base;
+
+    const matchIdx = base.findIndex((img) => productImageUrlsMatch(img, colorUri));
+    if (matchIdx >= 0) return base;
+
+    const rest = base.filter((img) => !productImageUrlsMatch(img, colorUri));
+    return [colorUri, ...rest];
+  }, [
+    product,
+    selectedVariations,
+    selectedColor,
+    getVariationTypes,
+    getApiProductImages,
+  ]);
+
+  const resolveGalleryImagesForColorUri = useCallback(
+    (colorUri: string): string[] => {
+      const normalized = normalizeProductImageUrl(colorUri);
+      if (!normalized) return getApiProductImages(product);
+
+      const base = getApiProductImages(product);
+      const matchIdx = base.findIndex((img) => productImageUrlsMatch(img, normalized));
+      if (matchIdx >= 0) return base;
+
+      const rest = base.filter((img) => !productImageUrlsMatch(img, normalized));
+      return [normalized, ...rest];
+    },
+    [product, getApiProductImages],
+  );
+
+  const syncGalleryToColorUri = useCallback(
+    (colorUri: string) => {
+      const normalized = normalizeProductImageUrl(colorUri);
+      if (!normalized) return;
+
+      const images = resolveGalleryImagesForColorUri(normalized);
+      const target = images.findIndex((img) => productImageUrlsMatch(img, normalized));
+      const index = target >= 0 ? target : 0;
+      setSelectedImageIndex(index);
+      requestAnimationFrame(() => {
+        imageGalleryScrollRef.current?.scrollTo({
+          x: index * width,
+          animated: true,
+        });
+      });
+    },
+    [resolveGalleryImagesForColorUri],
+  );
+
+  useEffect(() => {
+    if (!product) return;
+    const variationTypes = getVariationTypes();
+    const colorType = variationTypes.find((vt) => isColorVariationType(vt.name));
+    if (!colorType) return;
+
+    const colorKey = colorType.name.toLowerCase();
+    const selected = selectedVariations[colorKey] || selectedColor;
+    if (!selected) return;
+
+    const option = colorType.options.find((o) => o.value === selected);
+    const galleryFirst = getApiProductImages(product)[0] || '';
+    const colorUri =
+      normalizeProductImageUrl(option?.image || '') || galleryFirst;
+    if (!colorUri) return;
+
+    syncGalleryToColorUri(colorUri);
+  }, [
+    product,
+    selectedVariations,
+    selectedColor,
+    getVariationTypes,
+    getApiProductImages,
+    syncGalleryToColorUri,
+  ]);
 
   // Get selected variation price - MUST be before early return
   const getSelectedVariationPrice = useMemo(() => {
@@ -1337,9 +1436,142 @@ const ProductDetailScreen: React.FC = () => {
     }
   };
 
+  const buildAddToCartRequest = (): AddToCartRequest => {
+    const productSkuInfos = (product as any).productSkuInfos || [];
+    const rawVariants = (product as any).rawVariants || [];
+    const source =
+      (product as any).source || route.params?.source || selectedPlatform || '1688';
+    const minOrderQuantity = (product as any).minOrderQuantity || 1;
+
+    let selectedVariant: any = null;
+    let selectedSku: any = null;
+
+    if (rawVariants.length > 0) {
+      if (Object.keys(selectedVariations).length > 0) {
+        selectedVariant = rawVariants.find((variant: any) => {
+          const variantName = variant.name || '';
+          if (!variantName) return false;
+          return Object.entries(selectedVariations).every(([variationName, selectedValue]) => {
+            const searchPattern = `${variationName}: ${selectedValue}`;
+            return variantName.toLowerCase().includes(searchPattern.toLowerCase());
+          });
+        });
+      }
+      if (!selectedVariant && rawVariants.length > 0) {
+        selectedVariant = rawVariants[0];
+      }
+    }
+
+    let skuIdFromVariant: string | number | null = null;
+    let variantPrice: number | null = null;
+
+    if (selectedVariant) {
+      skuIdFromVariant = selectedVariant.skuId || selectedVariant.id || null;
+      variantPrice = selectedVariant.price || null;
+    }
+
+    if (productSkuInfos.length > 0) {
+      if (skuIdFromVariant) {
+        selectedSku = productSkuInfos.find(
+          (sku: any) =>
+            sku.skuId?.toString() === skuIdFromVariant?.toString() ||
+            sku.specId?.toString() === skuIdFromVariant?.toString(),
+        );
+      }
+
+      if (!selectedSku && Object.keys(selectedVariations).length > 0) {
+        selectedSku = productSkuInfos.find((sku: any) => {
+          const skuAttributes = sku.skuAttributes || [];
+          return Object.entries(selectedVariations).every(([variationName, selectedValue]) =>
+            skuAttributes.some((attr: any) => {
+              const attrName = (attr.attributeNameTrans || attr.attributeName || '').toLowerCase();
+              const attrValue = attr.valueTrans || attr.value || '';
+              return attrName === variationName.toLowerCase() && attrValue === selectedValue;
+            }),
+          );
+        });
+      }
+
+      if (!selectedSku && productSkuInfos.length > 0) {
+        selectedSku = productSkuInfos[0];
+      }
+    }
+
+    const finalSkuId =
+      skuIdFromVariant || selectedSku?.skuId || selectedVariant?.skuId || selectedVariant?.id || '0';
+    const isTaobao = source === 'taobao';
+    const finalSpecId = isTaobao
+      ? finalSkuId.toString()
+      : selectedSku?.specId?.toString() || finalSkuId.toString();
+    const finalPrice =
+      variantPrice || selectedSku?.price || selectedSku?.consignPrice || product.price || 0;
+    const productIdForUrl = product.offerId || product.id || productId || offerId || '';
+    const promotionUrl = isTaobao
+      ? `${SERVER_BASE_URL}/${productIdForUrl}`
+      : (product as any).promotionUrl || '';
+    const skuIdValue = typeof finalSkuId === 'string' ? parseInt(finalSkuId, 10) || 0 : finalSkuId;
+
+    return {
+      offerId: parseInt(productIdForUrl.toString() || '0', 10),
+      categoryId: parseInt((product as any).categoryId || product.category?.id || '0', 10),
+      subject: resolveText((product as any).subject || product.name || ''),
+      subjectTrans: resolveText((product as any).subjectTrans || product.name || ''),
+      imageUrl: product.images?.[0] || product.image || '',
+      promotionUrl,
+      source,
+      skuInfo: {
+        skuId: skuIdValue,
+        specId: finalSpecId,
+        price: finalPrice.toString(),
+        amountOnSale: selectedSku?.amountOnSale || selectedVariant?.stock || 0,
+        consignPrice: finalPrice.toString(),
+        cargoNumber: selectedSku?.cargoNumber || '',
+        skuAttributes: (selectedSku?.skuAttributes || selectedVariant?.attributes || []).map(
+          (attr: any) => ({
+            attributeId: parseInt(attr.attributeId || attr.propId || '0', 10) || 0,
+            attributeName: attr.attributeName || attr.prop_name || '',
+            attributeNameTrans:
+              attr.attributeNameTrans || attr.prop_name || attr.attributeName || '',
+            value: attr.value || attr.value_name || attr.value_desc || '',
+            valueTrans:
+              attr.valueTrans || attr.value_name || attr.value_desc || attr.value || '',
+            skuImageUrl: attr.skuImageUrl || attr.image || '',
+          }),
+        ),
+        fenxiaoPriceInfo: selectedSku?.fenxiaoPriceInfo || {
+          offerPrice: finalPrice.toString(),
+        },
+      },
+      companyName: resolveText(product.seller?.name || (product as any).companyName || ''),
+      sellerOpenId: product.seller?.id || (product as any).sellerOpenId || '',
+      quantity,
+      minOrderQuantity,
+    };
+  };
+
+  const validateBeforeCartAction = (): boolean => {
+    if (!canAddToCart) {
+      const variationTypes = getVariationTypes();
+      if (variationTypes.length > 0) {
+        showToast(t('product.pleaseSelectOptions'), 'warning');
+      }
+      return false;
+    }
+
+    const minOrderQuantity = (product as any).minOrderQuantity || 1;
+    if (quantity < minOrderQuantity) {
+      showToast(
+        t('product.minOrderQuantity') || `Minimum order quantity is ${minOrderQuantity}`,
+        'warning',
+      );
+      return false;
+    }
+
+    return true;
+  };
+
   const handleAddToCart = async () => {
     if (!isAuthenticated) {
-      // Navigate to login page with return navigation info
       navigation.navigate('Auth', {
         screen: 'Login',
         params: {
@@ -1354,306 +1586,33 @@ const ProductDetailScreen: React.FC = () => {
       return;
     }
 
-    if (!canAddToCart) {
-      const variationTypes = getVariationTypes();
-      if (variationTypes.length > 0) {
-        showToast(t('product.pleaseSelectOptions'), 'warning');
-      }
-      return;
-    }
-
-    // Check minOrderQuantity
-    const minOrderQuantity = (product as any).minOrderQuantity || 1;
-    if (quantity < minOrderQuantity) {
-      showToast(
-        t('product.minOrderQuantity') || `Minimum order quantity is ${minOrderQuantity}`,
-        'warning'
-      );
+    if (!validateBeforeCartAction()) {
       return;
     }
 
     try {
-      // Get the selected SKU based on selected variations
-      const productSkuInfos = (product as any).productSkuInfos || [];
-      const rawVariants = (product as any).rawVariants || [];
-      
-      // Get source from product, route params, or selected platform
-      const source = (product as any).source || route.params?.source || selectedPlatform || '1688';
-      
-      // Find the matching variant/SKU based on selected variations
-      let selectedVariant: any = null;
-      let selectedSku: any = null;
-      
-      // First, try to find matching variant from rawVariants (for Taobao, this contains sku_id from sku_properties)
-      if (rawVariants.length > 0) {
-        if (Object.keys(selectedVariations).length > 0) {
-          // Match variant based on selected variations
-          // Variant name format: "Color: Red / Size: Large"
-          selectedVariant = rawVariants.find((variant: any) => {
-            const variantName = variant.name || '';
-            if (!variantName) return false;
-            
-            // Check if all selected variations match this variant's name
-            return Object.entries(selectedVariations).every(([variationName, selectedValue]) => {
-              // Check if variant name contains the selected value
-              // Format: "variationName: selectedValue"
-              const searchPattern = `${variationName}: ${selectedValue}`;
-              return variantName.toLowerCase().includes(searchPattern.toLowerCase());
-            });
-          });
-        }
-        
-        // If no match found or no variations selected, use the first variant
-        if (!selectedVariant && rawVariants.length > 0) {
-          selectedVariant = rawVariants[0];
-        }
-      }
-      
-      // If we found a variant, get skuId from it (this comes from sku_properties)
-      let skuIdFromVariant: string | number | null = null;
-      let variantPrice: number | null = null;
-      
-      if (selectedVariant) {
-        skuIdFromVariant = selectedVariant.skuId || selectedVariant.id || null;
-        variantPrice = selectedVariant.price || null;
-      }
-      
-      // Now try to find matching SKU from productSkuInfos
-      if (productSkuInfos.length > 0) {
-        if (skuIdFromVariant) {
-          // Find SKU by skuId
-          selectedSku = productSkuInfos.find((sku: any) => 
-            sku.skuId?.toString() === skuIdFromVariant?.toString() || 
-            sku.specId?.toString() === skuIdFromVariant?.toString()
-          );
-        }
-        
-        // If we have selected variations but no skuId from variant, try to match by attributes
-        if (!selectedSku && Object.keys(selectedVariations).length > 0) {
-          selectedSku = productSkuInfos.find((sku: any) => {
-            const skuAttributes = sku.skuAttributes || [];
-            // Check if all selected variations match this SKU
-            return Object.entries(selectedVariations).every(([variationName, selectedValue]) => {
-              return skuAttributes.some((attr: any) => {
-                const attrName = (attr.attributeNameTrans || attr.attributeName || '').toLowerCase();
-                const attrValue = attr.valueTrans || attr.value || '';
-                return attrName === variationName.toLowerCase() && attrValue === selectedValue;
-              });
-            });
-          });
-        }
-        
-        // If no match found, use the first SKU
-        if (!selectedSku && productSkuInfos.length > 0) {
-          selectedSku = productSkuInfos[0];
-        } 
-      }
-      
-      // Determine final skuId, specId, and price
-      // Priority: skuId from variant (from sku_properties) > skuId from selectedSku > fallback
-      const finalSkuId = skuIdFromVariant || selectedSku?.skuId || selectedVariant?.skuId || selectedVariant?.id || '0';
-      
-      // Determine specId based on source:
-      // - For 1688: Use specId from selectedSku if available (specId exists separately in SKU info)
-      // - For Taobao: specId can be same as skuId
-      const isTaobao = source === 'taobao';
-      const finalSpecId = isTaobao 
-        ? finalSkuId.toString() // For Taobao, specId same as skuId
-        : (selectedSku?.specId?.toString() || finalSkuId.toString()); // For 1688, use specId from SKU info if available
-      
-      const finalPrice = variantPrice || selectedSku?.price || selectedSku?.consignPrice || product.price || 0;
-      
-      // Get product ID for promotionUrl
-      const productIdForUrl = product.offerId || product.id || productId || offerId || '';
-      
-      // For Taobao cases, set promotionUrl
-      const promotionUrl = isTaobao 
-        ? `${SERVER_BASE_URL}/${productIdForUrl}`
-        : ((product as any).promotionUrl || '');
-      
-      // Convert skuId to number if it's a string
-      const skuIdValue = typeof finalSkuId === 'string' ? parseInt(finalSkuId) || 0 : finalSkuId;
-      
-      // Build the request body
-      const requestBody = {
-        offerId: parseInt(productIdForUrl.toString() || '0'),
-        categoryId: parseInt((product as any).categoryId || product.category?.id || '0'),
-        subject: resolveText((product as any).subject || product.name || ''),
-        subjectTrans: resolveText((product as any).subjectTrans || product.name || ''),
-        imageUrl: product.images?.[0] || product.image || '',
-        promotionUrl: promotionUrl,
-        source: source,
-        skuInfo: {
-          skuId: skuIdValue,
-          specId: finalSpecId,
-          price: finalPrice.toString(),
-          amountOnSale: selectedSku?.amountOnSale || selectedVariant?.stock || 0,
-          consignPrice: finalPrice.toString(),
-          cargoNumber: selectedSku?.cargoNumber || '',
-          skuAttributes: (selectedSku?.skuAttributes || selectedVariant?.attributes || []).map((attr: any) => ({
-            attributeId: parseInt(attr.attributeId || attr.propId || '0', 10) || 0,
-            attributeName: attr.attributeName || attr.prop_name || '',
-            attributeNameTrans: attr.attributeNameTrans || attr.prop_name || attr.attributeName || '',
-            value: attr.value || attr.value_name || attr.value_desc || '',
-            valueTrans: attr.valueTrans || attr.value_name || attr.value_desc || attr.value || '',
-            skuImageUrl: attr.skuImageUrl || attr.image || '',
-          })),
-          fenxiaoPriceInfo: selectedSku?.fenxiaoPriceInfo || {
-            offerPrice: finalPrice.toString(),
-          },
-        },
-        companyName: resolveText(product.seller?.name || (product as any).companyName || ''),
-        sellerOpenId: product.seller?.id || (product as any).sellerOpenId || '',
-        quantity: quantity,
-        minOrderQuantity: minOrderQuantity,
-      };
-      
-      await addToCart(requestBody);
+      await addToCart(buildAddToCartRequest());
     } catch (error: any) {
       showToast(error?.message || t('product.failedToAdd'), 'error');
     }
   };
 
-  // Handle Buy Now - same logic as handleAddToCart but navigates to Checkout
   const handleBuyNow = async () => {
+    if (isBuyingNow) {
+      return;
+    }
+
     if (!isAuthenticated) {
       showToast(t('home.pleaseLogin'), 'warning');
       return;
     }
 
-    if (!canAddToCart) {
-      const variationTypes = getVariationTypes();
-      if (variationTypes.length > 0) {
-        showToast(t('product.pleaseSelectOptions'), 'warning');
-      }
-      return;
-    }
-
-    // Check minOrderQuantity
-    const minOrderQuantity = (product as any).minOrderQuantity || 1;
-    if (quantity < minOrderQuantity) {
-      showToast(
-        t('product.minOrderQuantity') || `Minimum order quantity is ${minOrderQuantity}`,
-        'warning'
-      );
+    if (!validateBeforeCartAction()) {
       return;
     }
 
     try {
-      // Reuse the same logic from handleAddToCart
-      const productSkuInfos = (product as any).productSkuInfos || [];
-      const rawVariants = (product as any).rawVariants || [];
-      const fetchSource = sourceRef.current;
-      
-      let selectedVariant: any = null;
-      let selectedSku: any = null;
-      
-      if (rawVariants.length > 0) {
-        if (Object.keys(selectedVariations).length > 0) {
-          selectedVariant = rawVariants.find((variant: any) => {
-            const variantName = variant.name || '';
-            if (!variantName) return false;
-            return Object.entries(selectedVariations).every(([variationName, selectedValue]) => {
-              const searchPattern = `${variationName}: ${selectedValue}`;
-              return variantName.toLowerCase().includes(searchPattern.toLowerCase());
-            });
-          });
-        }
-        if (!selectedVariant && rawVariants.length > 0) {
-          selectedVariant = rawVariants[0];
-        }
-      }
-      
-      let skuIdFromVariant: string | number | null = null;
-      let variantPrice: number | null = null;
-      
-      if (selectedVariant) {
-        skuIdFromVariant = selectedVariant.skuId || selectedVariant.id || null;
-        variantPrice = selectedVariant.price || null;
-      }
-      
-      if (productSkuInfos.length > 0) {
-        if (skuIdFromVariant) {
-          selectedSku = productSkuInfos.find((sku: any) => 
-            sku.skuId?.toString() === skuIdFromVariant?.toString() || 
-            sku.specId?.toString() === skuIdFromVariant?.toString()
-          );
-        }
-        
-        if (!selectedSku && Object.keys(selectedVariations).length > 0) {
-          selectedSku = productSkuInfos.find((sku: any) => {
-            const skuAttributes = sku.skuAttributes || [];
-            return Object.entries(selectedVariations).every(([variationName, selectedValue]) => {
-              return skuAttributes.some((attr: any) => {
-                const attrName = (attr.attributeNameTrans || attr.attributeName || '').toLowerCase();
-                const attrValue = attr.valueTrans || attr.value || '';
-                return attrName === variationName.toLowerCase() && attrValue === selectedValue;
-              });
-            });
-          });
-        }
-        
-        if (!selectedSku && productSkuInfos.length > 0) {
-          selectedSku = productSkuInfos[0];
-        }
-      }
-      
-      const finalSkuId = skuIdFromVariant || selectedSku?.skuId || selectedVariant?.skuId || selectedVariant?.id || '0';
-      
-      // Determine specId based on source:
-      // - For 1688: Use specId from selectedSku if available (specId exists separately in SKU info)
-      // - For Taobao: specId can be same as skuId
-      const isTaobao = fetchSource === 'taobao';
-      const finalSpecId = isTaobao 
-        ? finalSkuId.toString() // For Taobao, specId same as skuId
-        : (selectedSku?.specId?.toString() || finalSkuId.toString()); // For 1688, use specId from SKU info if available
-      
-      const finalPrice = variantPrice || selectedSku?.price || selectedSku?.consignPrice || product.price || 0;
-      
-      const productIdForUrl = product.offerId || product.id || productId || offerId || '';
-      const promotionUrl = isTaobao 
-        ? `${SERVER_BASE_URL}/${productIdForUrl}`
-        : ((product as any).promotionUrl || '');
-      
-      const skuIdValue = typeof finalSkuId === 'string' ? parseInt(finalSkuId) || 0 : finalSkuId;
-      
-      const skuInfoPayload = {
-        skuId: skuIdValue,
-        specId: finalSpecId,
-        price: finalPrice.toString(),
-        amountOnSale: selectedSku?.amountOnSale || selectedVariant?.stock || 0,
-        consignPrice: finalPrice.toString(),
-        cargoNumber: selectedSku?.cargoNumber || '',
-        skuAttributes: (selectedSku?.skuAttributes || selectedVariant?.attributes || []).map((attr: any) => ({
-          attributeId: parseInt(attr.attributeId || attr.propId || '0', 10) || 0,
-          attributeName: attr.attributeName || attr.prop_name || '',
-          attributeNameTrans: attr.attributeNameTrans || attr.prop_name || attr.attributeName || '',
-          value: attr.value || attr.value_name || attr.value_desc || '',
-          valueTrans: attr.valueTrans || attr.value_name || attr.value_desc || attr.value || '',
-          skuImageUrl: attr.skuImageUrl || attr.image || '',
-        })),
-        fenxiaoPriceInfo: selectedSku?.fenxiaoPriceInfo || {
-          offerPrice: finalPrice.toString(),
-        },
-      };
-
-      const directPurchaseBody = {
-        productId: parseInt(productIdForUrl.toString(), 10) || 0,
-        source: fetchSource,
-        quantity: String(quantity),
-        price: typeof finalPrice === 'number' ? finalPrice : parseFloat(String(finalPrice)) || 0,
-        sellerOpenId: product.seller?.id || (product as any).sellerOpenId || '',
-        imageUrl: product.images?.[0] || product.image || '',
-        promotionUrl: (product as any).promotionUrl || undefined,
-        companyName: resolveText(product.seller?.name || (product as any).companyName || ''),
-        subject: resolveText((product as any).subject || product.name || ''),
-        subjectTrans: resolveText((product as any).subjectTrans || product.name || (product as any).subject || ''),
-        categoryid: (product as any).categoryId?.toString() || product.category?.id?.toString() || undefined,
-        categoryname: (product as any).categoryName || product.category?.name || undefined,
-        skuInfo: skuInfoPayload,
-      };
-
-      checkoutDirectPurchase(directPurchaseBody);
+      await addToCartForBuyNow(buildAddToCartRequest());
     } catch (error: any) {
       showToast(error?.message || t('product.failedToProceedToCheckout'), 'error');
     }
@@ -1711,24 +1670,8 @@ const ProductDetailScreen: React.FC = () => {
   };
 
   const renderHeader = () => {
-    const headerBg = scrollY.interpolate({
-      inputRange: [0, HEADER_SCROLL_THRESHOLD],
-      outputRange: ['rgba(255,255,255,0)', 'rgba(255,255,255,1)'],
-      extrapolate: 'clamp',
-    });
-    const searchBarOpacity = scrollY.interpolate({
-      inputRange: [HEADER_SCROLL_THRESHOLD * 0.5, HEADER_SCROLL_THRESHOLD],
-      outputRange: [0, 1],
-      extrapolate: 'clamp',
-    });
-    const cameraIconOpacity = scrollY.interpolate({
-      inputRange: [0, HEADER_SCROLL_THRESHOLD * 0.5],
-      outputRange: [1, 0],
-      extrapolate: 'clamp',
-    });
-
     return (
-      <Animated.View style={[styles.header, { backgroundColor: headerBg }]}>
+      <View style={styles.header}>
         <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
           <ArrowBackIcon width={12} height={20} color={COLORS.text.primary} />
         </TouchableOpacity>
@@ -1762,13 +1705,12 @@ const ProductDetailScreen: React.FC = () => {
             <CartIcon width={24} height={24} color={COLORS.black} />
           </TouchableOpacity>
         </View>
-      </Animated.View>
+      </View>
     );
   };
 
   const renderImageGallery = () => {
-    // Use only API images (not from HTML description)
-    const apiImages = getApiProductImages(product);
+    const apiImages = displayGalleryImages;
     const totalImages = apiImages.length;
     const currentStat = liveStats[currentStatIndex];
     
@@ -1779,6 +1721,7 @@ const ProductDetailScreen: React.FC = () => {
     return (
       <View style={styles.imageGalleryContainer}>
         <ScrollView
+          ref={imageGalleryScrollRef}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
@@ -2022,48 +1965,65 @@ const ProductDetailScreen: React.FC = () => {
     // Get selected value from selectedVariations state
     const selectedValue = selectedVariations[variationName] || null;
     
-    const handleSelect = (value: string) => {
-      // Update selectedVariations state
-      setSelectedVariations(prev => ({
+    const galleryFirst = getApiProductImages(product)[0] || '';
+    const isColorSection = isColorVariationType(variationType.name);
+
+    const resolveOptionImage = (option: any): string =>
+      normalizeProductImageUrl(option.image || '') || galleryFirst;
+
+    const handleSelect = (value: string, option?: { image?: string }) => {
+      setSelectedVariations((prev) => ({
         ...prev,
         [variationName]: value,
       }));
-      
-      // Also update selectedColor and selectedSize for backward compatibility with addToCart
-      if (variationName === 'color') {
+
+      if (isColorSection) {
         setSelectedColor(value);
-      } else if (variationName === 'size') {
+        const uri = normalizeProductImageUrl(option?.image || '') || galleryFirst;
+        if (uri) {
+          syncGalleryToColorUri(uri);
+        }
+      } else if (variationName === 'size' || /size|尺码|사이즈/i.test(variationType.name)) {
         setSelectedSize(value);
       }
     };
 
-    // First variation type shows with images (if available), others show only text
-    const isFirstVariation = index === 0;
-    const hasImages = variationType.options.some((opt: any) => opt.image);
+    const handleColorImagePress = (option: any) => {
+      const uri = resolveOptionImage(option);
+      handleSelect(option.value, option);
+      if (uri) {
+        syncGalleryToColorUri(uri);
+      }
+    };
 
-    if (isFirstVariation) {
-      // Render first variation type with images (if available) and text
+    if (isColorSection) {
       return (
         <View style={styles.selectorContainer}>
           <Text style={styles.selectorTitle}>{variationType.name}{selectedValue ? ` : ${selectedValue}` : ''}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {variationType.options.map((option: any, optIndex: number) => {
               const isSelected = selectedValue === option.value;
+              const displayUri = resolveOptionImage(option);
               return (
                 <TouchableOpacity
                   key={optIndex}
                   style={styles.colorOption}
-                  onPress={() => handleSelect(option.value)}
+                  onPress={() => handleSelect(option.value, option)}
                 >
-                  {option.image && (
-                    <ProductImage
-                      uri={option.image}
-                      style={[
-                        styles.colorImage,
-                        isSelected && styles.selectedColorImage,
-                      ] as any}
-                    />
-                  )}
+                  {displayUri ? (
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => handleColorImagePress(option)}
+                    >
+                      <ProductImage
+                        uri={displayUri}
+                        style={[
+                          styles.colorImage,
+                          isSelected && styles.selectedColorImage,
+                        ] as any}
+                      />
+                    </TouchableOpacity>
+                  ) : null}
                   <Text 
                     style={[
                       styles.colorName,
@@ -2620,12 +2580,11 @@ const ProductDetailScreen: React.FC = () => {
             style={[
               styles.actionButton,
               styles.buyNowButton,
-              (!canAddToCart || isAddingToCartForBuyNow) && styles.disabledButton,
+              !canAddToCart && styles.disabledButton,
             ]}
-            disabled={!canAddToCart || isAddingToCartForBuyNow}
+            disabled={!canAddToCart}
             onPress={() => {
               if (!isAuthenticated) {
-                // Navigate to login page with return navigation info (same as Add to Cart)
                 navigation.navigate('Auth', {
                   screen: 'Login',
                   params: {
@@ -2640,20 +2599,10 @@ const ProductDetailScreen: React.FC = () => {
                 return;
               }
 
-              if (!canAddToCart) {
-                const variationTypes = getVariationTypes();
-                if (variationTypes.length > 0) {
-                  showToast(t('product.pleaseSelectOptions'), 'warning');
-                }
-                return;
-              }
-
-              // For Buy Now: Use handleAddToCart logic but with Buy Now mutation
-              // Reuse the same logic from handleAddToCart
               handleBuyNow();
             }}
           >
-            {isAddingToCartForBuyNow ? (
+            {isBuyingNow ? (
               <View style={styles.actionButtonContent}>
                 <ActivityIndicator size="small" color={COLORS.white} />
                 <Text style={styles.buyNowText}>{t('product.buyNow')}</Text>
@@ -2670,8 +2619,7 @@ const ProductDetailScreen: React.FC = () => {
   );}
 
   const renderImageViewer = () => {
-    // Use only API images for viewer
-    const images = getApiProductImages(product);
+    const images = displayGalleryImages;
     
     return (
       <Modal
@@ -2727,10 +2675,16 @@ const ProductDetailScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {/* Absolutely positioned header overlays the image */}
-      <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]} pointerEvents="box-none">
+      {/* Absolutely positioned header overlays the image; top fills white on scroll */}
+      <Animated.View
+        style={[
+          styles.safeArea,
+          { paddingTop: insets.top, backgroundColor: headerBg },
+        ]}
+        pointerEvents="box-none"
+      >
         {renderHeader()}
-      </SafeAreaView>
+      </Animated.View>
 
       <Animated.ScrollView
         style={styles.scrollView}
@@ -2836,8 +2790,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: SPACING.sm,
-    paddingTop: SPACING['2xl'],
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.xs,
   },
   headerButton: {
     width: 40,
@@ -2978,14 +2932,16 @@ const styles = StyleSheet.create({
     ...SHADOWS.small,
   },
   productInfoContainer: {
-    padding: SPACING.md,
-    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    paddingTop: 0,
+    paddingBottom: SPACING.sm,
+    marginTop: -SPACING.sm,
   },
   productName: {
     fontSize: FONTS.sizes.lg,
     fontWeight: '600',
     color: COLORS.text.primary,
-    marginBottom: SPACING.xs,
+    marginBottom: 0,
   },
   badgesRow: {
     flexDirection: 'row',
@@ -3037,8 +2993,8 @@ const styles = StyleSheet.create({
   ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.md,
-    marginTop: SPACING.sm,
+    marginBottom: SPACING.xs,
+    marginTop: SPACING.xs,
   },
   ratingContainer: {
     flexDirection: 'row',

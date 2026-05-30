@@ -35,6 +35,17 @@ import { useAppSelector } from '../../store/hooks';
 import { translations } from '../../i18n/translations';
 import { useTopCategoriesMutation } from '../../hooks/useTopCategoriesMutation';
 import { productsApi } from '../../services/productsApi';
+import {
+  buildL2MapFromL1List,
+  extractL1Categories,
+  extractL2Tree,
+  getCategoryNodeId,
+  getCategoryParentId,
+  getEmbeddedL2Children,
+  l1ListHasEmbeddedL2,
+  mapLocaleToCategoryLang,
+  pickCategoryLabel,
+} from '../../utils/categoryList';
 
 type CategoryTabScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Category'>;
 
@@ -69,9 +80,9 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
   const isTabletLandscape = Math.min(winWidth, winHeight) >= 600 && winWidth > winHeight;
   const isEmbeddedLandscapeHeader = hideHeader && isTabletLandscape;
   // Zustand store
-  const { 
+  const {
     selectedCategory,
-    setSelectedPlatform, 
+    setSelectedPlatform,
     setSelectedCategory,
   } = usePlatformStore();
   
@@ -150,10 +161,19 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
   // L1 mutation — fetches top-level categories from the API.
   const { mutate: refetchTopCategories, isLoading: isMutationLoading } = useTopCategoriesMutation({
     onSuccess: (data) => {
-      const categories = data?.categories || [];
+      const categories = extractL1Categories(data);
       setTopCategories(categories);
-      if (categories.length > 0 && !usePlatformStore.getState().selectedCategory) {
-        setSelectedCategory(categories[0]._id);
+      if (categories.length > 0) {
+        const firstId = getCategoryNodeId(categories[0]);
+        const sel = usePlatformStore.getState().selectedCategory;
+        const selValid = sel && categories.some((c: any) => getCategoryNodeId(c) === sel);
+        if (!selValid) {
+          setSelectedCategory(firstId);
+        }
+        if (l1ListHasEmbeddedL2(categories)) {
+          setAllL2ByL1(buildL2MapFromL1List(categories));
+          setIsLoadingAllL2(false);
+        }
       }
     },
     onError: (error) => {
@@ -168,13 +188,13 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
   useEffect(() => {
     if (!selectedCompany) return;
     const platform = getPlatformFromCompany(selectedCompany);
-    const lang = locale || 'ko';
+    const lang = mapLocaleToCategoryLang(locale || 'ko');
     const fetchKey = `${platform}|${lang}`;
-    if (hasFetchedRef.current === fetchKey) return;
-    hasFetchedRef.current = fetchKey;
+    if (hasFetchedRef.current === fetchKey && topCategoriesLenRef.current > 0) return;
     setIsLoadingTopCategories(true);
     refetchTopCategories(platform, lang).finally(() => {
       setIsLoadingTopCategories(false);
+      hasFetchedRef.current = fetchKey;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, locale]);
@@ -191,7 +211,13 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
       return;
     }
     const platform = getPlatformFromCompany(selectedCompany);
-    const lang = locale || 'ko';
+    const lang = mapLocaleToCategoryLang(locale || 'ko');
+
+    if (l1ListHasEmbeddedL2(topCategories)) {
+      setAllL2ByL1(buildL2MapFromL1List(topCategories));
+      setIsLoadingAllL2(false);
+      return;
+    }
 
     const token = ++fetchTokenRef.current;
     setIsLoadingAllL2(true);
@@ -200,7 +226,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
     (async () => {
       let queue: typeof topCategories = [...topCategories];
       const selId = usePlatformStore.getState().selectedCategory;
-      const selPos = queue.findIndex((l1: any) => l1._id === selId);
+      const selPos = queue.findIndex((l1: any) => getCategoryNodeId(l1) === selId);
       if (selPos > 0) {
         const picked = queue.splice(selPos, 1)[0];
         queue = [picked, ...queue];
@@ -209,18 +235,38 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
       const CONCURRENCY = 4;
       const fetchOne = async (l1: any) => {
         if (token !== fetchTokenRef.current) return;
+        const l1Id = getCategoryNodeId(l1);
+        const parentId = getCategoryParentId(l1);
+        if (!l1Id || !parentId) return;
         let tree: any[] = [];
         try {
-          const resp = await productsApi.getChildCategories(platform, l1._id, lang);
+          const resp = await productsApi.getChildCategories(platform, parentId, lang);
           if (token !== fetchTokenRef.current) return;
-          tree = (resp?.success && resp?.data?.tree) || [];
+          if (resp?.success && resp?.data) {
+            tree = extractL2Tree(resp.data);
+          }
+          if (
+            tree.length === 0 &&
+            l1.externalId != null &&
+            String(l1.externalId) !== parentId
+          ) {
+            const retry = await productsApi.getChildCategories(
+              platform,
+              String(l1.externalId),
+              lang,
+            );
+            if (token !== fetchTokenRef.current) return;
+            if (retry?.success && retry?.data) {
+              tree = extractL2Tree(retry.data);
+            }
+          }
         } catch {
           if (token !== fetchTokenRef.current) return;
         }
-        setAllL2ByL1((prev) => ({ ...prev, [l1._id]: tree }));
+        setAllL2ByL1((prev) => ({ ...prev, [l1Id]: tree }));
       };
 
-      if (pending.length > 0 && pending[0]._id === selId) {
+      if (pending.length > 0 && getCategoryNodeId(pending[0]) === selId) {
         await fetchOne(pending.shift());
         if (token !== fetchTokenRef.current) return;
       }
@@ -242,13 +288,21 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
   }, [topCategories, selectedCompany, locale]);
 
   // Top categories for the left column.
-  const categoriesToDisplay = useMemo(() => topCategories.map((cat: any) => ({
-    id: cat._id,
-    name: typeof cat.name === 'object'
-      ? (cat.name[locale] || cat.name.en || cat.name.zh || 'Category')
-      : cat.name,
-    image: cat.imageUrl || '',
-  })), [topCategories, locale]);
+  const categoryLang = mapLocaleToCategoryLang(locale);
+  const categoriesToDisplay = useMemo(
+    () =>
+      topCategories
+        .map((cat: any) => ({
+          id: getCategoryNodeId(cat),
+          name:
+            pickCategoryLabel(cat, categoryLang) ||
+            (cat.externalId != null ? String(cat.externalId) : '') ||
+            'Category',
+          image: getCategoryImage(cat),
+        }))
+        .filter((cat) => cat.id),
+    [topCategories, categoryLang, getCategoryImage],
+  );
 
   /**
    * Right column: one SectionList section per L1, in the same order as `topCategories`.
@@ -256,55 +310,53 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
    */
   const sections = useMemo(() => {
     return topCategories.map((l1: any) => {
-      const l1Name = typeof l1.name === 'object'
-        ? (l1.name[locale] || l1.name.en || l1.name.zh || 'Category')
-        : (l1.name || 'Category');
-      const tree = allL2ByL1[l1._id] || [];
-      const hasL2Loaded = Object.prototype.hasOwnProperty.call(allL2ByL1, l1._id);
+      const l1Id = getCategoryNodeId(l1);
+      const l1Name =
+        pickCategoryLabel(l1, categoryLang) ||
+        (l1.externalId != null ? String(l1.externalId) : '') ||
+        'Category';
+      const tree = allL2ByL1[l1Id] || [];
+      const hasL2Loaded = Object.prototype.hasOwnProperty.call(allL2ByL1, l1Id);
       const data = tree.map((level2: any) => {
-        const level3Children = Array.isArray(level2.children) ? level2.children : [];
-        const level2Name = typeof level2.name === 'object'
-          ? (level2.name[locale] || level2.name.en || level2.name.zh || '')
-          : (level2.name || '');
+        const level3Children = getEmbeddedL2Children(level2);
+        const level2Name = pickCategoryLabel(level2, categoryLang);
         return {
-          id: level2._id,
-          name: level2Name,
-          l1Id: l1._id,
+          id: getCategoryNodeId(level2),
+          name: level2Name || (level2.externalId != null ? String(level2.externalId) : '') || 'Category',
+          l1Id,
           l1Name,
           subsubcategories: level3Children.map((level3: any) => ({
-            id: level3._id,
-            name: typeof level3.name === 'object'
-              ? (level3.name[locale] || level3.name.en || level3.name.zh || '')
-              : (level3.name || ''),
+            id: getCategoryNodeId(level3),
+            name: pickCategoryLabel(level3, categoryLang) || 'Category',
             externalId: level3.externalId,
             image: getCategoryImage(level3) || '',
           })),
         };
-      }).filter((item: any) => item.name);
+      });
 
       if (!hasL2Loaded) {
         return {
-          l1Id: l1._id,
+          l1Id,
           title: l1Name,
           data: [
-            { id: `${l1._id}-placeholder-1`, isPlaceholder: true, l1Id: l1._id, l1Name },
-            { id: `${l1._id}-placeholder-2`, isPlaceholder: true, l1Id: l1._id, l1Name },
-            { id: `${l1._id}-placeholder-3`, isPlaceholder: true, l1Id: l1._id, l1Name },
+            { id: `${l1Id}-placeholder-1`, isPlaceholder: true, l1Id, l1Name },
+            { id: `${l1Id}-placeholder-2`, isPlaceholder: true, l1Id, l1Name },
+            { id: `${l1Id}-placeholder-3`, isPlaceholder: true, l1Id, l1Name },
           ],
         };
       }
 
       if (data.length === 0 && hasL2Loaded) {
         return {
-          l1Id: l1._id,
+          l1Id,
           title: l1Name,
-          data: [{ id: `${l1._id}-empty`, isEmpty: true, l1Id: l1._id, l1Name }],
+          data: [{ id: `${l1Id}-empty`, isEmpty: true, l1Id, l1Name }],
         };
       }
 
-      return { l1Id: l1._id, title: l1Name, data };
+      return { l1Id, title: l1Name, data };
     });
-  }, [topCategories, allL2ByL1, selectedCategory, locale, getCategoryImage]);
+  }, [topCategories, allL2ByL1, selectedCategory, categoryLang, getCategoryImage]);
 
   /**
    * Map each section's flat-index entry to a precise pixel offset/length so
@@ -399,7 +451,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
     // batch L2 effect (its dependency on `topCategories` reference fires).
     hasFetchedRef.current = null;
     try {
-      await refetchTopCategories(platform, locale || 'ko');
+      await refetchTopCategories(platform, mapLocaleToCategoryLang(locale || 'ko'));
     } finally {
       setRefreshing(false);
     }
@@ -453,7 +505,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
 
   const handleCategoryPress = useCallback(
     (categoryId: string) => {
-      const idx = topCategories.findIndex((t: any) => t._id === categoryId);
+      const idx = topCategories.findIndex((t: any) => getCategoryNodeId(t) === categoryId);
       if (idx < 0) return;
       const isResnap = categoryId === usePlatformStore.getState().selectedCategory;
       // Always re-arm: a tap is an explicit user intent to align both columns,
@@ -494,9 +546,9 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
   /** If the global selection is not in the current company’s top list (stale id), snap to the first L1. */
   useEffect(() => {
     if (topCategories.length === 0 || !selectedCategory) return;
-    const exists = topCategories.some((t: any) => t._id === selectedCategory);
+    const exists = topCategories.some((t: any) => getCategoryNodeId(t) === selectedCategory);
     if (!exists) {
-      const firstId = topCategories[0]._id;
+      const firstId = getCategoryNodeId(topCategories[0]);
       tapAlignCategoryIdRef.current = null;
       skipRightAutoAlignRef.current = false;
       setSelectedCategory(firstId);
@@ -519,7 +571,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
     if (!selectedCategory || topCategories.length === 0) return;
     if (skipRightAutoAlignRef.current) return;
     if (tapAlignCategoryIdRef.current === selectedCategory) return;
-    const idx = topCategories.findIndex((t: any) => t._id === selectedCategory);
+    const idx = topCategories.findIndex((t: any) => getCategoryNodeId(t) === selectedCategory);
     if (idx < 0) return;
     performTargetScroll(idx);
     scrollLeftRowIntoView(selectedCategory);
@@ -536,7 +588,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
     if (!targetId) return;
     if (skipRightAutoAlignRef.current) return;
     if (!Object.prototype.hasOwnProperty.call(allL2ByL1, targetId)) return;
-    const idx = topCategories.findIndex((t: any) => t._id === targetId);
+    const idx = topCategories.findIndex((t: any) => getCategoryNodeId(t) === targetId);
     if (idx < 0) return;
     performTargetScroll(idx);
     tapAlignCategoryIdRef.current = null;
@@ -878,7 +930,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
                 onScrollToIndexFailed={() => {
                   const id = tapAlignCategoryIdRef.current ?? selectedCategory;
                   if (!id) return;
-                  const idx = topCategories.findIndex((t: any) => t._id === id);
+                  const idx = topCategories.findIndex((t: any) => getCategoryNodeId(t) === id);
                   if (idx < 0) return;
                   setTimeout(() => performTargetScroll(idx), 80);
                 }}

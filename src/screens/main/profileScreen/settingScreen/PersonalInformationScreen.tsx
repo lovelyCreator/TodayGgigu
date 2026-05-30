@@ -7,11 +7,13 @@ import {
   TouchableOpacity,
   Image,
   Animated,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Icon from '../../../../components/Icon';
+import { DeleteAccountModal } from '../../../../components';
 import { COLORS, FONTS, SPACING } from '../../../../constants';
 import { RootStackParamList } from '../../../../types';
 import { useTranslation } from '../../../../hooks/useTranslation';
@@ -60,9 +62,10 @@ const Toggle: React.FC<{ value: boolean; onChange: (v: boolean) => void }> = ({
 const PersonalInformationScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'account' | 'company'>('account');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   // Notification toggles (UI-only local state)
   const [updateNotice, setUpdateNotice] = useState(false);
@@ -82,6 +85,37 @@ const PersonalInformationScreen: React.FC = () => {
 
   const dash = (value?: string | null): string =>
     value && String(value).trim() ? String(value) : '-';
+
+  const formatMemberLevel = (level?: string | null): string => {
+    const raw = level?.trim();
+    if (!raw) return t('profile.personalInfoScreen.memberLevelGeneral');
+    const normalized = raw.toLowerCase();
+    if (normalized === 'general') return t('profile.personalInfoScreen.memberLevelGeneral');
+    if (normalized === 'regular') return t('profile.personalInfoScreen.memberLevelRegular');
+    return raw;
+  };
+
+  const handleDeleteAccount = async (_password: string) => {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      Alert.alert(
+        t('profile.accountDeleted'),
+        t('profile.accountDeletedMessage'),
+        [
+          {
+            text: t('profile.ok'),
+            onPress: async () => {
+              await logout();
+              navigation.navigate('Auth');
+            },
+          },
+        ],
+      );
+    } catch {
+      Alert.alert(t('common.error'), t('profile.failedToDeleteAccount'));
+      throw new Error('delete_account_failed');
+    }
+  };
 
   const avatarSource =
     user?.avatar && typeof user.avatar === 'string' && user.avatar.trim() !== ''
@@ -114,7 +148,7 @@ const PersonalInformationScreen: React.FC = () => {
     },
     {
       label: t('profile.personalInfoScreen.memberLevel'),
-      value: dash(user?.level) || 'general',
+      value: formatMemberLevel(user?.level),
     },
     { label: t('profile.personalInfoScreen.lastLogin'), value: formatDate(user?.lastLogin) },
   ];
@@ -194,7 +228,7 @@ const PersonalInformationScreen: React.FC = () => {
           <View style={styles.verifiedPill}>
             <Icon name="checkmark" size={12} color={COLORS.white} />
             <Text style={styles.verifiedPillText}>
-              {t('profile.personalInfoScreen.verified')}
+              {t('profile.personalInfoScreen.verifiedComplete')}
             </Text>
           </View>
         </View>
@@ -231,10 +265,10 @@ const PersonalInformationScreen: React.FC = () => {
         <View style={styles.securityList}>
           {renderSecurityRow(
             t('profile.personalInfoScreen.identityVerification'),
-            t('profile.personalInfoScreen.verified') + '됨',
+            t('profile.personalInfoScreen.verifiedComplete'),
             <View style={styles.statusPillGreen}>
               <Text style={styles.statusPillGreenText}>
-                {t('profile.personalInfoScreen.verified')}됨
+                {t('profile.personalInfoScreen.verifiedComplete')}
               </Text>
             </View>,
           )}
@@ -328,6 +362,43 @@ const PersonalInformationScreen: React.FC = () => {
           )}
         </View>
       </View>
+
+      {/* ===== Account Deletion ===== */}
+      <View style={styles.card}>
+        {renderSectionHeading(
+          t('profile.personalInfoScreen.accountDeletion.title'),
+          t('profile.personalInfoScreen.accountDeletion.sectionDescription'),
+        )}
+        <View style={styles.deletionWarningList}>
+          <View style={styles.deletionWarningItem}>
+            <Icon name="close-circle" size={16} color={COLORS.red} />
+            <Text style={styles.deletionWarningText}>
+              {t('profile.personalInfoScreen.accountDeletion.allDataLost')}
+            </Text>
+          </View>
+          <View style={styles.deletionWarningItem}>
+            <Icon name="close-circle" size={16} color={COLORS.red} />
+            <Text style={styles.deletionWarningText}>
+              {t('profile.personalInfoScreen.accountDeletion.orderHistoryDeleted')}
+            </Text>
+          </View>
+          <View style={styles.deletionWarningItem}>
+            <Icon name="close-circle" size={16} color={COLORS.red} />
+            <Text style={styles.deletionWarningText}>
+              {t('profile.personalInfoScreen.accountDeletion.cannotRecoverAccount')}
+            </Text>
+          </View>
+        </View>
+        <TouchableOpacity
+          style={styles.deletionButton}
+          activeOpacity={0.8}
+          onPress={() => setShowDeleteModal(true)}
+        >
+          <Text style={styles.deletionButtonText}>
+            {t('profile.personalInfoScreen.accountDeletion.startButton')}
+          </Text>
+        </TouchableOpacity>
+      </View>
     </>
   );
 
@@ -390,7 +461,7 @@ const PersonalInformationScreen: React.FC = () => {
                 <View style={styles.statusPillGreen}>
                   <Icon name="checkmark" size={11} color={GREEN} />
                   <Text style={styles.statusPillGreenText}>
-                    {t('profile.personalInfoScreen.verified')}
+                    {t('profile.personalInfoScreen.verifiedComplete')}
                   </Text>
                 </View>
               </View>,
@@ -418,7 +489,7 @@ const PersonalInformationScreen: React.FC = () => {
                   <Text style={styles.levelBadgeIconText}>R</Text>
                 </View>
                 <Text style={styles.levelBadgeText}>
-                  {(dash(user?.level) || 'REGULAR').toUpperCase()}
+                  {formatMemberLevel(user?.level)}
                 </Text>
               </View>,
               { isLast: true },
@@ -551,6 +622,12 @@ const PersonalInformationScreen: React.FC = () => {
       >
         {activeTab === 'account' ? renderAccountTab() : renderCompanyTab()}
       </ScrollView>
+
+      <DeleteAccountModal
+        visible={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleDeleteAccount}
+      />
     </SafeAreaView>
   );
 };
@@ -832,6 +909,39 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.gray[400],
     marginTop: SPACING.xs,
+  },
+  deletionWarningList: {
+    backgroundColor: '#FFF0F1',
+    borderRadius: 10,
+    padding: SPACING.smmd,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: '#FFE4E6',
+    gap: SPACING.sm,
+  },
+  deletionWarningItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  deletionWarningText: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.red,
+  },
+  deletionButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.smmd,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.red,
+    backgroundColor: COLORS.white,
+  },
+  deletionButtonText: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.red,
   },
   // Toggle
   toggleTrack: {

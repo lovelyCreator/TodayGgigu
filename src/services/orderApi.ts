@@ -23,9 +23,28 @@ export interface ItemDetails {
   designatedShooting?: DesignatedShootingItem[];
 }
 
+/** Line item payload required by orders-proxy (`subject` or `productName`). */
+export interface CreateOrderLineItem {
+  cartItemId: string;
+  _id?: string;
+  offerId?: number | string;
+  source?: string;
+  subject: string;
+  productName: string;
+  subjectTrans?: string;
+  imageUrl?: string;
+  quantity: number;
+  skuInfo?: unknown;
+  companyName?: string | Record<string, string>;
+  sellerOpenId?: string;
+  [key: string]: unknown;
+}
+
 export interface CreateOrderRequest {
   cartItems: string[];
   quantities: Record<string, number>;
+  /** Full line metadata — orders-proxy validates `items[n].subject` / `productName`. */
+  items: CreateOrderLineItem[];
   estimatedShippingCostBySeller?: Record<string, number>;
   netExpectedTotalKRW: number;
   userCouponUsageId?: string;
@@ -49,6 +68,74 @@ export interface CreateOrderRequest {
     shipPayment?: string;
   };
 }
+
+const pickCartLineTitle = (
+  item: Record<string, unknown>,
+  locale: string,
+): string => {
+  const multi = item.subjectMultiLang as Record<string, string> | undefined;
+  if (multi && typeof multi === 'object') {
+    const fromMulti = multi[locale] || multi.ko || multi.en || multi.zh;
+    if (fromMulti && String(fromMulti).trim()) return String(fromMulti).trim();
+  }
+  const direct = item.subjectTrans || item.subject || item.productName || item.name;
+  return String(direct ?? '').trim();
+};
+
+export type CreateOrderCardFallback = {
+  id: string;
+  offerId?: string;
+  productName?: string;
+  productImage?: string | null;
+  source?: string;
+  quantity?: number;
+};
+
+/** Build `items` array for POST /orders-proxy from checkout rows or cart UI cards. */
+export const buildCreateOrderLineItems = (
+  cartItemIds: string[],
+  quantities: Record<string, number>,
+  sourceItems: unknown[] = [],
+  fallbackCards: CreateOrderCardFallback[] = [],
+  locale = 'ko',
+): CreateOrderLineItem[] => {
+  return cartItemIds.map((cartItemId) => {
+    const raw = sourceItems.find((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const row = entry as Record<string, unknown>;
+      return row._id === cartItemId || row.id === cartItemId;
+    }) as Record<string, unknown> | undefined;
+
+    const card = fallbackCards.find((c) => c.id === cartItemId);
+    const title =
+      (raw && pickCartLineTitle(raw, locale)) ||
+      card?.productName?.trim() ||
+      'Product';
+    const qty =
+      quantities[cartItemId] ??
+      (typeof raw?.quantity === 'number' ? raw.quantity : undefined) ??
+      card?.quantity ??
+      1;
+
+    return {
+      cartItemId,
+      _id: cartItemId,
+      offerId: (raw?.offerId as number | string | undefined) ?? card?.offerId,
+      source: String(raw?.source ?? card?.source ?? '1688'),
+      subject: title,
+      productName: title,
+      subjectTrans: raw?.subjectTrans != null ? String(raw.subjectTrans) : undefined,
+      imageUrl:
+        (typeof raw?.imageUrl === 'string' ? raw.imageUrl : undefined) ??
+        card?.productImage ??
+        undefined,
+      quantity: qty,
+      skuInfo: raw?.skuInfo,
+      companyName: raw?.companyName as string | Record<string, string> | undefined,
+      sellerOpenId: raw?.sellerOpenId != null ? String(raw.sellerOpenId) : undefined,
+    };
+  });
+};
 
 /** Item shape for POST /orders/direct-purchase (from checkout selectedItems) */
 export interface DirectPurchaseOrderItem {
@@ -255,9 +342,50 @@ const deriveSourceFromOtherSite = (otherSite?: string): string => {
   return '1688';
 };
 
+/** Canonical progressStatus codes used by Order Management tabs */
+export const normalizeProgressStatus = (raw?: string | null): string => {
+  const upper = String(raw ?? '').trim().toUpperCase();
+  if (!upper) return '';
+  const aliases: Record<string, string> = {
+    QUOTE: 'P_QUOTE',
+    QUOTE_PENDING: 'P_QUOTE',
+    PENDING_QUOTE: 'P_QUOTE',
+    PAY_WAIT: 'BUY_PAY_WAIT',
+    PAYMENT_PENDING: 'BUY_PAY_WAIT',
+    PENDING_PAYMENT: 'BUY_PAY_WAIT',
+    BUY_PAY_PENDING: 'BUY_PAY_WAIT',
+    /** API progress code for purchase payment pending */
+    P_PENDING: 'BUY_PAY_WAIT',
+  };
+  return aliases[upper] ?? upper;
+};
+
+/**
+ * Admin may move an order to payment pending while progressStatus still shows quote,
+ * or the API may return mixed casing. Map those orders to BUY_PAY_WAIT for 발주관리.
+ */
+export const resolvePurchaseAgencyProgressStatus = (order: {
+  progressStatus?: string | null;
+  paymentStatus?: string | null;
+  firstTierCost?: { totalKRW?: number; totalCNY?: number; total?: number } | null;
+}): string => {
+  const normalized = normalizeProgressStatus(order.progressStatus);
+  if (normalized === 'BUY_PAY_WAIT') return 'BUY_PAY_WAIT';
+  const tier = order.firstTierCost;
+  const hasQuoteTotal =
+    (tier?.totalKRW ?? 0) > 0 ||
+    (tier?.totalCNY ?? 0) > 0 ||
+    (tier?.total ?? 0) > 0;
+  const paymentPending = String(order.paymentStatus ?? 'pending').toLowerCase() === 'pending';
+  if (paymentPending && hasQuoteTotal && (normalized === 'P_QUOTE' || normalized === '')) {
+    return 'BUY_PAY_WAIT';
+  }
+  return normalized;
+};
+
 const deriveOrderStatusFromProxy = (raw: any): string => {
   if (raw.orderStatus) return raw.orderStatus;
-  if (raw.progressStatus === 'P_QUOTE') return 'quote';
+  if (normalizeProgressStatus(raw.progressStatus) === 'P_QUOTE') return 'quote';
   if (raw.paymentStatus === 'pending') return 'pending';
   if (raw.shippingStatus === 'delivered') return 'completed';
   return 'confirmed';
@@ -300,7 +428,11 @@ export const normalizeProxyOrder = (raw: any): Order => {
     _id: raw._id,
     orderNumber: raw.orderNumber ?? '',
     orderType: raw.orderType ?? 'General',
-    progressStatus: raw.progressStatus ?? '',
+    progressStatus: resolvePurchaseAgencyProgressStatus({
+      progressStatus: raw.progressStatus,
+      paymentStatus: raw.paymentStatus,
+      firstTierCost: raw.firstTierCost,
+    }),
     orderStatus: deriveOrderStatusFromProxy(raw),
     shippingStatus: raw.shippingStatus ?? 'not_shipped',
     warehouseStatus: raw.warehouseStatus ?? 'not_warehoused',
@@ -390,6 +522,19 @@ export const orderApi = {
       searchParams.set('page', String(p.page ?? 1));
       searchParams.set('pagesize', String(p.pageSize ?? 10));
       searchParams.set('lang', mapLocaleToOrdersLang(p.lang));
+      if (p.search) searchParams.set('search', p.search);
+      if (p.datePeriod) searchParams.set('datePeriod', p.datePeriod);
+      if (p.platform) searchParams.set('platform', p.platform);
+      if (p.viewFilter) searchParams.set('viewFilter', p.viewFilter);
+      if (p.progressStatus) {
+        searchParams.set('progressStatus', normalizeProgressStatus(p.progressStatus));
+      }
+      if (p.hasSimplifiedClearance !== undefined) {
+        searchParams.set('hasSimplifiedClearance', String(p.hasSimplifiedClearance));
+      }
+      if (p.transferMethod) searchParams.set('transferMethod', p.transferMethod);
+      if (p.periodFrom) searchParams.set('periodFrom', p.periodFrom);
+      if (p.periodTo) searchParams.set('periodTo', p.periodTo);
       const query = searchParams.toString();
       const url = `${ORDERS_PROXY_BASE_URL}/orders-proxy?${query}`;
 

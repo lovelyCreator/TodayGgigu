@@ -35,7 +35,7 @@ import { useCreateOrderMutation } from '../../../../hooks/useCreateOrderMutation
 import { useCreateOrderDirectPurchaseMutation } from '../../../../hooks/useCreateOrderDirectPurchaseMutation';
 import { useToast } from '../../../../context/ToastContext';
 import { formatPriceKRW, formatKRWDirect, formatDepositBalance } from '../../../../utils/i18nHelpers';
-import { addressApi } from '../../../../services/addressApi';
+import { addressApi, buildAddressSubmitBody, buildCreateOrderLineItems } from '../../../../services/addressApi';
 
 interface PaymentScreenParams {
   items: Array<{
@@ -1040,9 +1040,37 @@ const PaymentScreen: React.FC = () => {
         .filter(note => note)
         .join('\n');
 
+      const orderLineItems = buildCreateOrderLineItems(
+        cartItems,
+        quantities,
+        checkoutData?.selectedItems ?? items.map((item) => ({
+          _id: item._id || item.id,
+          id: item._id || item.id,
+          offerId: item.offerId,
+          subject: item.name,
+          productName: item.name,
+          imageUrl: item.image,
+          source: item.source,
+          quantity: item.quantity,
+          skuInfo: item.skuInfo,
+          companyName: item.companyName,
+          sellerOpenId: item.sellerOpenId,
+        })),
+        items.map((item) => ({
+          id: item._id || item.id,
+          offerId: item.offerId,
+          productName: item.name,
+          productImage: item.image,
+          source: item.source,
+          quantity: item.quantity,
+        })),
+        locale,
+      );
+
       const orderRequest = {
         cartItems,
         quantities,
+        items: orderLineItems,
         estimatedShippingCostBySeller: estimatedShippingCostBySeller || {},
         netExpectedTotalKRW: Math.round(finalTotal),
         userCouponUsageId: couponUsageId || undefined,
@@ -1307,22 +1335,24 @@ const PaymentScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.addressModalSaveButton}
                 onPress={async () => {
-                  if (!editAddress.recipient || !editAddress.contact || !editAddress.zonecode || !editAddress.detailAddress) {
-                    showToast('Please fill in all required fields', 'error');
+                  const detail = (editAddress.detailAddress || editAddress.roadAddress || '').trim();
+                  if (!detail || detail.length < 2) {
+                    showToast('Please enter detailed address (at least 2 characters)', 'error');
                     return;
                   }
                   setIsSavingAddress(true);
                   try {
-                    const addressData = {
-                      customerClearanceType: 'individual',
+                    const addressData = buildAddressSubmitBody({
+                      addressType: 'personal',
                       recipient: editAddress.recipient,
                       contact: editAddress.contact,
-                      personalCustomsCode: editAddress.customsCode,
-                      detailedAddress: editAddress.detailAddress || editAddress.roadAddress,
+                      mainAddress: editAddress.roadAddress || '',
+                      detailedAddress: detail,
                       zipCode: editAddress.zonecode,
+                      personalCustomsCode: editAddress.customsCode,
                       defaultAddress: isDefaultAddress,
                       note: '',
-                    };
+                    });
 
                     let response;
                     if (selectedAddress?.id) {

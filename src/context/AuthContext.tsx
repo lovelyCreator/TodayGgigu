@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from '../types';
 import { STORAGE_KEYS } from '../constants';
@@ -360,7 +360,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const updateUser = async (userData: Partial<User>) => {
+  const updateUser = useCallback(async (userData: Partial<User>) => {
     try {
       if (state.user) {
         const updatedUser = { ...state.user, ...userData, updatedAt: new Date() };
@@ -370,7 +370,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch (error) {
       dispatch({ type: 'AUTH_FAILURE', payload: 'Failed to update profile.' });
     }
-  };
+  }, [state.user]);
 
   const clearError = () => {
     dispatch({ type: 'AUTH_CLEAR_ERROR' });

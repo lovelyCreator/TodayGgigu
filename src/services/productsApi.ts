@@ -15,6 +15,7 @@ import { uploadToCloudinary, uploadVideoToCloudinary } from './cloudinary';
 import { API_BASE_URL, CATEGORIES_BASE_URL } from '../constants';
 import { buildSignatureHeaders } from './signature';
 import { normalizeProductImageUrl } from '../utils/productImageUrl';
+import { extractL1Categories, extractL2Tree } from '../utils/categoryList';
 
 // In-memory cache for category tree (clears on app restart)
 const categoryTreeCache: Record<string, CategoriesTreeResponse> = {};
@@ -1191,33 +1192,47 @@ export const productsApi = {
     }
   },
 
-  // Get top level categories
+  // Get top level categories via todayggigu.kr proxy only (signed /v1/categories/top does not respond)
   getTopCategories: async (
     platform: string = '1688',
     lang: string = 'ko'
   ): Promise<ApiResponse<any>> => {
-    const url = `${CATEGORIES_BASE_URL}/categories-proxy?endpoint=top&platform=${platform}&lang=${lang}`;
     try {
       const token = await getStoredToken();
+      const url = `${CATEGORIES_BASE_URL}/categories-proxy?endpoint=top&platform=${platform}&lang=${lang}`;
       const response = await axios.get(url, {
         timeout: 15000,
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       });
 
-      if (response.data && response.data.status === 'success' && response.data.data) {
+      const body = response.data;
+      const inner = body?.data ?? body;
+      const ok =
+        response.status === 200 &&
+        (body?.status === 'success' || body?.success === true || inner != null);
+
+      if (ok && inner != null) {
+        const categories = extractL1Categories(inner);
+        const platformFromPayload =
+          (typeof inner === 'object' && inner && !Array.isArray(inner) && inner.platform) ||
+          platform;
         return {
           success: true,
-          data: response.data.data,
-          message: 'Top categories retrieved successfully',
+          data: {
+            ...(typeof inner === 'object' && inner && !Array.isArray(inner) ? inner : {}),
+            categories,
+            platform: platformFromPayload,
+          },
+          message: body?.message || 'Top categories retrieved successfully',
         };
       }
 
       return {
         success: false,
-        message: 'No top categories data received',
+        message: body?.message || 'No top categories data received',
         data: null,
       };
     } catch (error: any) {
@@ -1230,7 +1245,7 @@ export const productsApi = {
     }
   },
 
-  // Get child categories by parent ID
+  // Get child categories by parent ID via proxy only (signed /v1/categories/children does not respond)
   getChildCategories: async (
     platform: string = '1688',
     parentId: string,
@@ -1243,22 +1258,33 @@ export const productsApi = {
       const response = await axios.get(url, {
         timeout: 15000,
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       });
 
-      if (response.data && response.data.status === 'success' && response.data.data) {
+      const body = response.data;
+      const inner = body?.data ?? body;
+      const ok =
+        response.status === 200 &&
+        (body?.status === 'success' || body?.success === true || inner != null);
+
+      if (ok && inner != null) {
+        const tree = extractL2Tree(inner);
         return {
           success: true,
-          data: response.data.data,
-          message: 'Child categories retrieved successfully',
+          data: {
+            ...(typeof inner === 'object' && inner && !Array.isArray(inner) ? inner : {}),
+            tree,
+            children: tree,
+          },
+          message: body?.message || 'Child categories retrieved successfully',
         };
       }
 
       return {
         success: false,
-        message: 'No child categories data received',
+        message: body?.message || 'No child categories data received',
         data: null,
       };
     } catch (error: any) {
