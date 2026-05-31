@@ -3732,7 +3732,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: COLORS.gray[200],
+    backgroundColor: COLORS.red,
   },
   uosAvatarFallback: {
     backgroundColor: COLORS.red,

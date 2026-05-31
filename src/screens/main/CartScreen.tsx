@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -27,7 +27,29 @@ import { requestPhotoLibraryPermission } from '../../utils/permissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../context/AuthContext';
 import { useCreateOrderMutation } from '../../hooks/useCreateOrderMutation';
-import { buildCreateOrderLineItems } from '../../services/orderApi';
+import {
+  buildOrdersProxyCreateRequest,
+  buildOrdersProxyLineItems,
+  mapLocaleToOrdersLang,
+  mergeOrderSourceItems,
+  orderApi,
+  OrdersProxyAddService,
+  validateOrdersProxyLineItems,
+} from '../../services/orderApi';
+import {
+  fetchCenterManageMeta,
+  type CenterManageMeta,
+} from '../../services/centerManageApi';
+import {
+  getApplicationCategories,
+  getCustomsClearanceOptions,
+  getInitialCenterManageSelections,
+  getLogisticsCentersForBusiness,
+  getTransportMethodsForBusiness,
+  profileClearanceToMetaLabel,
+  reconcileCenterManageSelections,
+  type CenterManageSelections,
+} from '../../utils/centerManageMeta';
 import { cartApi, CartItem, MultiLang } from '../../services/cartApi';
 import {
   getProfile,
@@ -60,6 +82,8 @@ interface CartCard {
   index: string;
   offerId: string;
   source: string;
+  specId: string;
+  skuId: string | number;
   companyName: string;
   productName: string;
   productImage: string | null;
@@ -75,6 +99,24 @@ interface CartCard {
 }
 
 type TabKey = 'past' | 'bundles' | 'offline';
+
+type NegotiationImageEntry = {
+  id: string;
+  fileUri: string;
+  fileName?: string;
+  mimeType?: string;
+};
+
+const createNegotiationImageEntry = (asset: {
+  uri: string;
+  fileName?: string;
+  type?: string;
+}): NegotiationImageEntry => ({
+  id: `neg-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  fileUri: asset.uri,
+  fileName: asset.fileName,
+  mimeType: asset.type,
+});
 
 const TIME_PERIODS: Array<{ labelKey: 'all' | 'h1' | 'h24' | 'd7'; value: number }> = [
   { labelKey: 'all', value: 0 },
@@ -114,6 +156,8 @@ const mapCartItemToCard = (
     index: String(index + 1).padStart(3, '0'),
     offerId,
     source: item.source || '1688',
+    specId: item.skuInfo?.specId ?? '',
+    skuId: item.skuInfo?.skuId ?? '',
     companyName: pickLang(item.companyName, locale),
     productName:
       pickLang(item.subjectMultiLang, locale) ||
@@ -143,6 +187,37 @@ type ProfileAddress = {
   defaultAddress?: boolean;
   customerClearanceType?: string;
   customMethod?: string;
+};
+
+const isProfileAddressBusiness = (addr: ProfileAddress): boolean =>
+  addr.customerClearanceType === 'business' || addr.customMethod === 'business';
+
+/** Matches center-manage meta 통관방식 labels (사업자 / 개인). */
+const isCustomsClearanceBusiness = (customsClearance: string): boolean => {
+  const v = customsClearance.trim();
+  if (v === '사업자' || v === 'Business' || v === '企业') return true;
+  if (v === '개인' || v === 'Personal' || v === '个人') return false;
+  return /business|사업|회사|enterprise/i.test(v);
+};
+
+const filterAddressesByCustoms = (
+  addresses: ProfileAddress[],
+  customsClearance: string,
+): ProfileAddress[] =>
+  addresses.filter(
+    (addr) => isProfileAddressBusiness(addr) === isCustomsClearanceBusiness(customsClearance),
+  );
+
+const pickPreferredAddress = (
+  addresses: ProfileAddress[],
+  preferredId?: string | null,
+): ProfileAddress | null => {
+  if (addresses.length === 0) return null;
+  if (preferredId) {
+    const current = addresses.find((a) => a._id === preferredId);
+    if (current) return current;
+  }
+  return addresses.find((a) => a.defaultAddress) || addresses[0];
 };
 
 const CartScreen: React.FC = () => {
@@ -194,18 +269,23 @@ const CartScreen: React.FC = () => {
 
   // Order modal state
   const [showOrderModal, setShowOrderModal] = useState(false);
+  const [negotiationContentImages, setNegotiationContentImages] = useState<
+    NegotiationImageEntry[]
+  >([]);
+  const [negotiationNote, setNegotiationNote] = useState('');
   const [showAddNewAddressModal, setShowAddNewAddressModal] = useState(false);
   const [purchasePayment, setPurchasePayment] = useState<'manual' | 'auto'>('manual');
   const [shippingPayment, setShippingPayment] = useState<'manual' | 'auto'>('manual');
   const [showPaymentTooltip, setShowPaymentTooltip] = useState(false);
-  const [logisticsCenter, setLogisticsCenter] = useState<'haerae' | 'guangzhou' | 'yiwu'>('haerae');
-  const [applicationType, setApplicationType] = useState<'sea' | 'air' | 'rocket'>('rocket');
-  const [customsMethod, setCustomsMethod] = useState<'business' | 'personal'>('business');
-  const [shippingMethod, setShippingMethod] = useState<
-    'rocketPallet' | 'rocketDelivery' | 'selfPallet' | 'selfDelivery'
-  >('rocketPallet');
-  const [businessInfoSelected, setBusinessInfoSelected] = useState('');
-  const [recipientInfoSelected, setRecipientInfoSelected] = useState('');
+  const [centerMeta, setCenterMeta] = useState<CenterManageMeta | null>(null);
+  const [centerMetaLoading, setCenterMetaLoading] = useState(false);
+  const [basicInfoSelections, setBasicInfoSelections] = useState<CenterManageSelections>({
+    businessType: '구매대행',
+    logisticsCenter: '위해',
+    transportMethod: '해운배송',
+    applicationCategory: '',
+    customsClearance: '사업자',
+  });
   const [profileAddresses, setProfileAddresses] = useState<ProfileAddress[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [depositBalance, setDepositBalance] = useState(0);
@@ -281,10 +361,22 @@ const CartScreen: React.FC = () => {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (showOrderModal) {
+      setNegotiationContentImages([]);
+      setNegotiationNote('');
+    }
+  }, [showOrderModal]);
+
   // Fetch the cart from the API and map items into local CartCard shape.
   const loadCart = useCallback(async () => {
     setCartLoading(true);
     setCartError(null);
+    if (isGuest || !isAuthenticated) {
+      setCards([]);
+      setCartLoading(false);
+      return;
+    }
     try {
       const res = await cartApi.getCart(locale);
       if (res.success && res.data?.cart) {
@@ -307,18 +399,23 @@ const CartScreen: React.FC = () => {
         );
       } else {
         setCards([]);
-        setCartError(res.message || 'Failed to load cart');
+        const isAuthError =
+          res.message?.toLowerCase().includes('authentication') ||
+          res.message?.toLowerCase().includes('unauthorized');
+        setCartError(isAuthError ? t('cart.loginPrompt') : res.message || 'Failed to load cart');
       }
     } catch (e: any) {
       setCards([]);
-      setCartError(e?.message || 'Failed to load cart');
+      const status = e?.response?.status;
+      const isAuthError = status === 401;
+      setCartError(isAuthError ? t('cart.loginPrompt') : e?.message || 'Failed to load cart');
     } finally {
       setCartLoading(false);
     }
     // `t` is intentionally excluded — useTranslation returns a new `t` each render,
     // including it here would re-create loadCart every render and loop the fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
+  }, [locale, isGuest, isAuthenticated]);
 
   const applyCartFromBuyNowResponse = useCallback(
     (
@@ -653,29 +750,78 @@ const CartScreen: React.FC = () => {
       setProfileAddresses(addresses);
       setDepositBalance(apiUser.depositBalance ?? 0);
 
-      const defaultAddr =
-        addresses.find((a) => a.defaultAddress) || addresses[0] || null;
-
-      if (defaultAddr) {
-        setSelectedAddressId(defaultAddr._id);
-        setRecipientInfoSelected(formatProfileAddressLabel(defaultAddr));
-        const isBusiness =
-          defaultAddr.customerClearanceType === 'business' ||
-          defaultAddr.customMethod === 'business';
-        setCustomsMethod(isBusiness ? 'business' : 'personal');
-      } else {
-        setSelectedAddressId(null);
-        setRecipientInfoSelected('');
-      }
-
-      const businessLabel = apiUser.isBusinesser
-        ? `${apiUser.userName || apiUser.users_id || ''} (${apiUser.userUniqueId || apiUser.tjMemberId || ''})`
-        : t('cartOrder.orderModal.personal');
-      setBusinessInfoSelected(businessLabel);
+      setBasicInfoSelections((prev) => {
+        const matching = filterAddressesByCustoms(addresses, prev.customsClearance);
+        const preferred = pickPreferredAddress(matching);
+        setSelectedAddressId(preferred?._id ?? null);
+        return prev;
+      });
       // Order modal uses local state only — avoid updateUser() here to prevent
       // auth/socket/focus-effect loops from repeated profile refetches.
     },
-    [t],
+    [],
+  );
+
+  const addressesForCustoms = useMemo(
+    () => filterAddressesByCustoms(profileAddresses, basicInfoSelections.customsClearance),
+    [profileAddresses, basicInfoSelections.customsClearance],
+  );
+
+  const deliveryAddressLabel = useMemo(() => {
+    const addr = pickPreferredAddress(addressesForCustoms, selectedAddressId);
+    return addr ? formatProfileAddressLabel(addr) : '';
+  }, [addressesForCustoms, selectedAddressId]);
+
+  useEffect(() => {
+    if (!showOrderModal) return;
+    const preferred = pickPreferredAddress(addressesForCustoms, selectedAddressId);
+    const nextId = preferred?._id ?? null;
+    if (nextId !== selectedAddressId) {
+      setSelectedAddressId(nextId);
+    }
+  }, [showOrderModal, addressesForCustoms, selectedAddressId]);
+
+  const patchBasicInfoSelection = useCallback(
+    (field: keyof CenterManageSelections, value: string) => {
+      setBasicInfoSelections((prev) => {
+        if (!centerMeta) {
+          return { ...prev, [field]: value };
+        }
+        return reconcileCenterManageSelections(
+          centerMeta,
+          { ...prev, [field]: value },
+          field,
+        );
+      });
+    },
+    [centerMeta],
+  );
+
+  const renderBasicInfoPills = (
+    label: string,
+    options: string[],
+    selected: string,
+    onSelect: (value: string) => void,
+  ) => (
+    <View style={styles.orderFieldCol}>
+      <Text style={styles.orderFieldLabel}>{label}</Text>
+      <View style={styles.pillGroup}>
+        {options.map((option) => {
+          const label = typeof option === 'string' ? option : String(option ?? '');
+          return (
+            <TouchableOpacity
+              key={label}
+              style={[styles.pill, selected === label && styles.pillActive]}
+              onPress={() => onSelect(label)}
+            >
+              <Text style={[styles.pillText, selected === label && styles.pillTextActive]}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
   );
 
   const refreshOrderProfile = useCallback(async () => {
@@ -706,27 +852,21 @@ const CartScreen: React.FC = () => {
   }, [navigation]);
 
   const showRecipientPicker = useCallback(() => {
-    if (profileAddresses.length === 0) {
+    if (addressesForCustoms.length === 0) {
       return;
     }
     Alert.alert(
       t('cartOrder.orderModal.selectRecipient'),
       undefined,
       [
-        ...profileAddresses.map((addr) => ({
+        ...addressesForCustoms.map((addr) => ({
           text: formatProfileAddressLabel(addr),
-          onPress: () => {
-            setSelectedAddressId(addr._id);
-            setRecipientInfoSelected(formatProfileAddressLabel(addr));
-            const isBusiness =
-              addr.customerClearanceType === 'business' || addr.customMethod === 'business';
-            setCustomsMethod(isBusiness ? 'business' : 'personal');
-          },
+          onPress: () => setSelectedAddressId(addr._id),
         })),
         { text: t('cartOrder.alerts.cancel'), style: 'cancel' as const },
       ],
     );
-  }, [profileAddresses, t]);
+  }, [addressesForCustoms, t]);
 
   const handleUseNewAddress = useCallback(() => {
     setShowAddNewAddressModal(true);
@@ -736,6 +876,37 @@ const CartScreen: React.FC = () => {
     navigation.navigate('AddressBook' as never, { fromShippingSettings: true } as never);
   }, [navigation]);
 
+  const pickNegotiationAttachment = useCallback(async () => {
+    try {
+      const granted = await requestPhotoLibraryPermission();
+      if (!granted) {
+        Alert.alert(t('cartOrder.alerts.permission'), t('cartOrder.alerts.photoPermission'));
+        return;
+      }
+      const options: ImageLibraryOptions = { mediaType: 'photo' as MediaType, quality: 0.7 };
+      launchImageLibrary(options, (res: ImagePickerResponse) => {
+        if (res.didCancel || res.errorCode) return;
+        const asset = res.assets?.[0];
+        const uri = asset?.uri;
+        if (!uri) return;
+        setNegotiationContentImages((prev) => [
+          ...prev,
+          createNegotiationImageEntry({
+            uri,
+            fileName: asset.fileName,
+            type: asset.type,
+          }),
+        ]);
+      });
+    } catch {
+      Alert.alert(t('cartOrder.alerts.error'), t('cartOrder.alerts.galleryFailed'));
+    }
+  }, [t]);
+
+  const removeNegotiationImage = useCallback((id: string) => {
+    setNegotiationContentImages((prev) => prev.filter((entry) => entry.id !== id));
+  }, []);
+
   const openOrderInfoModal = useCallback(async () => {
     if (isGuest || !isAuthenticated) {
       navigation.navigate('Auth' as never, { screen: 'Login' } as never);
@@ -743,16 +914,64 @@ const CartScreen: React.FC = () => {
     }
 
     setProfileLoading(true);
+    setCenterMetaLoading(true);
     try {
-      const res = await getProfile();
-      if (res.success && res.data?.user) {
-        applyProfileFromApi(res.data.user);
+      const [profileRes, metaRes] = await Promise.all([
+        getProfile(),
+        fetchCenterManageMeta(),
+      ]);
+
+      if (metaRes.success && metaRes.data) {
+        setCenterMeta(metaRes.data);
+        let selections = getInitialCenterManageSelections(metaRes.data);
+        if (profileRes.success && profileRes.data?.user) {
+          const addresses: ProfileAddress[] = (profileRes.data.user.addresses || []).map(
+            (addr: Record<string, unknown>) => ({
+              _id: String(addr._id || addr.id || ''),
+              defaultAddress: Boolean(addr.defaultAddress),
+              customerClearanceType: String(
+                addr.customerClearanceType || addr.customMethod || '',
+              ),
+              customMethod: String(addr.customMethod || addr.customerClearanceType || ''),
+            }),
+          );
+          const defaultAddr =
+            addresses.find((a) => a.defaultAddress) || addresses[0] || null;
+          if (defaultAddr) {
+            const isBusiness =
+              defaultAddr.customerClearanceType === 'business' ||
+              defaultAddr.customMethod === 'business';
+            const label = profileClearanceToMetaLabel(isBusiness);
+            const customsList = getCustomsClearanceOptions(
+              metaRes.data,
+              selections.businessType,
+              selections.logisticsCenter,
+              selections.transportMethod,
+              selections.applicationCategory,
+            );
+            if (customsList.includes(label)) {
+              selections = { ...selections, customsClearance: label };
+            }
+          }
+        }
+        setBasicInfoSelections(selections);
+      } else {
+        setCenterMeta(null);
+        Alert.alert(
+          t('cartOrder.alerts.error'),
+          metaRes.message || t('cartOrder.orderModal.orderFailed'),
+        );
+        return false;
+      }
+
+      if (profileRes.success && profileRes.data?.user) {
+        applyProfileFromApi(profileRes.data.user);
         setShowOrderModal(true);
         return true;
       }
       Alert.alert(
         t('cartOrder.alerts.error'),
-        res.error || t('cartOrder.orderModal.orderFailed'),
+        profileRes.error || t('cartOrder.orderModal.orderFailed'),
       );
       return false;
     } catch {
@@ -760,6 +979,7 @@ const CartScreen: React.FC = () => {
       return false;
     } finally {
       setProfileLoading(false);
+      setCenterMetaLoading(false);
     }
   }, [applyProfileFromApi, isAuthenticated, isGuest, navigation, t]);
 
@@ -805,7 +1025,7 @@ const CartScreen: React.FC = () => {
   }, [cards, cartLoading, openOrderInfoModal, profileLoading]);
 
   const handleConfirmOrder = useCallback(async () => {
-    if (!selectedAddressId) {
+    if (!selectedAddressId || addressesForCustoms.length === 0) {
       Alert.alert(t('cartOrder.alerts.notice'), t('cartOrder.orderModal.noAddress'));
       return;
     }
@@ -821,18 +1041,6 @@ const CartScreen: React.FC = () => {
       quantities[c.id] = c.quantity;
     });
 
-    const orderTypeMap: Record<typeof applicationType, 'General' | 'VVIC' | 'Rocket'> = {
-      sea: 'General',
-      air: 'General',
-      rocket: 'Rocket',
-    };
-    const transferMethodMap: Record<typeof applicationType, 'air' | 'ship'> = {
-      sea: 'ship',
-      air: 'air',
-      rocket: 'ship',
-    };
-    const transferMethod = transferMethodMap[applicationType];
-
     setCheckoutLoading(true);
     try {
       const checkoutRes = await cartApi.checkout(quantities);
@@ -845,64 +1053,131 @@ const CartScreen: React.FC = () => {
       }
 
       const checkoutData = checkoutRes.data;
-      const netExpectedTotalKRW = Math.round(
-        (checkoutData.productTotalKRW ?? 0) + (checkoutData.shippingTotalKRW ?? 0),
+
+      const cartRes = await cartApi.getCart(locale);
+      const cartApiItems = cartRes.success && cartRes.data?.cart?.items
+        ? cartRes.data.cart.items
+        : [];
+      const sourceItems = mergeOrderSourceItems(
+        cartItemIds,
+        checkoutData.selectedItems ?? [],
+        cartApiItems,
       );
 
-      const orderLineItems = buildCreateOrderLineItems(
+      const ordersLang = mapLocaleToOrdersLang(locale);
+      const fallbackCards = checkedCards.map((c) => ({
+        id: c.id,
+        offerId: c.offerId,
+        productName: c.productName,
+        productImage: c.productImage,
+        source: c.source,
+        quantity: c.quantity,
+        specId: c.specId,
+        skuId: c.skuId,
+      }));
+
+      let negotiationImageUrls: string[] = [];
+      if (negotiationContentImages.length > 0) {
+        const uploadRes = await orderApi.uploadOrderImages(
+          'negotiationContentImages',
+          negotiationContentImages.map((img) => ({
+            uri: img.fileUri,
+            fileName: img.fileName,
+            type: img.mimeType,
+          })),
+          ordersLang,
+        );
+        if (!uploadRes.success) {
+          Alert.alert(
+            t('cartOrder.alerts.error'),
+            uploadRes.error || t('cartOrder.orderModal.negotiationUploadFailed'),
+          );
+          return;
+        }
+        negotiationImageUrls = uploadRes.data?.urls ?? [];
+      }
+
+      let addServiceImageUrls: string[] = [];
+      if (modalPhotoUri && extraServices.length > 0) {
+        const uploadRes = await orderApi.uploadOrderImages(
+          'addServices',
+          [{ uri: modalPhotoUri, fileName: `addservice_${Date.now()}.jpg` }],
+          ordersLang,
+        );
+        if (!uploadRes.success) {
+          Alert.alert(
+            t('cartOrder.alerts.error'),
+            uploadRes.error || t('cartOrder.orderModal.negotiationUploadFailed'),
+          );
+          return;
+        }
+        addServiceImageUrls = uploadRes.data?.urls ?? [];
+      }
+
+      const addServicesPayload: OrdersProxyAddService[] = extraServices.map((svc) => ({
+        id: svc.id,
+        note: otherRequests.trim(),
+        imageUrl: addServiceImageUrls,
+      }));
+
+      const proxyItems = buildOrdersProxyLineItems(
         cartItemIds,
         quantities,
-        checkoutData.selectedItems ?? [],
-        checkedCards.map((c) => ({
-          id: c.id,
-          offerId: c.offerId,
-          productName: c.productName,
-          productImage: c.productImage,
-          source: c.source,
-          quantity: c.quantity,
-        })),
-        locale,
+        sourceItems,
+        fallbackCards,
+        {
+          locale,
+          addServices: addServicesPayload.length > 0 ? addServicesPayload : undefined,
+          negotiationContentImages:
+            negotiationImageUrls.length > 0 ? negotiationImageUrls : undefined,
+          negotiationNote: negotiationNote.trim() || undefined,
+        },
       );
 
-      await createOrder({
-        cartItems: cartItemIds,
-        quantities,
-        items: orderLineItems,
-        netExpectedTotalKRW,
-        estimatedShippingCostBySeller: checkoutData.estimatedShippingCostBySeller,
-        orderType: orderTypeMap[applicationType],
-        transferMethod,
-        flow: 'general',
-        paymentMethod: 'deposit',
+      const lineItemError = validateOrdersProxyLineItems(proxyItems);
+      if (lineItemError) {
+        Alert.alert(t('cartOrder.alerts.error'), lineItemError);
+        return;
+      }
+
+      if (!basicInfoSelections.applicationCategory) {
+        Alert.alert(t('cartOrder.alerts.notice'), t('cartOrder.orderModal.orderSubmitFailed'));
+        return;
+      }
+
+      const proxyRequest = buildOrdersProxyCreateRequest({
+        cartItemIds,
         addressId: selectedAddressId,
-        orderMainInfo: {
-          requestType: 'Purchase agency',
-          logisticsCenter,
-          transferMethod,
-          shippingMethod,
-          customMethod: customsMethod,
-        },
-        orderPaymentInfo: {
-          dispatchPayment: purchasePayment,
-          shipPayment: shippingPayment,
-        },
+        businessType: basicInfoSelections.businessType,
+        logisticsCenter: basicInfoSelections.logisticsCenter,
+        transportMethod: basicInfoSelections.transportMethod,
+        applicationCategory: basicInfoSelections.applicationCategory,
+        customsClearance: basicInfoSelections.customsClearance,
+        purchasePayment,
+        shippingPayment,
+        items: proxyItems,
       });
+
+      await createOrder(proxyRequest);
     } catch {
       // onError alert handled by mutation
     } finally {
       setCheckoutLoading(false);
     }
   }, [
-    applicationType,
+    basicInfoSelections,
     checkedCards,
     createOrder,
-    customsMethod,
-    logisticsCenter,
+    extraServices,
+    modalPhotoUri,
+    otherRequests,
     purchasePayment,
     selectedAddressId,
-    shippingMethod,
     shippingPayment,
     locale,
+    negotiationContentImages,
+    negotiationNote,
+    addressesForCustoms.length,
     t,
   ]);
 
@@ -1294,94 +1569,69 @@ const CartScreen: React.FC = () => {
                 )}
               </View>
 
-              {/* 기본정보 */}
+              {/* 기본정보 — GET /center-manage/meta (web과 동일 5단계) */}
               <View style={styles.orderSection}>
                 <View style={styles.orderSectionHead}>
                   <View style={styles.orderSectionBar} />
                   <Text style={styles.orderSectionTitle}>{t('cartOrder.orderModal.basicInfo')}</Text>
                 </View>
 
-                <View style={styles.orderFieldCol}>
-                  <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.logistics')}</Text>
-                  <View style={styles.pillGroup}>
-                    {(['haerae', 'guangzhou', 'yiwu'] as const).map((v) => (
-                      <TouchableOpacity
-                        key={v}
-                        style={[styles.pill, logisticsCenter === v && styles.pillActive]}
-                        onPress={() => setLogisticsCenter(v)}
-                      >
-                        <Text style={[styles.pillText, logisticsCenter === v && styles.pillTextActive]}>{t(`cartOrder.orderModal.${v}`)}</Text>
-                      </TouchableOpacity>
-                    ))}
+                {centerMetaLoading || !centerMeta ? (
+                  <View style={styles.centerMetaLoadingWrap}>
+                    <ActivityIndicator size="small" color={PRIMARY} />
+                    <Text style={styles.centerMetaLoadingText}>
+                      {t('cartOrder.orderModal.basicInfoLoading')}
+                    </Text>
                   </View>
-                </View>
-
-                <View style={styles.orderFieldCol}>
-                  <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.appType')}</Text>
-                  <View style={styles.pillGroup}>
-                    {(['sea', 'air', 'rocket'] as const).map((v) => (
-                      <TouchableOpacity
-                        key={v}
-                        style={[styles.pill, applicationType === v && styles.pillActive]}
-                        onPress={() => setApplicationType(v)}
-                      >
-                        <Text style={[styles.pillText, applicationType === v && styles.pillTextActive]}>{t(`cartOrder.orderModal.${v}`)}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-
-                <View style={styles.orderFieldCol}>
-                  <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.customs')}</Text>
-                  <View style={styles.pillGroup}>
-                    {(['business', 'personal'] as const).map((v) => (
-                      <TouchableOpacity
-                        key={v}
-                        style={[styles.pill, customsMethod === v && styles.pillActive]}
-                        onPress={() => setCustomsMethod(v)}
-                      >
-                        <Text style={[styles.pillText, customsMethod === v && styles.pillTextActive]}>{t(`cartOrder.orderModal.${v}`)}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-
-                <View style={styles.orderFieldCol}>
-                  <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.shippingMethod')}</Text>
-                  <View style={styles.pillGroup}>
-                    {(['rocketPallet', 'rocketDelivery', 'selfPallet', 'selfDelivery'] as const).map((v) => (
-                      <TouchableOpacity
-                        key={v}
-                        style={[styles.pill, shippingMethod === v && styles.pillActive]}
-                        onPress={() => setShippingMethod(v)}
-                      >
-                        <Text style={[styles.pillText, shippingMethod === v && styles.pillTextActive]}>{t(`cartOrder.orderModal.${v}`)}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
+                ) : (
+                  <>
+                    {renderBasicInfoPills(
+                      t('cartOrder.orderModal.businessTypeField'),
+                      centerMeta.businessType,
+                      basicInfoSelections.businessType,
+                      (v) => patchBasicInfoSelection('businessType', v),
+                    )}
+                    {renderBasicInfoPills(
+                      t('cartOrder.orderModal.logistics'),
+                      getLogisticsCentersForBusiness(centerMeta, basicInfoSelections.businessType),
+                      basicInfoSelections.logisticsCenter,
+                      (v) => patchBasicInfoSelection('logisticsCenter', v),
+                    )}
+                    {renderBasicInfoPills(
+                      t('cartOrder.orderModal.transportMethodField'),
+                      getTransportMethodsForBusiness(centerMeta, basicInfoSelections.businessType),
+                      basicInfoSelections.transportMethod,
+                      (v) => patchBasicInfoSelection('transportMethod', v),
+                    )}
+                    {renderBasicInfoPills(
+                      t('cartOrder.orderModal.applicationCategoryField'),
+                      getApplicationCategories(
+                        centerMeta,
+                        basicInfoSelections.businessType,
+                        basicInfoSelections.logisticsCenter,
+                        basicInfoSelections.transportMethod,
+                      ),
+                      basicInfoSelections.applicationCategory,
+                      (v) => patchBasicInfoSelection('applicationCategory', v),
+                    )}
+                    {renderBasicInfoPills(
+                      t('cartOrder.orderModal.customs'),
+                      getCustomsClearanceOptions(
+                        centerMeta,
+                        basicInfoSelections.businessType,
+                        basicInfoSelections.logisticsCenter,
+                        basicInfoSelections.transportMethod,
+                        basicInfoSelections.applicationCategory,
+                      ),
+                      basicInfoSelections.customsClearance,
+                      (v) => patchBasicInfoSelection('customsClearance', v),
+                    )}
+                  </>
+                )}
               </View>
 
-              {/* 사업자/개인정보 & 수령정보 — placed at the bottom per spec */}
+              {/* 배송주소확인 — 통관방식(사업자/개인)에 맞는 등록 주소 */}
               <View style={styles.orderSection}>
-                <View style={styles.orderFieldRow}>
-                  <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.businessInfo')}</Text>
-                  <View style={styles.selectBtn}>
-                    <Text style={styles.selectBtnText} numberOfLines={2}>
-                      {businessInfoSelected || t('cartOrder.orderModal.selectPlaceholder')}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.orderFieldRow}>
-                  <Text style={styles.orderFieldLabel}>{t('cartOrder.orderModal.recipientInfo')}</Text>
-                  <View style={styles.selectBtn}>
-                    <Text style={styles.selectBtnText} numberOfLines={2}>
-                      {recipientInfoSelected || t('cartOrder.orderModal.selectPlaceholder')}
-                    </Text>
-                  </View>
-                </View>
-
                 <View style={styles.deliveryAddressSection}>
                   <View style={styles.deliveryAddressHeader}>
                     <Text style={styles.deliveryAddressTitle}>
@@ -1415,10 +1665,12 @@ const CartScreen: React.FC = () => {
                     </View>
                   </View>
 
-                  {profileAddresses.length === 0 ? (
+                  {addressesForCustoms.length === 0 ? (
                     <View style={styles.deliveryAddressEmptyBox}>
                       <Text style={styles.deliveryAddressEmptyText}>
-                        {t('cartOrder.orderModal.noRegisteredReceivingAddress')}
+                        {isCustomsClearanceBusiness(basicInfoSelections.customsClearance)
+                          ? t('cartOrder.orderModal.noBusinessAddress')
+                          : t('cartOrder.orderModal.noPersonalAddress')}
                       </Text>
                     </View>
                   ) : (
@@ -1428,7 +1680,7 @@ const CartScreen: React.FC = () => {
                       activeOpacity={0.7}
                     >
                       <Text style={styles.deliveryAddressFilledText} numberOfLines={3}>
-                        {recipientInfoSelected || t('cartOrder.orderModal.selectPlaceholder')}
+                        {deliveryAddressLabel || t('cartOrder.orderModal.selectPlaceholder')}
                       </Text>
                     </TouchableOpacity>
                   )}
@@ -1438,6 +1690,55 @@ const CartScreen: React.FC = () => {
               {/* 부가서비스 — same selection as cart page */}
               <View style={styles.orderExtraServiceSection}>
                 {renderExtraServiceBar()}
+              </View>
+
+              {/* 협상내역 — negotiation remarks at bottom of order modal */}
+              <View style={styles.negotiationSection}>
+                <View style={styles.negotiationHeader}>
+                  <Text style={styles.negotiationHeaderTitle}>
+                    {t('cartOrder.orderModal.negotiationHistory')}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.negotiationAddBtn}
+                    onPress={pickNegotiationAttachment}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('cartOrder.orderModal.negotiationAddAttachment')}
+                  >
+                    <Icon name="add" size={18} color={COLORS.text.primary} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.negotiationBody}>
+                  {negotiationContentImages.length > 0 ? (
+                    <View style={styles.negotiationImagesRow}>
+                      {negotiationContentImages.map((entry) => (
+                        <View key={entry.id} style={styles.negotiationThumbWrap}>
+                          <Image
+                            source={{ uri: entry.fileUri }}
+                            style={styles.negotiationThumb}
+                            resizeMode="cover"
+                          />
+                          <TouchableOpacity
+                            style={styles.negotiationThumbRemove}
+                            onPress={() => removeNegotiationImage(entry.id)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Icon name="close" size={12} color={COLORS.white} />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  <TextInput
+                    style={styles.negotiationInput}
+                    value={negotiationNote}
+                    onChangeText={setNegotiationNote}
+                    placeholder={t('cartOrder.orderModal.negotiationRemarksPlaceholder')}
+                    placeholderTextColor={COLORS.gray[400]}
+                    multiline
+                    textAlignVertical="top"
+                  />
+                </View>
               </View>
             </ScrollView>
 
@@ -2070,6 +2371,80 @@ const styles = StyleSheet.create({
     paddingTop: SPACING.md,
     borderTopWidth: 1,
     borderTopColor: COLORS.gray[100],
+  },
+  negotiationSection: {
+    marginTop: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: COLORS.white,
+  },
+  negotiationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.smmd,
+    backgroundColor: COLORS.gray[100],
+  },
+  negotiationHeaderTitle: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  negotiationAddBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  negotiationBody: {
+    padding: SPACING.md,
+    gap: SPACING.sm,
+    backgroundColor: COLORS.white,
+  },
+  negotiationImagesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  negotiationThumbWrap: {
+    position: 'relative',
+  },
+  negotiationThumbRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.gray[700],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  negotiationInput: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    borderRadius: 8,
+    paddingHorizontal: SPACING.smmd,
+    paddingVertical: SPACING.sm,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    backgroundColor: COLORS.white,
+  },
+  negotiationThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
   },
   extraBarInOrderModal: {
     borderBottomWidth: 0,
@@ -3023,6 +3398,16 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray[100],
+  },
+  centerMetaLoadingWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.md,
+  },
+  centerMetaLoadingText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
   },
   orderSectionHead: {
     flexDirection: 'row',

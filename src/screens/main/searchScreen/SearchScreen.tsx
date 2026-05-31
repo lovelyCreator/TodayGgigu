@@ -1866,7 +1866,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.sm,
-    paddingTop: SPACING.xl,
+    paddingTop: SPACING['3xl'],
     paddingBottom: SPACING.sm,
     gap: SPACING.sm,
   },

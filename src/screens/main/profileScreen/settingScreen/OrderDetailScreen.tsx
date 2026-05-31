@@ -11,12 +11,19 @@ import EditIcon from '../../../../assets/icons/EditIcon';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../../../constants';
 import { useToast } from '../../../../context/ToastContext';
-import { formatPriceKRW } from '../../../../utils/i18nHelpers';
+import {
+  coerceDisplayText,
+  formatPriceKRW,
+  resolveOrderItemCompanyName,
+} from '../../../../utils/i18nHelpers';
+import { useTranslation } from '../../../../hooks/useTranslation';
+import { getOrderProgressStatusLabel } from '../../../../utils/orderProgressStatusLabel';
 import { orderApi } from '../../../../services/orderApi';
 
 const OrderDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
+  const { t, locale } = useTranslation();
   const { showToast } = useToast();
   const { order: initialOrder } = route.params || {};
   const [currentOrder, setCurrentOrder] = useState(initialOrder);
@@ -38,18 +45,20 @@ const OrderDetailScreen: React.FC = () => {
 
   if (!order) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Order Detail</Text>
-          <View style={{ width: 40 }} />
-        </View>
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea} edges={['top', 'left', 'right']}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>{t('profile.orderDetail')}</Text>
+            <View style={{ width: 40 }} />
+          </View>
+        </SafeAreaView>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <Text style={{ color: COLORS.text.secondary }}>Order not found</Text>
+          <Text style={{ color: COLORS.text.secondary }}>{t('profile.orderNotFound')}</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -93,7 +102,7 @@ const OrderDetailScreen: React.FC = () => {
 
   const copy = (text: string) => {
     Clipboard.setString(text);
-    showToast('Copied', 'success');
+    showToast(t('profile.copied'), 'success');
   };
 
   const isPayCase = order.status === 'unpaid' || order.progressStatus === 'WH_PAY_WAIT';
@@ -104,21 +113,28 @@ const OrderDetailScreen: React.FC = () => {
     try {
       const res = await orderApi.confirmReceived(order.id);
       if (res.success) {
-        showToast('Order confirmed as received', 'success');
+        showToast(t('profile.orderConfirmedAsReceived'), 'success');
         navigation.goBack();
       } else {
-        showToast(res.error || 'Failed to confirm', 'error');
+        showToast(res.error || t('profile.failedToConfirm'), 'error');
       }
     } catch {
-      showToast('Failed to confirm receipt', 'error');
+      showToast(t('profile.failedToConfirmReceipt'), 'error');
     } finally {
       setIsConfirming(false);
     }
   };
 
+  const unknownStoreLabel = t('profile.unknownStore');
+
+  const resolveStoreName = (item: any): string =>
+    resolveOrderItemCompanyName(item, locale) ||
+    coerceDisplayText(item?.companyName ?? item?.companyNameMultiLang, locale, '') ||
+    unknownStoreLabel;
+
   const storeGroups: Record<string, any[]> = {};
   (order.items || []).forEach((item: any) => {
-    const key = item.companyName || 'Unknown Store';
+    const key = resolveStoreName(item);
     if (!storeGroups[key]) storeGroups[key] = [];
     storeGroups[key].push(item);
   });
@@ -126,14 +142,20 @@ const OrderDetailScreen: React.FC = () => {
   const address = order.shippingAddress;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{order.progressStatus || order.orderStatus || 'Order Detail'}</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <View style={styles.container}>
+      <SafeAreaView style={styles.headerSafeArea} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {getOrderProgressStatusLabel(t, order.progressStatus) ||
+              order.orderStatus ||
+              t('profile.orderDetail')}
+          </Text>
+          <View style={{ width: 40 }} />
+        </View>
+      </SafeAreaView>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
         {/* Delivery Address */}
@@ -175,7 +197,9 @@ const OrderDetailScreen: React.FC = () => {
         {/* Store groups + items */}
         {Object.entries(storeGroups).map(([storeName, items]) => (
           <View key={storeName} style={styles.section}>
-            <Text style={styles.storeName}>{storeName} {'>'}</Text>
+            <Text style={styles.storeName}>
+              {coerceDisplayText(storeName, locale, unknownStoreLabel)} {'>'}
+            </Text>
             {items.map((item: any, i: number) => {
               const skuLabel = (item.skuAttributes || []).map((a: any) => a.valueTrans || a.value).join(' / ');
               return (
@@ -183,7 +207,10 @@ const OrderDetailScreen: React.FC = () => {
                   <Image source={{ uri: item.imageUrl || item.image }} style={styles.productImage} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.productTitle} numberOfLines={2}>
-                      {item.subjectTrans || item.subject || item.productName || ''}
+                      {coerceDisplayText(item.subjectTrans, locale, '') ||
+                        coerceDisplayText(item.subject, locale, '') ||
+                        coerceDisplayText(item.productName, locale, '') ||
+                        ''}
                     </Text>
                     {!!skuLabel && <Text style={styles.productSpecs}>{skuLabel}</Text>}
                     <View style={styles.priceRow}>
@@ -197,24 +224,24 @@ const OrderDetailScreen: React.FC = () => {
             <View style={styles.summaryBox}>
               {order.firstTierCost?.productTotalKRW != null && (
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Product total</Text>
+                  <Text style={styles.summaryLabel}>{t('profile.productTotal')}</Text>
                   <Text style={styles.summaryValue}>{formatPriceKRW(order.firstTierCost.productTotalKRW)}</Text>
                 </View>
               )}
               {order.firstTierCost?.chinaShippingKRW != null && (
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>China shipping</Text>
+                  <Text style={styles.summaryLabel}>{t('profile.chinaShipping')}</Text>
                   <Text style={styles.summaryValue}>{formatPriceKRW(order.firstTierCost.chinaShippingKRW)}</Text>
                 </View>
               )}
               {order.firstTierCost?.baseInternationalShippingKRW != null && (
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Int'l shipping</Text>
+                  <Text style={styles.summaryLabel}>{t('profile.intlShipping')}</Text>
                   <Text style={styles.summaryValue}>{formatPriceKRW(order.firstTierCost.baseInternationalShippingKRW)}</Text>
                 </View>
               )}
               <View style={[styles.summaryRow, styles.summaryTotal]}>
-                <Text style={styles.summaryTotalLabel}>Amount paid</Text>
+                <Text style={styles.summaryTotalLabel}>{t('profile.amountPaid')}</Text>
                 <Text style={styles.summaryTotalValue}>{formatPriceKRW(order.totalAmount ?? order.paidAmount ?? 0)}</Text>
               </View>
             </View>
@@ -223,18 +250,18 @@ const OrderDetailScreen: React.FC = () => {
 
         {/* Order details */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order Details</Text>
+          <Text style={styles.sectionTitle}>{t('profile.orderDetails')}</Text>
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Order No.</Text>
+            <Text style={styles.detailLabel}>{t('profile.orderNo')}</Text>
             <View style={styles.detailValueRow}>
               <Text style={styles.detailValue} numberOfLines={1}>{order.orderNumber}</Text>
               <TouchableOpacity onPress={() => copy(order.orderNumber)}>
-                <Text style={styles.copyBtn}>Copy</Text>
+                <Text style={styles.copyBtn}>{t('home.buyList.copy')}</Text>
               </TouchableOpacity>
             </View>
           </View>
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Created</Text>
+            <Text style={styles.detailLabel}>{t('profile.created')}</Text>
             <Text style={styles.detailValue}>{new Date(order.createdAt || order.date).toLocaleString()}</Text>
           </View>
         </View>
@@ -244,7 +271,7 @@ const OrderDetailScreen: React.FC = () => {
       <View style={styles.bottomBar}>
         {isPayCase ? (
           <TouchableOpacity style={styles.payBtn} onPress={() => navigation.navigate('Payment' as never)}>
-            <Text style={styles.payBtnText}>Pay</Text>
+            <Text style={styles.payBtnText}>{t('profile.pay')}</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -255,7 +282,7 @@ const OrderDetailScreen: React.FC = () => {
             {isConfirming ? (
               <ActivityIndicator size="small" color={COLORS.white} />
             ) : (
-              <Text style={styles.confirmBtnText}>Confirm Receipt</Text>
+              <Text style={styles.confirmBtnText}>{t('profile.confirmReceipt')}</Text>
             )}
           </TouchableOpacity>
         )}
@@ -266,7 +293,7 @@ const OrderDetailScreen: React.FC = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.addressModalContent}>
             <View style={styles.addressModalHeader}>
-              <Text style={styles.addressModalTitle}>Edit address</Text>
+              <Text style={styles.addressModalTitle}>{t('home.buyList.editAddress')}</Text>
               <TouchableOpacity onPress={() => setAddressModalVisible(false)}>
                 <Icon name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
@@ -295,7 +322,7 @@ const OrderDetailScreen: React.FC = () => {
               <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Postal code:</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="e.g. 06000"
+                placeholder={t('home.buyList.postalCode')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.zonecode}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, zonecode: v }))}
@@ -305,7 +332,7 @@ const OrderDetailScreen: React.FC = () => {
               <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Detail address:</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="Search address above or enter manually"
+                placeholder={t('home.buyList.searchAddress')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.detailAddress}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, detailAddress: v }))}
@@ -314,7 +341,7 @@ const OrderDetailScreen: React.FC = () => {
               <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Recipient name:</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="Up to 25 characters"
+                placeholder={t('home.buyList.upTo25Chars')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.recipient}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, recipient: v }))}
@@ -338,7 +365,7 @@ const OrderDetailScreen: React.FC = () => {
               <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Customs clearance code:</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="Please enter the customs clearance code"
+                placeholder={t('home.buyList.enterCustomsCode')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.customsCode}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, customsCode: v }))}
@@ -355,7 +382,7 @@ const OrderDetailScreen: React.FC = () => {
                 style={styles.addressModalSaveButton}
                 onPress={async () => {
                   if (!editAddress.recipient || !editAddress.contact || !editAddress.zonecode || !editAddress.detailAddress) {
-                    showToast('Please fill in all required fields', 'error');
+                    showToast(t('profile.pleaseFillinAllRequiredFields'), 'error');
                     return;
                   }
                   setIsSavingAddress(true);
@@ -369,7 +396,7 @@ const OrderDetailScreen: React.FC = () => {
                       country: 'South Korea',
                     });
                     if (res.success) {
-                      showToast('Address updated successfully', 'success');
+                      showToast(t('profile.addressUpdatedSuccessfully'), 'success');
                       setAddressModalVisible(false);
                       // Re-fetch order to get updated address
                       const refreshed = await orderApi.getOrderById(order.id);
@@ -380,11 +407,11 @@ const OrderDetailScreen: React.FC = () => {
                         }));
                       }
                     } else {
-                      showToast(res.error || 'Failed to update address', 'error');
+                      showToast(res.error || t('profile.failedToUpdateAddress'), 'error');
                     }
                   } catch (error: any) {
                     console.error('Address update error:', error);
-                    showToast(error?.message || 'Failed to update address', 'error');
+                    showToast(error?.message || t('profile.failedToUpdateAddress'), 'error');
                   } finally {
                     setIsSavingAddress(false);
                   }
@@ -393,7 +420,7 @@ const OrderDetailScreen: React.FC = () => {
                 {isSavingAddress ? (
                   <ActivityIndicator size="small" color={COLORS.white} />
                 ) : (
-                  <Text style={styles.addressModalSaveButtonText}>Save</Text>
+                  <Text style={styles.addressModalSaveButtonText}>{t('profile.save')}</Text>
                 )}
               </TouchableOpacity>
             </ScrollView>
@@ -435,18 +462,22 @@ const OrderDetailScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
+  headerSafeArea: { backgroundColor: COLORS.white },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm * 2,
-    paddingTop: SPACING.md * 2,
-    paddingBottom: SPACING.md * 2,
-    backgroundColor: COLORS.white, borderBottomWidth: 1, borderBottomColor: COLORS.gray[200],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 12,
+    backgroundColor: COLORS.white,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[200],
   },
   backButton: { width: 40, height: 40, justifyContent: 'center' },
   headerTitle: { flex: 1, fontSize: FONTS.sizes.md, fontWeight: '700', color: COLORS.red, textAlign: 'center' },

@@ -1,6 +1,15 @@
-import { getStoredToken } from './authApi';
+import { getStoredToken, refreshAccessToken } from './authApi';
 
 import { API_BASE_URL, CATEGORIES_BASE_URL } from '../constants';
+import {
+  resolveOrderMainRequestType,
+  resolveOrdersProxyOrderType,
+} from '../utils/centerManageMeta';
+import {
+  resolveLocalizedValue,
+  resolveOrderItemCompanyName,
+  type AppLocale,
+} from '../utils/i18nHelpers';
 
 /** Orders list/create proxy (same host as categories-proxy) */
 const ORDERS_PROXY_BASE_URL = CATEGORIES_BASE_URL;
@@ -37,6 +46,8 @@ export interface CreateOrderLineItem {
   skuInfo?: unknown;
   companyName?: string | Record<string, string>;
   sellerOpenId?: string;
+  negotiationContentImages?: string[];
+  note?: string;
   [key: string]: unknown;
 }
 
@@ -56,6 +67,10 @@ export interface CreateOrderRequest {
   paymentMethod: 'deposit' | 'bank' | 'card';
   addressId: string;
   notes?: string;
+  /** 협상내역 — uploaded image URLs from device attachments. */
+  negotiationContentImages?: string[];
+  /** 협상내역 — remarks (비고). */
+  note?: string;
   orderMainInfo?: {
     requestType?: string;
     logisticsCenter?: string;
@@ -68,6 +83,321 @@ export interface CreateOrderRequest {
     shipPayment?: string;
   };
 }
+
+/** Web orders-proxy line item (POST https://todayggigu.kr/api/orders-proxy). */
+export interface OrdersProxyAddService {
+  id: string;
+  note: string;
+  imageUrl: string[];
+}
+
+export interface OrdersProxyLineItem {
+  otherSite: string;
+  offerId: number | string;
+  skuId?: number | string;
+  specId?: string;
+  quantity: number;
+  subject?: string;
+  subjectTrans?: string;
+  imageUrl?: string;
+  sellerOpenId?: string;
+  skuAttributes?: unknown[];
+  companyName?: string | Record<string, string>;
+  categoryId?: number | string;
+  addServices?: OrdersProxyAddService[];
+  negotiationContentImages?: string[];
+  note?: string;
+  [key: string]: unknown;
+}
+
+/** Web orders-proxy create body (matches working web checkout). */
+export interface OrdersProxyCreateRequest {
+  orderType: string;
+  cartItemIds: string[];
+  addressId: string;
+  dispatchmethod: string;
+  dispatchmethodship: string;
+  items: OrdersProxyLineItem[];
+  orderMainInfo: {
+    requestType: string;
+    logisticsCenter: string;
+    transferMethod: string;
+    shippingMethod: string;
+    customMethod: string;
+  };
+}
+
+/** Must match POST /v1/orders/upload-images `kind` enum (not shorthand aliases). */
+export type OrderImageUploadKind = 'addServices' | 'negotiationContentImages';
+
+export interface OrderImageUploadFile {
+  uri: string;
+  fileName?: string;
+  type?: string;
+}
+
+export interface OrderImageUploadData {
+  urls: string[];
+  groupedUrls?: Record<string, string[]>;
+}
+
+export const toOtherSite = (source?: string): string => {
+  const s = String(source ?? '1688').toLowerCase();
+  if (s.includes('taobao')) return 'taobao.com';
+  return '1688.com';
+};
+
+export const mapLogisticsCenterToApi = (
+  center: 'haerae' | 'guangzhou' | 'yiwu',
+): string => {
+  const map: Record<typeof center, string> = {
+    haerae: 'Weihai',
+    guangzhou: 'Guangzhou',
+    yiwu: 'Yiwu',
+  };
+  return map[center];
+};
+
+export const mapApplicationTypeToOrderType = (
+  appType: 'sea' | 'air' | 'rocket',
+): 'General' | 'VVIC' | 'Rocket' => {
+  if (appType === 'rocket') return 'Rocket';
+  return 'General';
+};
+
+export const mapApplicationTypeToRequestType = (appType: 'sea' | 'air' | 'rocket'): string => {
+  if (appType === 'rocket') return 'Rocket';
+  if (appType === 'air') return 'Air';
+  return 'General';
+};
+
+export const mapOrderMainTransferMethod = (appType: 'sea' | 'air' | 'rocket'): string => {
+  if (appType === 'rocket') return 'Rocket sea (CJ)';
+  if (appType === 'air') return 'Air';
+  return 'Sea (LCL)';
+};
+
+export const mapShippingMethodToApi = (
+  method: 'rocketPallet' | 'rocketDelivery' | 'selfPallet' | 'selfDelivery',
+): string => {
+  const map: Record<typeof method, string> = {
+    rocketPallet: 'Rocket Pallet',
+    rocketDelivery: 'Rocket delivery',
+    selfPallet: 'Self Pallet',
+    selfDelivery: 'Self Delivery',
+  };
+  return map[method];
+};
+
+export const mapCustomsMethodToApi = (method: 'business' | 'personal'): string =>
+  method === 'business' ? 'Business' : 'Personal';
+
+export const mapPurchasePaymentToDispatchMethod = (payment: 'manual' | 'auto'): string =>
+  payment === 'auto' ? 'buy_auto' : 'buy_manual';
+
+export const mapShippingPaymentToDispatchMethodShip = (payment: 'manual' | 'auto'): string =>
+  payment === 'auto' ? 'auto' : 'manual';
+
+export type BuildOrdersProxyItemsOptions = {
+  locale?: string;
+  addServices?: OrdersProxyAddService[];
+  negotiationContentImages?: string[];
+  negotiationNote?: string;
+};
+
+/** Prefer cart API rows (skuInfo) merged with checkout selectedItems. */
+export const mergeOrderSourceItems = (
+  cartItemIds: string[],
+  checkoutItems: unknown[] = [],
+  cartItems: unknown[] = [],
+): unknown[] =>
+  cartItemIds.map((cartItemId) => {
+    const findById = (list: unknown[]) =>
+      list.find((entry) => {
+        if (!entry || typeof entry !== 'object') return false;
+        const row = entry as Record<string, unknown>;
+        return row._id === cartItemId || row.id === cartItemId;
+      }) as Record<string, unknown> | undefined;
+
+    const fromCart = findById(cartItems);
+    const fromCheckout = findById(checkoutItems);
+
+    if (fromCart && fromCheckout) {
+      return {
+        ...fromCheckout,
+        ...fromCart,
+        skuInfo: fromCart.skuInfo ?? fromCheckout.skuInfo,
+        quantity: fromCheckout.quantity ?? fromCart.quantity,
+      };
+    }
+    return fromCart ?? fromCheckout ?? { _id: cartItemId };
+  });
+
+/** 1688 line items must include specId or skuId before orders-proxy create. */
+export const validateOrdersProxyLineItems = (items: OrdersProxyLineItem[]): string | null => {
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    if (item.otherSite !== '1688.com') continue;
+    const hasSpec = Boolean(item.specId && String(item.specId).trim());
+    const hasSku = item.skuId != null && String(item.skuId).trim() !== '';
+    if (!hasSpec && !hasSku) {
+      return `items[${i}] requires specId or skuId for 1688`;
+    }
+  }
+  return null;
+};
+
+/** Build web-shaped `items` for orders-proxy from checkout/cart rows. */
+export const buildOrdersProxyLineItems = (
+  cartItemIds: string[],
+  quantities: Record<string, number>,
+  sourceItems: unknown[] = [],
+  fallbackCards: CreateOrderCardFallback[] = [],
+  options: BuildOrdersProxyItemsOptions = {},
+): OrdersProxyLineItem[] => {
+  const { locale = 'ko', addServices, negotiationContentImages, negotiationNote } = options;
+  const trimmedNote = negotiationNote?.trim();
+
+  return cartItemIds.map((cartItemId) => {
+    const raw = sourceItems.find((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const row = entry as Record<string, unknown>;
+      return row._id === cartItemId || row.id === cartItemId;
+    }) as Record<string, unknown> | undefined;
+
+    const card = fallbackCards.find((c) => c.id === cartItemId);
+    const skuInfo = raw?.skuInfo as Record<string, unknown> | undefined;
+    const source = String(raw?.source ?? card?.source ?? '1688');
+    const title =
+      (raw && pickCartLineTitle(raw, locale)) ||
+      card?.productName?.trim() ||
+      'Product';
+    const qty =
+      quantities[cartItemId] ??
+      (typeof raw?.quantity === 'number' ? raw.quantity : undefined) ??
+      card?.quantity ??
+      1;
+
+    const skuIdRaw = skuInfo?.skuId ?? raw?.skuId ?? card?.skuId;
+    const skuId =
+      typeof skuIdRaw === 'number' || typeof skuIdRaw === 'string' ? skuIdRaw : undefined;
+    const specIdRaw = skuInfo?.specId ?? raw?.specId ?? card?.specId;
+    const specId = specIdRaw != null && String(specIdRaw).trim() ? String(specIdRaw) : undefined;
+    const otherSite = toOtherSite(source);
+
+    return {
+      otherSite,
+      offerId: (raw?.offerId as number | string | undefined) ?? card?.offerId ?? '',
+      ...(skuId != null && skuId !== '' ? { skuId } : {}),
+      ...(specId ? { specId } : {}),
+      ...(skuInfo && typeof skuInfo === 'object' ? { skuInfo } : {}),
+      quantity: qty,
+      subject: title,
+      subjectTrans: raw?.subjectTrans != null ? String(raw.subjectTrans) : undefined,
+      imageUrl:
+        (typeof raw?.imageUrl === 'string' ? raw.imageUrl : undefined) ??
+        card?.productImage ??
+        undefined,
+      sellerOpenId: raw?.sellerOpenId != null ? String(raw.sellerOpenId) : undefined,
+      skuAttributes: skuInfo?.skuAttributes as unknown[] | undefined,
+      companyName: raw?.companyName as string | Record<string, string> | undefined,
+      categoryId: raw?.categoryId as number | string | undefined,
+      ...(addServices && addServices.length > 0 ? { addServices } : {}),
+      ...(negotiationContentImages && negotiationContentImages.length > 0
+        ? { negotiationContentImages }
+        : {}),
+      ...(trimmedNote ? { note: trimmedNote } : {}),
+    };
+  });
+};
+
+export type BuildOrdersProxyCreateParams = {
+  cartItemIds: string[];
+  addressId: string;
+  /** From GET /center-manage/meta — Korean labels as on web */
+  businessType: string;
+  logisticsCenter: string;
+  transportMethod: string;
+  applicationCategory: string;
+  customsClearance: string;
+  purchasePayment: 'manual' | 'auto';
+  shippingPayment: 'manual' | 'auto';
+  items: OrdersProxyLineItem[];
+};
+
+export const buildOrdersProxyCreateRequest = (
+  params: BuildOrdersProxyCreateParams,
+): OrdersProxyCreateRequest => {
+  const orderType = resolveOrdersProxyOrderType(params.transportMethod);
+  const requestType = resolveOrderMainRequestType(
+    params.transportMethod,
+    params.businessType,
+  );
+
+  return {
+    orderType,
+    cartItemIds: params.cartItemIds,
+    addressId: params.addressId,
+    dispatchmethod: mapPurchasePaymentToDispatchMethod(params.purchasePayment),
+    dispatchmethodship: mapShippingPaymentToDispatchMethodShip(params.shippingPayment),
+    items: params.items,
+    orderMainInfo: {
+      requestType,
+      logisticsCenter: params.logisticsCenter,
+      transferMethod: params.transportMethod,
+      shippingMethod: params.applicationCategory,
+      customMethod: params.customsClearance,
+    },
+  };
+};
+
+export const isOrdersProxyCreateRequest = (
+  request: CreateOrderRequest | OrdersProxyCreateRequest,
+): request is OrdersProxyCreateRequest => {
+  const proxy = request as OrdersProxyCreateRequest;
+  return (
+    Array.isArray(proxy.cartItemIds) &&
+    typeof proxy.dispatchmethod === 'string' &&
+    typeof proxy.dispatchmethodship === 'string' &&
+    proxy.orderMainInfo != null
+  );
+};
+
+export const convertLegacyCreateOrderToProxy = (
+  req: CreateOrderRequest,
+): OrdersProxyCreateRequest => {
+  const items = buildOrdersProxyLineItems(
+    req.cartItems,
+    req.quantities,
+    req.items as unknown[],
+    [],
+    {
+      negotiationContentImages: req.negotiationContentImages,
+      negotiationNote: req.note,
+    },
+  );
+
+  const dispatchmethod =
+    req.orderPaymentInfo?.dispatchPayment === 'auto' ? 'buy_auto' : 'buy_manual';
+  const dispatchmethodship =
+    req.orderPaymentInfo?.shipPayment === 'auto' ? 'auto' : 'manual';
+
+  return {
+    orderType: req.orderType,
+    cartItemIds: req.cartItems,
+    addressId: req.addressId,
+    dispatchmethod,
+    dispatchmethodship,
+    items,
+    orderMainInfo: {
+      requestType: req.orderMainInfo?.requestType ?? req.orderType,
+      logisticsCenter: req.orderMainInfo?.logisticsCenter ?? 'Weihai',
+      transferMethod: req.orderMainInfo?.transferMethod ?? 'Sea (LCL)',
+      shippingMethod: req.orderMainInfo?.shippingMethod ?? 'Rocket delivery',
+      customMethod: req.orderMainInfo?.customMethod ?? 'Personal',
+    },
+  };
+};
 
 const pickCartLineTitle = (
   item: Record<string, unknown>,
@@ -89,6 +419,8 @@ export type CreateOrderCardFallback = {
   productImage?: string | null;
   source?: string;
   quantity?: number;
+  specId?: string;
+  skuId?: string | number;
 };
 
 /** Build `items` array for POST /orders-proxy from checkout rows or cart UI cards. */
@@ -225,6 +557,7 @@ export interface OrderItem {
   userShippingFee?: number;
   skuAttributes?: OrderItemSkuAttribute[];
   companyName: string | Record<string, string>;
+  companyNameMultiLang?: Record<string, string> | Record<string, unknown>;
   categoryName?: Record<string, string>;
   sellerOpenId: string;
   notes?: string;
@@ -235,15 +568,81 @@ export interface OrderItem {
 }
 
 export interface FirstTierCost {
+  realProductTotalKRW?: number;
   productTotalKRW?: number;
   chinaShippingKRW?: number;
   baseInternationalShippingKRW?: number;
   serviceFee?: number;
   serviceFeeAmountKRW?: number;
   totalKRW?: number;
+  totalCNY?: number;
+  total?: number;
   addOnAtCreation?: any[];
   _id?: string;
 }
+
+const coerceOrderAmount = (value: unknown): number => {
+  if (value == null || value === '') return 0;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** Unit price for order line display (handles userPrice, subtotal/qty, numeric strings). */
+export const resolveOrderItemUnitPrice = (item: {
+  userPrice?: unknown;
+  price?: unknown;
+  unitPrice?: unknown;
+  subtotal?: unknown;
+  quantity?: unknown;
+}): number => {
+  const qty = coerceOrderAmount(item.quantity) || 1;
+  const userPrice = coerceOrderAmount(item.userPrice);
+  const price = coerceOrderAmount(item.price);
+  const unitPrice = coerceOrderAmount(item.unitPrice);
+  if (userPrice > 0) return userPrice;
+  if (price > 0) return price;
+  if (unitPrice > 0) return unitPrice;
+  const subtotal = coerceOrderAmount(item.subtotal);
+  if (subtotal > 0 && qty > 0) return subtotal / qty;
+  return 0;
+};
+
+/** Order total in KRW for list/detail (falls back when totalKRW is 0 or missing). */
+export const resolveOrderTotalKRW = (order: {
+  firstTierCost?: FirstTierCost | null;
+  paidAmount?: unknown;
+  totalAmount?: unknown;
+  items?: Array<{
+    userPrice?: unknown;
+    price?: unknown;
+    unitPrice?: unknown;
+    subtotal?: unknown;
+    quantity?: unknown;
+  }>;
+}): number => {
+  const tier = order.firstTierCost;
+  for (const candidate of [
+    tier?.totalKRW,
+    tier?.productTotalKRW,
+    tier?.realProductTotalKRW,
+    order.paidAmount,
+    order.totalAmount,
+    tier?.totalCNY,
+    tier?.total,
+  ]) {
+    const n = coerceOrderAmount(candidate);
+    if (n > 0) return n;
+  }
+  const items = order.items ?? [];
+  return items.reduce((sum, item) => {
+    const subtotal = coerceOrderAmount(item.subtotal);
+    const line =
+      subtotal > 0
+        ? subtotal
+        : resolveOrderItemUnitPrice(item) * (coerceOrderAmount(item.quantity) || 1);
+    return sum + line;
+  }, 0);
+};
 
 export interface OrderPayment {
   tier: string;
@@ -356,6 +755,11 @@ export const normalizeProgressStatus = (raw?: string | null): string => {
     BUY_PAY_PENDING: 'BUY_PAY_WAIT',
     /** API progress code for purchase payment pending */
     P_PENDING: 'BUY_PAY_WAIT',
+    /** Purchase agency — auto procurement in progress (orders-proxy create) */
+    PURCHASING: 'P_AU_PURCHASING',
+    AU_PURCHASING: 'P_AU_PURCHASING',
+    RECEIPT_APPLICATION: 'P_RECEIPT_APPLICATION',
+    P_RECEIPT: 'P_RECEIPT_APPLICATION',
   };
   return aliases[upper] ?? upper;
 };
@@ -383,6 +787,61 @@ export const resolvePurchaseAgencyProgressStatus = (order: {
   return normalized;
 };
 
+const matchesShippingAgencyLabel = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes('배송대행')) return true;
+  const lower = trimmed.toLowerCase();
+  return (
+    lower === 'shipping' ||
+    lower === 'delivery' ||
+    lower === 'shipping_agency' ||
+    lower === 'delivery_agency' ||
+    lower === 'shipping agency'
+  );
+};
+
+/** 신청구분 = 배송대행 (orderMainInfo.requestType, businessType, etc.). */
+export const isShippingAgencyOrder = (order: {
+  orderMainInfo?: { requestType?: string; businessType?: string } | null;
+  requestType?: string;
+  businessType?: string;
+  orderType?: string;
+  orderNumber?: string;
+}): boolean => {
+  const orderNum = String(order.orderNumber ?? '').trim();
+  if (/^G\d/i.test(orderNum)) return true;
+  const candidates = [
+    order.orderMainInfo?.requestType,
+    order.orderMainInfo?.businessType,
+    order.requestType,
+    order.businessType,
+    order.orderType,
+  ];
+  return candidates.some((c) => matchesShippingAgencyLabel(String(c ?? '')));
+};
+
+/**
+ * UI / filter progress status.
+ * 배송대행 orders use NO_ORDER_INFO while waiting for inbound — show as 도착예정, not 주문정보없음.
+ */
+export const resolveOrderProgressStatus = (order: {
+  progressStatus?: string | null;
+  paymentStatus?: string | null;
+  firstTierCost?: { totalKRW?: number; totalCNY?: number; total?: number } | null;
+  orderMainInfo?: { requestType?: string; businessType?: string } | null;
+  requestType?: string;
+  businessType?: string;
+  orderType?: string;
+  orderNumber?: string;
+}): string => {
+  const status = resolvePurchaseAgencyProgressStatus(order);
+  if (status === 'NO_ORDER_INFO' && isShippingAgencyOrder(order)) {
+    return 'WH_ARRIVE_EXPECTED';
+  }
+  return status;
+};
+
 const deriveOrderStatusFromProxy = (raw: any): string => {
   if (raw.orderStatus) return raw.orderStatus;
   if (normalizeProgressStatus(raw.progressStatus) === 'P_QUOTE') return 'quote';
@@ -391,8 +850,12 @@ const deriveOrderStatusFromProxy = (raw: any): string => {
   return 'confirmed';
 };
 
-const normalizeProxyOrderItem = (item: any): OrderItem => {
+const normalizeProxyOrderItem = (item: any, locale: AppLocale = 'ko'): OrderItem => {
   const source = item.source || deriveSourceFromOtherSite(item.otherSite);
+  const quantity = coerceOrderAmount(item.quantity) || 1;
+  const unitPrice = resolveOrderItemUnitPrice(item);
+  const userPrice = coerceOrderAmount(item.userPrice);
+  const companyName = resolveOrderItemCompanyName(item, locale);
   return {
     id: String(item._id ?? item.id ?? ''),
     offerId: String(item.offerId ?? ''),
@@ -403,12 +866,17 @@ const normalizeProxyOrderItem = (item: any): OrderItem => {
     subjectMultiLang: item.subjectMultiLang,
     imageUrl: item.imageUrl ?? '',
     promotionUrl: item.promotionUrl,
-    price: item.price ?? 0,
-    userPrice: item.userPrice,
-    quantity: item.quantity ?? 1,
-    subtotal: item.subtotal ?? (item.price ?? 0) * (item.quantity ?? 1),
+    price: unitPrice,
+    userPrice: userPrice > 0 ? userPrice : undefined,
+    quantity,
+    subtotal: coerceOrderAmount(item.subtotal) || unitPrice * quantity,
     skuAttributes: item.skuAttributes,
-    companyName: item.companyName ?? item.companyNameMultiLang ?? '',
+    companyName: companyName || '',
+    companyNameMultiLang:
+      item.companyNameMultiLang ??
+      (typeof item.companyName === 'object' && item.companyName != null
+        ? item.companyName
+        : undefined),
     categoryName: item.categoryName ?? item.categoryNameMultiLang,
     sellerOpenId: item.sellerOpenId ?? '',
     source,
@@ -417,10 +885,10 @@ const normalizeProxyOrderItem = (item: any): OrderItem => {
 };
 
 /** Normalize GET /orders-proxy document into app Order shape */
-export const normalizeProxyOrder = (raw: any): Order => {
+export const normalizeProxyOrder = (raw: any, locale: AppLocale = 'ko'): Order => {
   const id = String(raw._id ?? raw.id ?? '');
   const trackingNumbers = Array.isArray(raw.trackingNumbers) ? raw.trackingNumbers : [];
-  const items = (raw.items ?? []).map(normalizeProxyOrderItem);
+  const items = (raw.items ?? []).map((item: any) => normalizeProxyOrderItem(item, locale));
 
   return {
     ...raw,
@@ -428,10 +896,13 @@ export const normalizeProxyOrder = (raw: any): Order => {
     _id: raw._id,
     orderNumber: raw.orderNumber ?? '',
     orderType: raw.orderType ?? 'General',
-    progressStatus: resolvePurchaseAgencyProgressStatus({
+    progressStatus: resolveOrderProgressStatus({
       progressStatus: raw.progressStatus,
       paymentStatus: raw.paymentStatus,
       firstTierCost: raw.firstTierCost,
+      orderMainInfo: raw.orderMainInfo,
+      orderType: raw.orderType,
+      orderNumber: raw.orderNumber,
     }),
     orderStatus: deriveOrderStatusFromProxy(raw),
     shippingStatus: raw.shippingStatus ?? 'not_shipped',
@@ -442,7 +913,12 @@ export const normalizeProxyOrder = (raw: any): Order => {
     secondTierCost: raw.secondTierCost,
     orderPayments: raw.orderPayments,
     paidAmount: raw.paidAmount,
-    totalAmount: raw.firstTierCost?.totalKRW ?? raw.totalAmount,
+    totalAmount: resolveOrderTotalKRW({
+      firstTierCost: raw.firstTierCost,
+      paidAmount: raw.paidAmount,
+      totalAmount: raw.totalAmount,
+      items,
+    }),
     currency: raw.currency ?? 'KRW',
     items,
     shippingAddress: raw.shippingAddress,
@@ -576,7 +1052,10 @@ export const orderApi = {
       }
 
       const rawData = responseData.data ?? responseData ?? {};
-      const normalizedOrders = (rawData.orders ?? []).map(normalizeProxyOrder);
+      const ordersLocale = mapLocaleToOrdersLang(p.lang);
+      const normalizedOrders = (rawData.orders ?? []).map((order: any) =>
+        normalizeProxyOrder(order, ordersLocale),
+      );
 
       return {
         success: true,
@@ -848,7 +1327,106 @@ export const orderApi = {
     }
   },
 
-  createOrder: async (request: CreateOrderRequest): Promise<ApiResponse<OrderResponse>> => {
+  uploadOrderImages: async (
+    kind: OrderImageUploadKind,
+    files: OrderImageUploadFile[],
+    lang?: string,
+  ): Promise<ApiResponse<OrderImageUploadData>> => {
+    try {
+      if (files.length === 0) {
+        return { success: true, data: { urls: [] } };
+      }
+
+      let token = await getStoredToken();
+      if (!token) {
+        return {
+          success: false,
+          error: 'No authentication token found. Please log in again.',
+        };
+      }
+
+      const langParam = lang || 'en';
+      const url = `${API_BASE_URL}/orders/upload-images?lang=${encodeURIComponent(langParam)}`;
+      const formData = new FormData();
+      formData.append('kind', kind);
+      files.forEach((file, index) => {
+        formData.append('images', {
+          uri: file.uri,
+          type: file.type || 'image/jpeg',
+          name: file.fileName || `image_${Date.now()}_${index}.jpg`,
+        } as unknown as Blob);
+      });
+
+      const postForm = async (accessToken: string) => {
+        const signatureHeaders = await buildSignatureHeaders('POST', url);
+        return fetch(url, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'ngrok-skip-browser-warning': 'true',
+            ...signatureHeaders,
+          },
+        });
+      };
+
+      let response = await postForm(token);
+      if (response.status === 401) {
+        const newToken = await refreshAccessToken();
+        if (newToken) {
+          token = newToken;
+          response = await postForm(newToken);
+        }
+      }
+
+      const responseText = await response.text();
+      let responseData: {
+        status?: string;
+        message?: string;
+        data?: OrderImageUploadData & {
+          urls?: string[];
+          groupedUrls?: Record<string, string[]>;
+        };
+      };
+      try {
+        responseData = JSON.parse(responseText);
+      } catch {
+        return { success: false, error: 'Invalid response from server.' };
+      }
+
+      if (!response.ok || responseData.status !== 'success') {
+        return {
+          success: false,
+          error: responseData?.message || `Upload failed with status ${response.status}`,
+        };
+      }
+
+      const grouped = responseData.data?.groupedUrls;
+      const urls =
+        responseData.data?.urls ??
+        grouped?.[kind] ??
+        (kind === 'addServices'
+          ? grouped?.addServices
+          : grouped?.negotiationContentImages) ??
+        [];
+
+      return {
+        success: true,
+        message: responseData.message,
+        data: { urls, groupedUrls: responseData.data?.groupedUrls },
+      };
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      return {
+        success: false,
+        error: err.message || 'Failed to upload order images.',
+      };
+    }
+  },
+
+  createOrder: async (
+    request: CreateOrderRequest | OrdersProxyCreateRequest,
+  ): Promise<ApiResponse<OrderResponse>> => {
     try {
       const token = await getStoredToken();
       // console.log('🛒 CREATE ORDER - ACCESS TOKEN:', token);
@@ -860,9 +1438,13 @@ export const orderApi = {
         };
       }
 
+      const body = isOrdersProxyCreateRequest(request)
+        ? request
+        : convertLegacyCreateOrderToProxy(request);
+
       const url = `${ORDERS_PROXY_BASE_URL}/orders-proxy`;
       console.log('🛒 CREATE ORDER REQUEST URL:', url);
-      console.log('🛒 CREATE ORDER REQUEST BODY:', JSON.stringify(request, null, 2));
+      console.log('🛒 CREATE ORDER REQUEST BODY:', JSON.stringify(body, null, 2));
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -870,7 +1452,7 @@ export const orderApi = {
           'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true',
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(body),
       });
 
       console.log('🛒 CREATE ORDER RESPONSE STATUS:', response.status);

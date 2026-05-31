@@ -341,7 +341,12 @@ export type RootStackParamList = {
   LiveSellerDetail: { sellerId: string; sellerName?: string; source?: string };
   OrderConfirmation: { orderId: string };
   Search: { query?: string; filters?: SearchFilters };
-  Category: { categoryId?: string; filters?: SearchFilters } | undefined;
+  Category: {
+    categoryId?: string;
+    filters?: SearchFilters;
+    /** CategoryTab company tab: '1688' | 'Taobao' (from product detail platform link) */
+    initialCompany?: '1688' | 'Taobao' | 'All';
+  } | undefined;
   EditProfile: undefined;
   AddressBook: { fromShippingSettings?: boolean };
   SelectAddress: { selectedAddressId?: string; onSelect?: (address: Address) => void };

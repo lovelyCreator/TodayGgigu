@@ -39,7 +39,13 @@ import { useDeleteFromWishlistMutation } from '../../../../hooks/useDeleteFromWi
 import { useAuth } from '../../../../context/AuthContext';
 import { usePlatformStore } from '../../../../store/platformStore';
 import { useAppSelector } from '../../../../store/hooks';
-import { formatPriceKRW, getLocalizedText } from '../../../../utils/i18nHelpers';
+import {
+  coerceDisplayText,
+  extractCompanyNameFromProductDetail,
+  formatPriceKRW,
+  resolveOrderItemCompanyName,
+} from '../../../../utils/i18nHelpers';
+import { productsApi } from '../../../../services/productsApi';
 import { translations } from '../../../../i18n/translations';
 import { useCancelOrderMutation } from '../../../../hooks/useCancelOrderMutation';
 import { useAddToCartMutation } from '../../../../hooks/useAddToCartMutation';
@@ -64,7 +70,10 @@ import {
   orderApi,
   mapLocaleToOrdersLang,
   normalizeProgressStatus,
-  resolvePurchaseAgencyProgressStatus,
+  resolveOrderItemUnitPrice,
+  resolveOrderTotalKRW,
+  resolveOrderProgressStatus,
+  isShippingAgencyOrder,
 } from '../../../../services/orderApi';
 import {
   computeProgressStatusCounts,
@@ -80,6 +89,7 @@ interface OrderItem {
   price: number;
   image: string;
   companyName: string;
+  companyNameMultiLang?: Record<string, unknown>;
   sellerOpenId: string;
   offerId: string;
   itemId?: string; // MongoDB _id from API
@@ -171,13 +181,13 @@ const STATUS_GROUPS = [
     key: 'purchase_agency',
     title: '발주관리',
     titleKey: 'pages.orders.groups.purchaseAgency',
-    statuses: ['P_QUOTE', 'BUY_PAY_WAIT', 'BUYING_MANUAL', 'BUYING_PROBLEM', 'BUY_FINAL_DONE'],
+    statuses: ['P_QUOTE', 'BUY_PAY_WAIT', 'P_AU_PURCHASING', 'BUYING_MANUAL', 'BUYING_PROBLEM', 'BUY_FINAL_DONE'],
   },
   {
     key: 'warehouse',
     title: '현지입/출고',
     titleKey: 'pages.orders.groups.warehouse',
-    statuses: ['WH_ARRIVE_EXPECTED', 'DELIVERY_EXCEPTION', 'WH_IN_PROGRESS', 'WH_IN_DONE', 'WH_PICK_DONE', 'WH_PAY_WAIT', 'WH_SHIPPED'],
+    statuses: ['P_RECEIPT_APPLICATION', 'WH_ARRIVE_EXPECTED', 'DELIVERY_EXCEPTION', 'WH_IN_PROGRESS', 'WH_IN_DONE', 'WH_PICK_DONE', 'WH_PAY_WAIT', 'WH_SHIPPED'],
   },
   {
     key: 'international_shipping',
@@ -201,10 +211,12 @@ const PROGRESS_STATUS_META: Record<string, {
   P_QUOTE: { tab: 'category', group: 'purchase_agency', translationKey: 'pages.orders.status.quotePending' },
   BUY_PAY_WAIT: { tab: 'unpaid', group: 'purchase_agency', translationKey: 'pages.orders.status.paymentPending' },
   BUY_PAY_DONE: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.paymentComplete' },
+  P_AU_PURCHASING: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.purchasing' },
   BUYING_MANUAL: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.purchasing' },
   BUYING_FINANCIAL_SETTLEMENT: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.financialSettlement' },
   BUYING_PROBLEM: { tab: 'error', group: 'purchase_agency', translationKey: 'pages.orders.status.problemProduct' },
   BUY_FINAL_DONE: { tab: 'end', group: 'purchase_agency', translationKey: 'pages.orders.status.purchaseFinalComplete' },
+  P_RECEIPT_APPLICATION: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.receiptApplication' },
   WH_ARRIVE_EXPECTED: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.centerArrivalExpected' },
   DELIVERY_EXCEPTION: { tab: 'error', group: 'warehouse', translationKey: 'pages.orders.status.deliveryException' },
   WH_IN_EXPECTED: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.expectedWarehouseIn' },
@@ -228,11 +240,17 @@ const getCanonicalOrderProgressStatus = (order: {
   progressStatus?: string | null;
   paymentStatus?: string | null;
   firstTierCost?: ApiOrder['firstTierCost'];
+  orderMainInfo?: ApiOrder['orderMainInfo'];
+  orderType?: string;
+  orderNumber?: string;
 }): string =>
-  resolvePurchaseAgencyProgressStatus({
+  resolveOrderProgressStatus({
     progressStatus: order.progressStatus,
     paymentStatus: order.paymentStatus,
     firstTierCost: order.firstTierCost,
+    orderMainInfo: order.orderMainInfo,
+    orderType: order.orderType,
+    orderNumber: order.orderNumber,
   });
 
 const orderMatchesProgressStatus = (order: Order, selected: string): boolean =>
@@ -246,10 +264,13 @@ const orderBelongsToStatusGroup = (order: Order, groupKey: string): boolean => {
 };
 
 const mapOrderStatusMeta = (order: ApiOrder): Pick<Order, 'status' | 'statusGroup' | 'statusTranslationKey' | 'progressStatus'> => {
-  const progressStatus = resolvePurchaseAgencyProgressStatus({
+  const progressStatus = resolveOrderProgressStatus({
     progressStatus: order.progressStatus,
     paymentStatus: order.paymentStatus,
     firstTierCost: order.firstTierCost,
+    orderMainInfo: order.orderMainInfo,
+    orderType: order.orderType,
+    orderNumber: order.orderNumber,
   });
   const directMeta = PROGRESS_STATUS_META[progressStatus];
   if (directMeta) {
@@ -288,7 +309,7 @@ const mapOrderStatusMeta = (order: ApiOrder): Pick<Order, 'status' | 'statusGrou
     };
   }
 
-  const fallbackNormalized = normalizeProgressStatus(order.progressStatus);
+  const fallbackNormalized = normalizeProgressStatus(progressStatus);
   const fallbackMeta = PROGRESS_STATUS_META[fallbackNormalized];
   if (fallbackMeta) {
     return {
@@ -296,6 +317,45 @@ const mapOrderStatusMeta = (order: ApiOrder): Pick<Order, 'status' | 'statusGrou
       statusGroup: fallbackMeta.group,
       statusTranslationKey: fallbackMeta.translationKey,
       progressStatus: fallbackNormalized,
+    };
+  }
+
+  const history = order.statusHistory ?? [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const fromHistory = normalizeProgressStatus(history[i]?.status);
+    const historyMeta = PROGRESS_STATUS_META[fromHistory];
+    if (historyMeta) {
+      return {
+        status: historyMeta.tab,
+        statusGroup: historyMeta.group,
+        statusTranslationKey: historyMeta.translationKey,
+        progressStatus: fromHistory,
+      };
+    }
+  }
+
+  if (/^P_AU_/.test(fallbackNormalized) || /^BUYING_/.test(fallbackNormalized)) {
+    return {
+      status: 'progressing',
+      statusGroup: 'purchase_agency',
+      statusTranslationKey: 'pages.orders.status.purchasing',
+      progressStatus: fallbackNormalized,
+    };
+  }
+
+  if (
+    isShippingAgencyOrder({
+      orderMainInfo: order.orderMainInfo,
+      orderType: order.orderType,
+      orderNumber: order.orderNumber,
+    })
+  ) {
+    const receiptMeta = PROGRESS_STATUS_META.P_RECEIPT_APPLICATION;
+    return {
+      status: receiptMeta.tab,
+      statusGroup: receiptMeta.group,
+      statusTranslationKey: receiptMeta.translationKey,
+      progressStatus: fallbackNormalized || 'P_RECEIPT_APPLICATION',
     };
   }
 
@@ -390,6 +450,7 @@ const BuyListScreen = () => {
     endDate: null,
   });
   const [orders, setOrders] = useState<Order[]>([]);
+  const storeNameCacheRef = useRef<Map<string, string>>(new Map());
   const [viewFilterCounts, setViewFilterCounts] = useState<Record<string, number>>({});
   /** Snapshot for navigation badges — unfiltered fetch so counts stay accurate while filtering the list */
   const [countOrders, setCountOrders] = useState<
@@ -419,6 +480,84 @@ const BuyListScreen = () => {
     }
     return value || key;
   };
+
+  const unknownStoreLabel = t('profile.unknownStore');
+
+  const enrichOrderStoreNames = useCallback(
+    async (orderList: Order[]) => {
+      const pending = new Map<string, { offerId: string; source: string }>();
+
+      for (const order of orderList) {
+        for (const item of order.items) {
+          if (resolveOrderItemCompanyName(item as unknown as Record<string, unknown>, locale)) {
+            continue;
+          }
+          const offerId = String(item.offerId ?? '').trim();
+          if (!offerId) continue;
+          const source = item.source || '1688';
+          const cacheKey = `${source}:${offerId}`;
+          if (storeNameCacheRef.current.has(cacheKey) || pending.has(cacheKey)) continue;
+          pending.set(cacheKey, { offerId, source });
+        }
+      }
+
+      if (pending.size === 0) return;
+
+      const fetched = await Promise.all(
+        [...pending.entries()].map(async ([cacheKey, { offerId, source }]) => {
+          try {
+            const res = await productsApi.getProductDetail(offerId, source, locale);
+            const name = res.success
+              ? extractCompanyNameFromProductDetail(res.data, locale)
+              : '';
+            return { cacheKey, name };
+          } catch {
+            return { cacheKey, name: '' };
+          }
+        }),
+      );
+
+      let hasNew = false;
+      for (const { cacheKey, name } of fetched) {
+        if (name) {
+          storeNameCacheRef.current.set(cacheKey, name);
+          hasNew = true;
+        }
+      }
+      if (!hasNew) return;
+
+      setOrders((prev) =>
+        prev.map((order) => ({
+          ...order,
+          items: order.items.map((item) => {
+            const cacheKey = `${item.source || '1688'}:${item.offerId}`;
+            const cached = storeNameCacheRef.current.get(cacheKey);
+            if (!cached) return item;
+            if (resolveOrderItemCompanyName(item as unknown as Record<string, unknown>, locale)) {
+              return item;
+            }
+            return { ...item, companyName: cached };
+          }),
+        })),
+      );
+    },
+    [locale],
+  );
+
+  const resolveStoreName = useCallback(
+    (value: unknown, item?: OrderItem): string => {
+      const fromItem =
+        item != null
+          ? resolveOrderItemCompanyName(item as unknown as Record<string, unknown>, locale)
+          : '';
+      return (
+        fromItem ||
+        coerceDisplayText(value, locale, '') ||
+        unknownStoreLabel
+      );
+    },
+    [locale, unknownStoreLabel],
+  );
 
   // Add to wishlist mutation
   const { mutate: addToWishlist } = useAddToWishlistMutation({
@@ -796,41 +935,45 @@ const BuyListScreen = () => {
         setOrders([]);
         return;
       }
-      const resolveText = (val: unknown): string => {
-        if (val == null) return '';
-        if (typeof val === 'string') return val;
-        if (typeof val === 'object' && val !== null && ('en' in val || 'ko' in val || 'zh' in val)) {
-          const o = val as Record<string, string>;
-          return getLocalizedText({ en: o.en ?? '', ko: o.ko ?? '', zh: o.zh ?? '' }, locale);
-        }
-        return String(val);
-      };
       const mappedOrders = data.orders.map((order: any) => {
         const statusMeta = mapOrderStatusMeta(order);
-        const totalAmount = order.firstTierCost?.totalKRW ?? order.paidAmount ?? order.totalAmount ?? 0;
+        const totalAmount = resolveOrderTotalKRW(order);
         return {
           id: order.id,
           orderId: order.id,
           orderNumber: order.orderNumber,
           date: new Date(order.createdAt).toISOString().split('T')[0],
           ...statusMeta,
-          items: (order.items || []).map((item: any) => ({
-            productName: resolveText(item.subjectMultiLang) || item.subjectTrans || item.subject || 'Unknown Product',
-            quantity: item.quantity || 1,
-            price: item.userPrice ?? item.price ?? 0,
-            image: item.imageUrl || '',
-            companyName: typeof item.companyName === 'object' ? resolveText(item.companyName) : (item.companyName || 'Unknown Store'),
+          items: (order.items || []).map((item: any) => {
+            const quantity = item.quantity || 1;
+            const unitPrice = resolveOrderItemUnitPrice(item);
+            return {
+            productName:
+              coerceDisplayText(item.subjectMultiLang, locale, '') ||
+              coerceDisplayText(item.subjectTrans, locale, '') ||
+              coerceDisplayText(item.subject, locale, '') ||
+              t('buyList.unknownProduct'),
+            quantity,
+            price: unitPrice,
+            image: item.imageUrl || item.image || '',
+            companyName: resolveOrderItemCompanyName(item, locale),
+            companyNameMultiLang:
+              item.companyNameMultiLang ??
+              (typeof item.companyName === 'object' && item.companyName != null
+                ? item.companyName
+                : undefined),
             sellerOpenId: item.sellerOpenId || '',
             offerId: String(item.offerId ?? ''),
             itemId: item._id || item.id || '',
-            subtotal: item.subtotal ?? (item.price * (item.quantity || 1) || 0),
+            subtotal: item.subtotal ?? unitPrice * quantity,
             skuAttributes: item.skuAttributes || [],
             source:
               item.source ||
               (String(item.otherSite ?? '').includes('taobao') ? 'taobao' : '1688'),
             specId: item.specId || '',
             skuId: String(item.skuId ?? ''),
-          })),
+          };
+          }),
           totalAmount,
           // Raw API fields for OrderDetailScreen
           shippingAddress: order.shippingAddress,
@@ -876,8 +1019,10 @@ const BuyListScreen = () => {
           unreadCount: inquiryMap.get(order.id) ? (unreadCountsMap[inquiryMap.get(order.id)!] || 0) : 0,
         }));
         setOrders(ordersWithInquiries);
+        void enrichOrderStoreNames(ordersWithInquiries);
       } catch {
         // silently fail — orders already set
+        void enrichOrderStoreNames(mappedOrders);
       }
     },
     onError: (error: string) => {
@@ -885,8 +1030,8 @@ const BuyListScreen = () => {
       showToast(error || 'Failed to fetch orders', 'error');
       setOrders([]);
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [locale]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- t/unknownStoreLabel stable enough per locale
+  }), [locale, enrichOrderStoreNames]);
 
   const { mutate: getOrders, isLoading } = useGetOrdersMutation(getOrdersOptions);
 
@@ -950,13 +1095,17 @@ const BuyListScreen = () => {
       if (response.success && response.data?.orders) {
         setCountOrders(
           response.data.orders.map((order) => ({
-            progressStatus: resolvePurchaseAgencyProgressStatus({
+            progressStatus: resolveOrderProgressStatus({
               progressStatus: order.progressStatus,
               paymentStatus: order.paymentStatus,
               firstTierCost: order.firstTierCost,
+              orderMainInfo: order.orderMainInfo,
+              orderType: order.orderType,
+              orderNumber: order.orderNumber,
             }),
             paymentStatus: order.paymentStatus,
             firstTierCost: order.firstTierCost,
+            orderMainInfo: order.orderMainInfo,
           })),
         );
         if (response.data.viewFilterCounts) {
@@ -1275,13 +1424,14 @@ const BuyListScreen = () => {
   const groupOrderItemsByStore = (items: OrderItem[]): StoreGroup[] => {
     const grouped: { [key: string]: OrderItem[] } = {};
     items.forEach((item) => {
-      const key = `${item.sellerOpenId}_${item.companyName}`;
+      const storeLabel = resolveStoreName(item.companyName, item);
+      const key = `${item.sellerOpenId}_${storeLabel}`;
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(item);
     });
     return Object.keys(grouped).map((key) => {
       const storeItems = grouped[key];
-      const companyName = storeItems[0]?.companyName ?? 'Unknown Store';
+      const companyName = resolveStoreName(storeItems[0]?.companyName, storeItems[0]);
       const sellerOpenId = storeItems[0]?.sellerOpenId ?? '';
       const storeTotal = storeItems.reduce((sum, item) => sum + item.subtotal, 0);
       return { companyName, sellerOpenId, items: storeItems, storeTotal };
@@ -1291,7 +1441,9 @@ const BuyListScreen = () => {
   // Render store group header
   const renderStoreHeader = (storeGroup: StoreGroup) => (
     <View style={styles.storeHeader}>
-      <Text style={styles.storeName} numberOfLines={1}>{storeGroup.companyName}</Text> 
+      <Text style={styles.storeName} numberOfLines={1}>
+        {resolveStoreName(storeGroup.companyName, storeGroup.items[0])}
+      </Text>
       <Text style={styles.storeName}>{'>'}</Text>
     </View>
   );
@@ -1382,7 +1534,9 @@ const BuyListScreen = () => {
           >
             {/* Store header */}
             <View style={styles.storeHeader}>
-              <Text style={styles.storeName}>{storeGroup.companyName} {'>'}</Text>
+              <Text style={styles.storeName}>
+                {resolveStoreName(storeGroup.companyName, storeGroup.items[0])} {'>'}
+              </Text>
             </View>
             {/* Items */}
             {storeGroup.items.map((item, itemIndex) =>
@@ -2227,7 +2381,9 @@ const BuyListScreen = () => {
                 <ScrollView style={styles.refundItemsScroll} showsVerticalScrollIndicator={false}>
                   {groupOrderItemsByStore(refundModalOrder.items).map((group, gi) => (
                     <View key={gi} style={styles.refundStoreGroup}>
-                      <Text style={styles.refundStoreName}>{group.companyName} {'>'}</Text>
+                      <Text style={styles.refundStoreName}>
+                        {resolveStoreName(group.companyName, group.items[0])} {'>'}
+                      </Text>
                       {group.items.map((item, ii) => {
                         const itemKey = String(gi * 100 + ii);
                         const isSelected = refundSelectedItems.has(itemKey);

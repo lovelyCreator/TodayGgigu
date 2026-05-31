@@ -1533,7 +1533,7 @@ const styles = StyleSheet.create({
   quickAccessSection: {
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.xs,
-    marginBottom: 100,
+    marginBottom: 0,
   },
   quickAccessContainer: {
     flexDirection: 'row',
@@ -1635,7 +1635,9 @@ const styles = StyleSheet.create({
   },
   moreToLoveSection: {
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.lg,
+    paddingTop: 0,
+    paddingBottom: SPACING.lg,
+    marginTop: 10,
     marginBottom: SPACING.xl,
   },
   sectionTitle: {

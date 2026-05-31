@@ -1,8 +1,5 @@
-import axios from 'axios';
-import { getStoredToken } from './authApi';
-
 import { API_BASE_URL } from '../constants';
-import { buildSignatureHeaders } from './signature';
+import { axiosWithAuth } from './authenticatedHttp';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -187,19 +184,8 @@ export const cartApi = {
   // Get cart
   getCart: async (lang: string = 'en'): Promise<ApiResponse<{ cart: Cart }>> => {
     try {
-      const token = await getStoredToken();
-
       const url = `${API_BASE_URL}/cart?lang=${lang}`;
-
-      const signatureHeaders = await buildSignatureHeaders('GET', url);
-
-      const response = await axios.get(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...signatureHeaders,
-        },
-      });
+      const response = await axiosWithAuth('GET', url);
 
       if (!response.data || !response.data.data) {
         return {
@@ -228,18 +214,8 @@ export const cartApi = {
   // Add product to cart
   addToCart: async (request: AddToCartRequest): Promise<ApiResponse<{ cart: Cart }>> => {
     try {
-      const token = await getStoredToken();
-
       const url = `${API_BASE_URL}/cart`;
-      const signatureHeaders = await buildSignatureHeaders('POST', url, request);
-
-      const response = await axios.post(url, request, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...signatureHeaders,
-        },
-      });
+      const response = await axiosWithAuth('POST', url, { data: request });
 
       console.log('Add to cart response:', response.data);
 
@@ -270,19 +246,8 @@ export const cartApi = {
   // Update cart item quantity
   updateCartItem: async (cartItemId: string, quantity: number): Promise<ApiResponse<{ cart: Cart }>> => {
     try {
-      const token = await getStoredToken();
-
       const url = `${API_BASE_URL}/cart/${cartItemId}`;
-      // console.log('Sending update cart item request to:', url);
-      // console.log('Update cart item body:', JSON.stringify({ quantity }, null, 2));
-      const signatureHeaders = await buildSignatureHeaders('PUT', url);
-      const response = await axios.put(url, { quantity }, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...signatureHeaders,
-        },
-      });
+      const response = await axiosWithAuth('PUT', url, { data: { quantity } });
 
       // console.log('Update cart item response:', response.data);
 
@@ -313,18 +278,8 @@ export const cartApi = {
   // Delete cart item
   deleteCartItem: async (cartItemId: string): Promise<ApiResponse<{ cart: Cart }>> => {
     try {
-      const token = await getStoredToken();
-
       const url = `${API_BASE_URL}/cart/${cartItemId}`;
-      // console.log('Sending delete cart item request to:', url);
-      const signatureHeaders = await buildSignatureHeaders('DELETE', url);
-      const response = await axios.delete(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...signatureHeaders,
-        },
-      });
+      const response = await axiosWithAuth('DELETE', url);
 
       // console.log('Delete cart item response:', response.data);
 
@@ -355,21 +310,8 @@ export const cartApi = {
   // Clear cart (delete all items)
   clearCart: async (): Promise<ApiResponse<{ cart: Cart }>> => {
     try {
-      const token = await getStoredToken();
-
       const url = `${API_BASE_URL}/cart`;
-      // console.log('Sending clear cart request to:', url);
-
-      const signatureHeaders = await buildSignatureHeaders('DELETE', url);
-
-      const response = await axios.delete(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...signatureHeaders,
-
-        },
-      });
+      const response = await axiosWithAuth('DELETE', url);
 
       // console.log('Clear cart response:', response.data);
 
@@ -400,20 +342,8 @@ export const cartApi = {
   // Delete batch cart items
   deleteCartBatch: async (cartItemIds: string[]): Promise<ApiResponse<{ cart: Cart }>> => {
     try {
-      const token = await getStoredToken();
-
       const url = `${API_BASE_URL}/cart`;
-      // console.log('Sending delete batch cart items request to:', url);
-      // console.log('Delete batch body:', JSON.stringify({ itemIds: cartItemIds }, null, 2));
-
-      const signatureHeaders = await buildSignatureHeaders('DELETE', url);
-
-      const response = await axios.delete(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...signatureHeaders,
-        },
+      const response = await axiosWithAuth('DELETE', url, {
         data: { itemIds: cartItemIds },
       });
 
@@ -446,19 +376,9 @@ export const cartApi = {
   // Checkout - update quantities for selected items (POST /cart/checkout)
   checkout: async (quantities: { [cartItemId: string]: number }): Promise<ApiResponse<CheckoutResponse>> => {
     try {
-      const token = await getStoredToken();
-
       const url = `${API_BASE_URL}/cart/checkout`;
       const body = { quantities };
-      const signatureHeaders = await buildSignatureHeaders('POST', url, body);
-
-      const response = await axios.post(url, body, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...signatureHeaders,
-        },
-      });
+      const response = await axiosWithAuth('POST', url, { data: body });
 
       // console.log('Checkout response:', response.data);
 
@@ -489,16 +409,8 @@ export const cartApi = {
   // Direct purchase checkout (POST /cart/checkout/direct-purchase) - from ProductDetail Buy Now
   checkoutDirectPurchase: async (body: DirectPurchaseRequest): Promise<ApiResponse<CheckoutResponse>> => {
     try {
-      const token = await getStoredToken();
       const url = `${API_BASE_URL}/cart/checkout/direct-purchase`;
-      const signatureHeaders = await buildSignatureHeaders('POST', url, body);
-      const response = await axios.post(url, body, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...signatureHeaders,
-        },
-      });
+      const response = await axiosWithAuth('POST', url, { data: body });
       if (!response.data || !response.data.data) {
         return {
           success: false,

@@ -1,5 +1,10 @@
 import { useState, useCallback } from 'react';
-import { orderApi, CreateOrderRequest, OrderResponse } from '../services/orderApi';
+import {
+  orderApi,
+  CreateOrderRequest,
+  OrdersProxyCreateRequest,
+  OrderResponse,
+} from '../services/orderApi';
 
 interface UseCreateOrderMutationOptions {
   onSuccess?: (data: OrderResponse) => void;
@@ -11,7 +16,7 @@ export const useCreateOrderMutation = (options?: UseCreateOrderMutationOptions) 
   const [isError, setIsError] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const mutate = useCallback(async (request: CreateOrderRequest) => {
+  const mutate = useCallback(async (request: CreateOrderRequest | OrdersProxyCreateRequest) => {
     setIsLoading(true);
     setIsError(false);
     setError(null);

@@ -1,5 +1,5 @@
 import type { Order as ApiOrder } from '../services/orderApi';
-import { resolvePurchaseAgencyProgressStatus } from '../services/orderApi';
+import { resolveOrderProgressStatus } from '../services/orderApi';
 
 export type ProfileOrderCounts = {
   unpaid: number;
@@ -26,6 +26,7 @@ const EMPTY_PROFILE_COUNTS: ProfileOrderCounts = {
 const PROFILE_STATUS_MAP: Record<keyof ProfileOrderCounts, readonly string[]> = {
   unpaid: ['BUY_PAY_WAIT', 'P_PENDING'],
   to_be_shipped: [
+    'P_RECEIPT_APPLICATION',
     'WH_ARRIVE_EXPECTED',
     'WH_IN_PROGRESS',
     'WH_IN_DONE',
@@ -45,11 +46,13 @@ export const getOrderProgressStatus = (order: {
   progressStatus?: string | null;
   paymentStatus?: string | null;
   firstTierCost?: ApiOrder['firstTierCost'];
+  orderMainInfo?: ApiOrder['orderMainInfo'];
 }): string =>
-  resolvePurchaseAgencyProgressStatus({
+  resolveOrderProgressStatus({
     progressStatus: order.progressStatus,
     paymentStatus: order.paymentStatus,
     firstTierCost: order.firstTierCost,
+    orderMainInfo: order.orderMainInfo,
   });
 
 export const computeProgressStatusCounts = (

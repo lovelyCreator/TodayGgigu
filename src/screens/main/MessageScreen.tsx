@@ -25,6 +25,7 @@ import SearchIcon from '../../assets/icons/SearchIcon';
 import { API_BASE_URL } from '../../constants';
 import { getStoredToken } from '../../services/authApi';
 import { buildSignatureHeaders } from '../../services/signature';
+import { getOrderProgressStatusLabel } from '../../utils/orderProgressStatusLabel';
 
 type TabType = 'order' | 'general' | 'fileDownload';
 
@@ -391,21 +392,8 @@ const MessageScreen: React.FC<MessageScreenProps> = ({ initialTabOverride, onEmb
     }
   };
 
-  const getProgressStatusLabel = (status?: string) => {
-    if (!status) return '';
-    const map: Record<string, string> = {
-      'BUY_PAY_WAIT': 'message.progressStatus.paymentPending',
-      'P_PENDING': 'message.progressStatus.paymentPending',
-      'BUY_PAY_DONE': 'message.progressStatus.purchaseInProgress',
-      'BUYING_MANUAL': 'message.progressStatus.buyingInProgress',
-      'WH_ARRIVE_EXPECTED': 'message.progressStatus.shippingPending',
-      'WH_IN_DONE': 'message.progressStatus.warehouseComplete',
-      'INTERNATIONAL_SHIPPED': 'message.progressStatus.inTransit',
-      'ORDER_RECEIVED': 'message.progressStatus.received',
-    };
-    const key = map[status];
-    return (key && t(key)) || status;
-  };
+  const getProgressStatusLabel = (status?: string) =>
+    getOrderProgressStatusLabel(t, status);
 
   // ═══════════════════════════════════════════════════════
   // ─── HEADER ────────────────────────────────────────────
@@ -741,6 +729,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.lg,
     paddingBottom: SPACING.sm,
     backgroundColor: COLORS.background,
   },

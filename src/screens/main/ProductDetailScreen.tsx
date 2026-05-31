@@ -25,6 +25,11 @@ import { useAuth } from '../../context/AuthContext';
 import { ProductCard, SearchButton } from '../../components';
 import { PhotoCaptureModal } from '../../components';
 import { usePlatformStore } from '../../store/platformStore';
+import {
+  productPlatformToCompanyTab,
+  resolveProductPlatformKey,
+  type ProductPlatformKey,
+} from '../../utils/productPlatform';
 import { useAppSelector } from '../../store/hooks';
 import { ActivityIndicator } from 'react-native';
 import { Product } from '../../types';
@@ -133,7 +138,7 @@ const ProductDetailScreen: React.FC = () => {
   
   // ALL HOOKS MUST BE CALLED BEFORE ANY CONDITIONAL RETURNS OR HOOKS THAT USE THEM
   // Get platform and locale (defined early so they can be used in callbacks)
-  const { selectedPlatform } = usePlatformStore();
+  const { selectedPlatform, setSelectedPlatform } = usePlatformStore();
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
   const { t } = useTranslation();
   const { showToast } = useToast();
@@ -455,7 +460,28 @@ const ProductDetailScreen: React.FC = () => {
     return raw;
   }, [routeSource, selectedPlatform]);
   const country = useMemo(() => routeCountry || locale, [routeCountry, locale]);
-  
+
+  const productPlatformKey = useMemo((): ProductPlatformKey => {
+    const raw =
+      (product as any)?.source ||
+      routeSource ||
+      sourceRef.current ||
+      selectedPlatform ||
+      '1688';
+    return resolveProductPlatformKey(raw);
+  }, [product, routeSource, selectedPlatform]);
+
+  const topCategoryLabel = useMemo(() => {
+    const i18nKey = productPlatformKey === 'taobao' ? 'taobao' : '1688';
+    return t(`home.platforms.${i18nKey}`);
+  }, [productPlatformKey, t]);
+
+  const handleOpenPlatformCategory = useCallback(() => {
+    const companyTab = productPlatformToCompanyTab(productPlatformKey);
+    setSelectedPlatform(productPlatformKey);
+    navigation.navigate('Category', { initialCompany: companyTab });
+  }, [navigation, productPlatformKey, setSelectedPlatform]);
+
   // Live stats data - defined before useEffect that uses it
   const liveStats = [
     { icon: 'star', color: '#FFD700', text: '155+ people gave 5-star reviews' },
@@ -1869,8 +1895,21 @@ const ProductDetailScreen: React.FC = () => {
               {product.rating?.toFixed(1) || '0'}
             </Text>
           </View>
-          <View style={{ width: 1, height: 16, backgroundColor: COLORS.gray[500], marginRight: SPACING.sm }} />
+          <View style={styles.ratingDivider} />
           <Text style={styles.soldText}>{soldOut || 0} {t('product.sold')}</Text>
+          <View style={styles.ratingRowSpacer} />
+          <TouchableOpacity
+            style={styles.topCategoryLink}
+            onPress={handleOpenPlatformCategory}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={topCategoryLabel}
+          >
+            <Text style={styles.topCategoryLinkText} numberOfLines={1}>
+              {topCategoryLabel}
+            </Text>
+            <Icon name="chevron-forward" size={14} color={COLORS.primary} />
+          </TouchableOpacity>
         </View>
         
         {/* Discount and Product Code badges */}
@@ -2933,9 +2972,9 @@ const styles = StyleSheet.create({
   },
   productInfoContainer: {
     paddingHorizontal: SPACING.md,
-    paddingTop: 0,
+    paddingTop: SPACING.smmd,
     paddingBottom: SPACING.sm,
-    marginTop: -SPACING.sm,
+    marginTop: 0,
   },
   productName: {
     fontSize: FONTS.sizes.lg,
@@ -3014,6 +3053,28 @@ const styles = StyleSheet.create({
   soldText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
+    marginRight: SPACING.sm,
+  },
+  ratingDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: COLORS.gray[500],
+    marginRight: SPACING.sm,
+  },
+  ratingRowSpacer: {
+    flex: 1,
+    minWidth: SPACING.xs,
+  },
+  topCategoryLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    maxWidth: '42%',
+  },
+  topCategoryLinkText: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
   priceRow: {
     flexDirection: 'row',

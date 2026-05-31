@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../../components/Icon';
 import { launchCamera, launchImageLibrary, MediaType, ImagePickerResponse, CameraOptions, ImageLibraryOptions } from 'react-native-image-picker';
 import RNFS from 'react-native-fs';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute, RouteProp } from '@react-navigation/native';
 import { requestCameraPermission, requestPhotoLibraryPermission } from '../../utils/permissions';
 import { StackNavigationProp } from '@react-navigation/stack';
 
@@ -30,6 +30,8 @@ import { SearchButton, NotificationBadge, ImagePickerModal } from '../../compone
 import NotificationIcon from '../../assets/icons/NotificationIcon';
 
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
 import { usePlatformStore } from '../../store/platformStore';
 import { useAppSelector } from '../../store/hooks';
 import { translations } from '../../i18n/translations';
@@ -76,6 +78,7 @@ function getLeftListViewPosition(index: number, length: number): number {
 
 const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = false, onModalClose }) => {
   const navigation = useNavigation<CategoryTabScreenNavigationProp>();
+  const route = useRoute<RouteProp<RootStackParamList, 'Category'>>();
   const { width: winWidth, height: winHeight } = useWindowDimensions();
   const isTabletLandscape = Math.min(winWidth, winHeight) >= 600 && winWidth > winHeight;
   const isEmbeddedLandscapeHeader = hideHeader && isTabletLandscape;
@@ -124,8 +127,32 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
     return company.toLowerCase();
   };
   
+  const { isAuthenticated } = useAuth();
+  const {
+    unreadCount: orderMessageUnread,
+    generalInquiryUnreadCount,
+    getUnreadCounts,
+    getGeneralInquiryUnreadCounts,
+    isConnected,
+  } = useSocket();
+  const messageUnreadCount = isAuthenticated
+    ? orderMessageUnread + generalInquiryUnreadCount
+    : 0;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isAuthenticated || !isConnected) return;
+      getUnreadCounts();
+      getGeneralInquiryUnreadCounts();
+    }, [
+      isAuthenticated,
+      isConnected,
+      getUnreadCounts,
+      getGeneralInquiryUnreadCounts,
+    ]),
+  );
+
   const [refreshing, setRefreshing] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(25);
   const [imagePickerModalVisible, setImagePickerModalVisible] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState<string>('All');
   const [topCategories, setTopCategories] = useState<any[]>([]);
@@ -182,6 +209,27 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
       showToast(error || t('category.failedToLoadCategories'), 'error');
     },
   });
+
+  const appliedInitialCompanyRef = useRef<string | null>(null);
+
+  // Deep link from product detail: open the matching top-level platform tab (1688 / Taobao).
+  useFocusEffect(
+    useCallback(() => {
+      const initialCompany = route.params?.initialCompany;
+      if (!initialCompany || initialCompany === 'All') return;
+      if (!(COMPANY_TABS as readonly string[]).includes(initialCompany)) return;
+      if (appliedInitialCompanyRef.current === initialCompany) return;
+      appliedInitialCompanyRef.current = initialCompany;
+      const platform = getPlatformFromCompany(initialCompany);
+      fetchTokenRef.current++;
+      hasFetchedRef.current = null;
+      setTopCategories([]);
+      setAllL2ByL1({});
+      setSelectedCategory('');
+      setSelectedPlatform(platform);
+      setSelectedCompany(initialCompany);
+    }, [route.params?.initialCompany, setSelectedPlatform, setSelectedCategory]),
+  );
 
   // Fetch L1 categories when the selected company/platform changes (and on mount).
   // hasFetchedRef key includes locale so a language switch re-fetches with the new lang.
@@ -789,7 +837,8 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
 
         <NotificationBadge
           customIcon={<NotificationIcon width={28} height={28} color={COLORS.text.primary} />}
-          count={unreadCount}
+          count={messageUnreadCount}
+          badgeColor={COLORS.red}
           onPress={() => {
             navigation.navigate('Message' as never);
           }}
@@ -987,7 +1036,7 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: COLORS.white,
-    paddingTop: SPACING.xl,
+    paddingTop: SPACING.md,
     borderBottomWidth: 2,
     borderBottomColor: COLORS.gray[200],
     ...SHADOWS.sm,

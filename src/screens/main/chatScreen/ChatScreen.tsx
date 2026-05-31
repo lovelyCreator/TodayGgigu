@@ -6,7 +6,6 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
   Platform,
   Modal,
@@ -18,7 +17,7 @@ import {
 } from 'react-native';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from '../../../components/Icon';
 import { COLORS, FONTS, SHADOWS, SPACING } from '../../../constants';
 import { RootStackParamList } from '../../../types';
@@ -32,6 +31,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { SocketMessage, socketService } from '../../../services/socketService';
 import { inquiryApi } from '../../../services/inquiryApi';
 import { orderApi } from '../../../services/orderApi';
+import { getOrderProgressStatusLabel } from '../../../utils/orderProgressStatusLabel';
 
 type ChatRouteProp = RouteProp<RootStackParamList, 'Chat'>;
 type ChatScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Chat'>;
@@ -709,26 +709,27 @@ const ChatScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.85}
-        >
-          <Icon name="arrow-back" size={16} color={COLORS.black} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>
-            {t('chat.orderInquiry') || '주문문의'}{messages.length > 0 ? ` (${messages.length})` : ''}
-          </Text>
+    <View style={styles.container}>
+      <SafeAreaView style={styles.headerSafeArea} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.85}
+          >
+            <Icon name="arrow-back" size={16} color={COLORS.black} />
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>
+              {t('chat.orderInquiry') || '주문문의'}{messages.length > 0 ? ` (${messages.length})` : ''}
+            </Text>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
 
       {/* Order Info Bar */}
       {orderNumber ? (
-        <View>
+        <View style={styles.orderInfoSection}>
           <TouchableOpacity
             style={styles.orderInfoBar}
             activeOpacity={0.7}
@@ -744,7 +745,9 @@ const ChatScreen: React.FC = () => {
             <View style={styles.orderInfoContent}>
               <Text style={styles.orderInfoNumber} numberOfLines={1}>{orderNumber}</Text>
               {orderData?.progressStatus ? (
-                <Text style={styles.orderInfoStatus}>{orderData.progressStatus}</Text>
+                <Text style={styles.orderInfoStatus}>
+                  {getOrderProgressStatusLabel(t, orderData.progressStatus)}
+                </Text>
               ) : null}
             </View>
             <Icon name={showOrderDetail ? 'chevron-up' : 'chevron-down'} size={18} color={COLORS.gray[400]} />
@@ -908,7 +911,7 @@ const ChatScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -917,12 +920,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F5F5',
   },
+  headerSafeArea: {
+    backgroundColor: COLORS.white,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: 12,
     backgroundColor: COLORS.white,
+  },
+  orderInfoSection: {
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+    paddingHorizontal: SPACING.md,
   },
   backButton: {
     width: 36,
@@ -945,8 +956,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     paddingHorizontal: SPACING.md,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray[200],
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
   },
   orderInfoIcon: {
     width: 36,
@@ -982,8 +994,10 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     paddingHorizontal: SPACING.md,
     paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray[200],
+    marginTop: SPACING.xs,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
   },
   orderDetailItem: {
     flexDirection: 'row',

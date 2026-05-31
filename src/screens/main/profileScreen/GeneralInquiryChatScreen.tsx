@@ -588,22 +588,24 @@ const GeneralInquiryChatScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity hitSlop={BACK_NAVIGATION_HIT_SLOP} onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-back" size={16} color={COLORS.black} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {isCreateMode ? t('inquiry.oneToOne') : (inquiry?.subject || t('inquiry.generalInquiry'))}
-          </Text>
-          {!isCreateMode && inquiry?.assignedAdmin && (
-            <Text style={styles.headerSubtitle} numberOfLines={1}>
-              {t('inquiry.assignedTo')} {inquiry.assignedAdmin.name}
+    <View style={styles.container}>
+      <SafeAreaView style={styles.headerSafeArea} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
+          <TouchableOpacity hitSlop={BACK_NAVIGATION_HIT_SLOP} onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-back" size={16} color={COLORS.black} />
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {isCreateMode ? t('inquiry.oneToOne') : (inquiry?.subject || t('inquiry.generalInquiry'))}
             </Text>
-          )}
+            {!isCreateMode && inquiry?.assignedAdmin && (
+              <Text style={styles.headerSubtitle} numberOfLines={1}>
+                {t('inquiry.assignedTo')} {inquiry.assignedAdmin.name}
+              </Text>
+            )}
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
 
       {localLoading && messages.length === 0 ? (
         <View style={styles.loadingContainer}>
@@ -748,7 +750,7 @@ const GeneralInquiryChatScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -756,6 +758,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F5F5',
+  },
+  headerSafeArea: {
+    backgroundColor: COLORS.white,
   },
   flex: {
     flex: 1,
@@ -765,7 +770,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: 12,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.white,
   },
   backButton: {
     width: 36,
@@ -784,7 +789,7 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     fontSize: FONTS.sizes.xs,
-    color: COLORS.white + 'CC',
+    color: COLORS.gray[600],
     marginTop: 2,
   },
   headerRight: {
