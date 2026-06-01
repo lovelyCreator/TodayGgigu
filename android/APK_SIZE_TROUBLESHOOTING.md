@@ -25,8 +25,8 @@ Get-ChildItem android/app/build/outputs/apk/release/*.apk | Select-Object Name, 
 ```
 
 You should see:
-- `todayGgigu-1.0-armeabi-v7a-release.apk` (~20-35MB)
-- `todayGgigu-1.0-arm64-v8a-release.apk` (~20-35MB)
+- `todayggigu-1.0-armeabi-v7a-release.apk` (~20-35MB)
+- `todayggigu-1.0-arm64-v8a-release.apk` (~20-35MB)
 
 ### Step 3: Verify Split Configuration
 
@@ -128,7 +128,7 @@ When installing split APK:
 
 2. **Install matching APK:**
    ```bash
-   adb install android/app/build/outputs/apk/release/todaymall-1.0-arm64-v8a-release.apk
+   adb install android/app/build/outputs/apk/release/todayggigu-1.0-arm64-v8a-release.apk
    ```
 
 ## Expected Results

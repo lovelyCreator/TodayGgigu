@@ -6,7 +6,7 @@ const LazyCategoryTabScreen = lazy(() => import('../main/CategoryTabScreen'));
 
 // Export a component that wraps the lazy-loaded component with Suspense
 const CategoryTabScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading categories..." />}>
+  <Suspense fallback={<LoadingSpinner messageKey="loading.categories" />}>
     <LazyCategoryTabScreen {...props} />
   </Suspense>
 );

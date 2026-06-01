@@ -96,9 +96,16 @@ interface CartCard {
   expanded: boolean;
   addedAt: number;
   remarks: string;
+  /** UI-only: grouped as a set bundle (세트묶음) */
+  bundleId?: string | null;
 }
 
-type TabKey = 'past' | 'bundles' | 'offline';
+type TabKey = 'past' | 'bundles';
+
+type CartSetBundleMeta = {
+  id: string;
+  collapsed: boolean;
+};
 
 type NegotiationImageEntry = {
   id: string;
@@ -174,6 +181,7 @@ const mapCartItemToCard = (
     expanded: false,
     addedAt: item.addedAt ? new Date(item.addedAt).getTime() : Date.now(),
     remarks: '',
+    bundleId: null,
   };
 };
 
@@ -353,6 +361,7 @@ const CartScreen: React.FC = () => {
   }, [locale, t]);
 
   const [cards, setCards] = useState<CartCard[]>([]);
+  const [setBundles, setSetBundles] = useState<CartSetBundleMeta[]>([]);
   const [cartLoading, setCartLoading] = useState(true);
   const [cartError, setCartError] = useState<string | null>(null);
 
@@ -393,6 +402,7 @@ const CartScreen: React.FC = () => {
                   expanded: existing.expanded,
                   photoUri: existing.photoUri,
                   remarks: existing.remarks,
+                  bundleId: existing.bundleId ?? null,
                 }
               : mapped;
           }),
@@ -518,10 +528,13 @@ const CartScreen: React.FC = () => {
         style: 'destructive',
         onPress: async () => {
           const prev = cards;
-          setCards((c) => c.filter((x) => !x.checked)); // optimistic
+          const next = cards.filter((x) => !x.checked);
+          setCards(next);
+          pruneEmptyBundles(next);
           const res = await cartApi.deleteCartBatch(checkedIds);
           if (!res.success) {
-            setCards(prev); // revert
+            setCards(prev);
+            pruneEmptyBundles(prev);
             showAlert(t('cartOrder.alerts.notice'), res.message || 'Failed to delete items');
           }
         },
@@ -531,10 +544,13 @@ const CartScreen: React.FC = () => {
 
   const handleDeleteOne = async (id: string) => {
     const prev = cards;
-    setCards((c) => c.filter((x) => x.id !== id)); // optimistic
+    const next = cards.filter((x) => x.id !== id);
+    setCards(next);
+    pruneEmptyBundles(next);
     const res = await cartApi.deleteCartItem(id);
     if (!res.success) {
-      setCards(prev); // revert
+      setCards(prev);
+      pruneEmptyBundles(prev);
       showAlert(t('cartOrder.alerts.notice'), res.message || 'Failed to delete item');
     }
   };
@@ -719,6 +735,86 @@ const CartScreen: React.FC = () => {
     }
     return true;
   });
+
+  const pruneEmptyBundles = useCallback((nextCards: CartCard[]) => {
+    const activeBundleIds = new Set(
+      nextCards.map((c) => c.bundleId).filter((id): id is string => Boolean(id)),
+    );
+    setSetBundles((prev) => prev.filter((b) => activeBundleIds.has(b.id)));
+  }, []);
+
+  const unbundledCards = useMemo(
+    () => filteredCards.filter((c) => !c.bundleId),
+    [filteredCards],
+  );
+
+  const bundledCards = useMemo(
+    () => filteredCards.filter((c) => c.bundleId),
+    [filteredCards],
+  );
+
+  const orderedSetBundles = useMemo(() => {
+    const idsInCards = [...new Set(bundledCards.map((c) => c.bundleId!))];
+    const orderedIds = [
+      ...setBundles.map((b) => b.id).filter((id) => idsInCards.includes(id)),
+      ...idsInCards.filter((id) => !setBundles.some((b) => b.id === id)),
+    ];
+    return orderedIds.map((id, index) => {
+      const meta = setBundles.find((b) => b.id === id);
+      const items = bundledCards.filter((c) => c.bundleId === id);
+      return {
+        id,
+        index: index + 1,
+        collapsed: meta?.collapsed ?? false,
+        items,
+        totalQty: items.reduce((s, c) => s + c.quantity, 0),
+        totalAmount: items.reduce((s, c) => s + c.quantity * c.unitPrice, 0),
+        allChecked: items.length > 0 && items.every((c) => c.checked),
+      };
+    });
+  }, [bundledCards, setBundles]);
+
+  const handleBundlesTabPress = useCallback(() => {
+    const eligible = cards.filter((c) => c.checked && !c.bundleId);
+    if (eligible.length >= 2) {
+      const bundleId = `set-${Date.now()}`;
+      const selectedIds = new Set(eligible.map((c) => c.id));
+      setCards((prev) =>
+        prev.map((c) =>
+          selectedIds.has(c.id) ? { ...c, bundleId, checked: true } : c,
+        ),
+      );
+      setSetBundles((prev) => [...prev, { id: bundleId, collapsed: false }]);
+      setActiveTab('bundles');
+      return;
+    }
+    setActiveTab('bundles');
+    if (orderedSetBundles.length === 0) {
+      showAlert(t('cartOrder.alerts.notice'), t('cartOrder.bundles.needTwoItems'));
+    }
+  }, [cards, orderedSetBundles.length, t]);
+
+  const toggleBundleCollapse = useCallback((bundleId: string) => {
+    setSetBundles((prev) => {
+      const exists = prev.find((b) => b.id === bundleId);
+      if (exists) {
+        return prev.map((b) =>
+          b.id === bundleId ? { ...b, collapsed: !b.collapsed } : b,
+        );
+      }
+      return [...prev, { id: bundleId, collapsed: true }];
+    });
+  }, []);
+
+  const toggleBundleCheck = useCallback((bundleId: string) => {
+    setCards((prev) => {
+      const items = prev.filter((c) => c.bundleId === bundleId);
+      const allChecked = items.length > 0 && items.every((c) => c.checked);
+      return prev.map((c) =>
+        c.bundleId === bundleId ? { ...c, checked: !allChecked } : c,
+      );
+    });
+  }, []);
 
   const totalQty = filteredCards.reduce((s, c) => s + c.quantity, 0);
   const grandTotal = filteredCards.reduce((s, c) => s + c.quantity * c.unitPrice, 0);
@@ -1181,6 +1277,168 @@ const CartScreen: React.FC = () => {
     t,
   ]);
 
+  const renderBundleTableHeader = () => (
+    <View style={styles.bundleTableHeader}>
+      <View style={styles.bundleItemCheckCol} />
+      <View style={styles.bundleTableColInfo}>
+        <Text style={[styles.bundleTableHeaderText, styles.bundleTableHeaderTextLeft]}>
+          {t('cartOrder.bundles.table.productInfo')}
+        </Text>
+      </View>
+      <View style={styles.bundleTableColQty}>
+        <Text style={styles.bundleTableHeaderText}>
+          {t('cartOrder.bundles.table.quantity')}
+        </Text>
+      </View>
+      <View style={styles.bundleTableColPrice}>
+        <Text style={styles.bundleTableHeaderText}>
+          {t('cartOrder.bundles.table.unitPrice')}
+        </Text>
+      </View>
+      <View style={styles.bundleTableColAmount}>
+        <Text style={styles.bundleTableHeaderText}>
+          {t('cartOrder.bundles.table.productAmount')}
+        </Text>
+      </View>
+      <View style={styles.bundleTableColManage}>
+        <Text style={styles.bundleTableHeaderText}>
+          {t('cartOrder.bundles.table.manage')}
+        </Text>
+      </View>
+    </View>
+  );
+
+  const renderBundleItemRow = (card: CartCard, isLast: boolean) => {
+    const subtotal = card.quantity * card.unitPrice;
+    const specParts: string[] = [];
+    if (card.size) {
+      specParts.push(`${t('cartOrder.bundles.spec')}: ${card.size}`);
+    }
+    if (card.color) {
+      specParts.push(`${t('cartOrder.bundles.color')}: ${card.color}`);
+    }
+
+    return (
+      <View
+        key={card.id}
+        style={[styles.bundleItemRow, !isLast && styles.bundleItemRowBorder]}
+      >
+        <TouchableOpacity style={styles.bundleItemCheckCol} onPress={() => toggleCheck(card.id)}>
+          <View style={[styles.checkBox, card.checked && styles.checkBoxChecked]}>
+            {card.checked && <Icon name="checkmark" size={12} color={COLORS.white} />}
+          </View>
+        </TouchableOpacity>
+        <View style={styles.bundleItemInfo}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => navigateToProductDetail(card)}
+            style={styles.bundleItemInfoPress}
+          >
+            {card.productImage ? (
+              <Image source={{ uri: card.productImage }} style={styles.bundleItemImage} />
+            ) : (
+              <View style={[styles.bundleItemImage, styles.productImagePlaceholder]}>
+                <Icon name="cube-outline" size={18} color={COLORS.gray[400]} />
+              </View>
+            )}
+            <View style={styles.bundleItemTextWrap}>
+              <Text style={styles.bundleItemTitle} numberOfLines={2}>
+                {card.productName}
+              </Text>
+              {specParts.map((line) => (
+                <Text key={line} style={styles.bundleItemSpec} numberOfLines={1}>
+                  {line}
+                </Text>
+              ))}
+            </View>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.bundleTableColQty}>
+          <Text style={styles.bundleItemQty}>{card.quantity}</Text>
+        </View>
+        <View style={styles.bundleTableColPrice}>
+          <Text style={styles.bundleItemUnitPrice}>¥ {card.unitPrice.toFixed(2)}</Text>
+        </View>
+        <View style={styles.bundleTableColAmount}>
+          <Text style={styles.bundleItemAmount}>¥ {subtotal.toFixed(2)}</Text>
+        </View>
+        <View style={styles.bundleTableColManage}>
+          <TouchableOpacity onPress={() => handleDeleteOne(card.id)}>
+            <Text style={styles.bundleItemDelete}>{t('cartOrder.card.delete')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  const renderSetBundleGroup = (bundle: (typeof orderedSetBundles)[number]) => (
+    <View key={bundle.id} style={styles.bundleGroup}>
+      <View style={styles.bundleGroupHeader}>
+        <TouchableOpacity
+          style={styles.bundleItemCheckCol}
+          onPress={() => toggleBundleCheck(bundle.id)}
+        >
+          <View style={[styles.checkBox, bundle.allChecked && styles.checkBoxChecked]}>
+            {bundle.allChecked && <Icon name="checkmark" size={12} color={COLORS.white} />}
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.bundleTableColInfo}
+          onPress={() => toggleBundleCollapse(bundle.id)}
+        >
+          <View style={styles.bundleTitleRow}>
+            <Text style={styles.bundleGroupTitle}>
+              {t('cartOrder.bundles.setProduct', { n: String(bundle.index) })}
+            </Text>
+            <Icon
+              name={bundle.collapsed ? 'chevron-forward' : 'chevron-down'}
+              size={14}
+              color={COLORS.text.primary}
+            />
+          </View>
+        </TouchableOpacity>
+        <Text style={styles.bundleHeaderQty}>{bundle.totalQty}</Text>
+        <Text style={styles.bundleHeaderAmount}>¥ {bundle.totalAmount.toFixed(2)}</Text>
+        <View style={styles.bundleTableColManage} />
+      </View>
+      {!bundle.collapsed &&
+        bundle.items.map((card, idx) =>
+          renderBundleItemRow(card, idx === bundle.items.length - 1),
+        )}
+    </View>
+  );
+
+  const renderCartListContent = () => {
+    if (activeTab === 'bundles') {
+      if (orderedSetBundles.length === 0) {
+        return (
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyText}>{t('cartOrder.bundles.empty')}</Text>
+          </View>
+        );
+      }
+      return (
+        <>
+          {renderBundleTableHeader()}
+          {orderedSetBundles.map(renderSetBundleGroup)}
+        </>
+      );
+    }
+
+    if (unbundledCards.length === 0) {
+      if (filteredCards.length === 0) {
+        return null;
+      }
+      return (
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyText}>{t('cartOrder.empty')}</Text>
+        </View>
+      );
+    }
+
+    return unbundledCards.map(renderCard);
+  };
+
   const renderCard = (card: CartCard) => {
     const subtotal = card.quantity * card.unitPrice;
 
@@ -1403,18 +1661,10 @@ const CartScreen: React.FC = () => {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tabBtn, activeTab === 'bundles' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('bundles')}
+          onPress={handleBundlesTabPress}
         >
           <Text style={[styles.tabText, activeTab === 'bundles' && styles.tabTextActive]}>
             {t('cartOrder.tabs.bundles')}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabBtn, activeTab === 'offline' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('offline')}
-        >
-          <Text style={[styles.tabText, activeTab === 'offline' && styles.tabTextActive]}>
-            {t('cartOrder.tabs.offline')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -1456,7 +1706,7 @@ const CartScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           ) : (
-            filteredCards.map(renderCard)
+            renderCartListContent()
           )}
         </ScrollView>
 
@@ -2798,6 +3048,152 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingTop: 6,
     paddingBottom: SPACING.lg,
+  },
+  bundleTableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[200],
+    marginBottom: 8,
+  },
+  bundleTableHeaderText: {
+    fontSize: FONTS.sizes.xs,
+    fontWeight: '700',
+    color: COLORS.text.secondary,
+    textAlign: 'center',
+  },
+  bundleTableHeaderTextLeft: {
+    textAlign: 'left',
+  },
+  bundleTableColInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  bundleTableColQty: {
+    width: 36,
+    alignItems: 'center',
+  },
+  bundleTableColPrice: {
+    width: 64,
+    alignItems: 'flex-end',
+  },
+  bundleTableColAmount: {
+    width: 72,
+    alignItems: 'flex-end',
+  },
+  bundleTableColManage: {
+    width: 44,
+    alignItems: 'center',
+  },
+  bundleGroup: {
+    borderWidth: 1,
+    borderColor: PRIMARY,
+    borderRadius: 12,
+    marginBottom: 14,
+    overflow: 'hidden',
+    backgroundColor: COLORS.white,
+  },
+  bundleGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    backgroundColor: COLORS.gray[50],
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[200],
+  },
+  bundleTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  bundleGroupTitle: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  bundleHeaderQty: {
+    width: 36,
+    textAlign: 'center',
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  bundleHeaderAmount: {
+    width: 72,
+    textAlign: 'right',
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: PRIMARY,
+  },
+  bundleItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  bundleItemRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.gray[200],
+  },
+  bundleItemCheckCol: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bundleItemInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  bundleItemInfoPress: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  bundleItemImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: COLORS.gray[100],
+  },
+  bundleItemTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  bundleItemTitle: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+    lineHeight: 16,
+  },
+  bundleItemSpec: {
+    fontSize: 10,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  bundleItemQty: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    textAlign: 'center',
+  },
+  bundleItemUnitPrice: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    textAlign: 'right',
+  },
+  bundleItemAmount: {
+    fontSize: FONTS.sizes.xs,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    textAlign: 'right',
+  },
+  bundleItemDelete: {
+    fontSize: FONTS.sizes.xs,
+    color: PRIMARY,
+    fontWeight: '600',
   },
   // CARD — stylish
   card: {

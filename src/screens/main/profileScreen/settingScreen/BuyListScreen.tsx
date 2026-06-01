@@ -2897,7 +2897,7 @@ const BuyListScreen = () => {
                       country: 'South Korea',
                     });
                     if (res.success) {
-                      showToast(t('home.addressUpdatedSuccessfully'), 'success');
+                      showToast(t('profile.addressModal.updateSuccess'), 'success');
                       // Update the order in the list with new address
                       setOrders(prevOrders => 
                         prevOrders.map(o => 

@@ -16,7 +16,12 @@ import { Address } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useAddAddressMutation } from '../hooks/useAddAddressMutation';
 import { useUpdateAddressMutation } from '../hooks/useUpdateAddressMutation';
-import { buildAddressSubmitBody, formatAddressApiErrorMessage } from '../services/addressApi';
+import {
+  buildAddressSubmitBody,
+  getAddressFormValidationErrorKey,
+  getAddressSaveSuccessMessage,
+  resolveAddressSaveError,
+} from '../services/addressApi';
 import { useToast } from '../context/ToastContext';
 import { useTranslation } from '../hooks/useTranslation';
 
@@ -91,13 +96,12 @@ const AddNewAddressModal: React.FC<AddNewAddressModalProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const showSaveError = useCallback(
-    (message: string) => {
-      const formatted =
-        formatAddressApiErrorMessage(message, message) || message;
+    (error: unknown) => {
+      const formatted = resolveAddressSaveError(error, t);
       setSaveError(formatted);
       showToast(formatted, 'error', 6000);
     },
-    [showToast],
+    [showToast, t],
   );
 
   const clearSaveError = useCallback(() => {
@@ -169,7 +173,7 @@ const AddNewAddressModal: React.FC<AddNewAddressModalProps> = ({
     skipProfileRefetch: true,
     onSuccess: (data) => {
       setSaveError(null);
-      showToast(t('profile.addressModal.saveSuccess'), 'success');
+      showToast(getAddressSaveSuccessMessage(false, t), 'success');
       if (data?.addresses) {
         updateUser({ addresses: mapApiAddresses(data.addresses as Array<Record<string, unknown>>) });
       }
@@ -185,7 +189,7 @@ const AddNewAddressModal: React.FC<AddNewAddressModalProps> = ({
     skipProfileRefetch: true,
     onSuccess: (data) => {
       setSaveError(null);
-      showToast(t('profile.addressModal.updateSuccess'), 'success');
+      showToast(getAddressSaveSuccessMessage(true, t), 'success');
       if (data?.addresses) {
         updateUser({ addresses: mapApiAddresses(data.addresses as Array<Record<string, unknown>>) });
       }
@@ -203,11 +207,20 @@ const AddNewAddressModal: React.FC<AddNewAddressModalProps> = ({
   };
 
   const handleSaveAddress = () => {
-    const detail = detailedAddress.trim();
-    if (!detail || detail.length < 2) {
-      showSaveError(t('profile.addressModal.detailRequired'));
+    const validationKey = getAddressFormValidationErrorKey({
+      mainAddress,
+      detailedAddress,
+      zipCode,
+      recipient,
+      contact,
+      personalCustomsCode,
+    });
+    if (validationKey) {
+      showSaveError(t(`profile.addressModal.${validationKey}`));
       return;
     }
+
+    const detail = detailedAddress.trim();
     if (detail.length > 120) {
       showSaveError(t('profile.addressModal.detailAddressHelper'));
       return;

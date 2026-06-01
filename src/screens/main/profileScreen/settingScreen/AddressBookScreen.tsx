@@ -23,7 +23,13 @@ import { RootStackParamList, Address } from '../../../../types';
 import { useAuth } from '../../../../context/AuthContext';
 import { useAddAddressMutation } from '../../../../hooks/useAddAddressMutation';
 import { useUpdateAddressMutation } from '../../../../hooks/useUpdateAddressMutation';
-import { addressApi, buildAddressSubmitBody, formatAddressApiErrorMessage } from '../../../../services/addressApi';
+import {
+  addressApi,
+  buildAddressSubmitBody,
+  getAddressFormValidationErrorKey,
+  getAddressSaveSuccessMessage,
+  resolveAddressSaveError,
+} from '../../../../services/addressApi';
 import { useToast } from '../../../../context/ToastContext';
 import { useTranslation } from '../../../../hooks/useTranslation';
 
@@ -56,8 +62,8 @@ const AddressBookScreen: React.FC = () => {
   const [note, setNote] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const showSaveError = (message: string) => {
-    const formatted = formatAddressApiErrorMessage(message, message) || message;
+  const showSaveError = (error: unknown) => {
+    const formatted = resolveAddressSaveError(error, t);
     setSaveError(formatted);
     showToast(formatted, 'error', 6000);
   };
@@ -111,7 +117,7 @@ const AddressBookScreen: React.FC = () => {
   const { mutate: addAddress, isLoading: isAdding } = useAddAddressMutation({
     onSuccess: (data) => {
       setSaveError(null);
-      showToast('Address added successfully', 'success');
+      showToast(getAddressSaveSuccessMessage(false, t), 'success');
       setAddressModalVisible(false);
       resetForm();
       // Update user context with new addresses
@@ -135,7 +141,7 @@ const AddressBookScreen: React.FC = () => {
       }
     },
     onError: (error) => {
-      showSaveError(error || 'Failed to add address');
+      showSaveError(error || t('profile.addressModal.saveFailed'));
     },
   });
 
@@ -143,7 +149,7 @@ const AddressBookScreen: React.FC = () => {
   const { mutate: updateAddress, isLoading: isUpdating } = useUpdateAddressMutation({
     onSuccess: (data) => {
       setSaveError(null);
-      showToast('Address updated successfully', 'success');
+      showToast(getAddressSaveSuccessMessage(true, t), 'success');
       setAddressModalVisible(false);
       resetForm();
       // Update user context with new addresses
@@ -167,7 +173,7 @@ const AddressBookScreen: React.FC = () => {
       }
     },
     onError: (error) => {
-      showSaveError(error || 'Failed to update address');
+      showSaveError(error || t('profile.addressModal.saveFailed'));
     },
   });
 
@@ -208,9 +214,22 @@ const AddressBookScreen: React.FC = () => {
   };
 
   const handleSaveAddress = () => {
+    const validationKey = getAddressFormValidationErrorKey({
+      mainAddress,
+      detailedAddress,
+      zipCode,
+      recipient,
+      contact,
+      personalCustomsCode,
+    });
+    if (validationKey) {
+      showSaveError(t(`profile.addressModal.${validationKey}`));
+      return;
+    }
+
     const detail = detailedAddress.trim();
-    if (!detail || detail.length < 2) {
-      showSaveError(t('profile.addressModal.detailRequired'));
+    if (detail.length > 120) {
+      showSaveError(t('profile.addressModal.detailAddressHelper'));
       return;
     }
 
@@ -346,7 +365,7 @@ const AddressBookScreen: React.FC = () => {
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setIsManagementMode(!isManagementMode)}>
           <Text style={styles.managementText}>
-            {isManagementMode ? 'Exit' : 'Management'}
+            {isManagementMode ? t('profile.done') : t('profile.management')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity 
@@ -388,13 +407,13 @@ const AddressBookScreen: React.FC = () => {
             {isDefault ? (
               <View style={styles.defaultBadgeContainer}>
                 {isManagementMode && (<Icon name="checkmark-circle" size={16} color={COLORS.red} />)}
-                <Text style={styles.defaultBadge}>Default</Text>
+                <Text style={styles.defaultBadge}>{t('profile.defaultAddressBadge')}</Text>
               </View>
             ) : (
               isManagementMode && (
                 <View style={styles.defaultBadgeContainer}>
                   <View style={styles.defaultCheckboxEmpty} />
-                  <Text style={styles.defaultBadgeGray}>Default</Text>
+                  <Text style={styles.defaultBadgeGray}>{t('profile.defaultAddressBadge')}</Text>
                 </View>
               )
             )}
@@ -791,8 +810,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md * 2,
-    paddingTop: SPACING['2xl'] * 2,
+    paddingTop: SPACING['3xl'],
+    paddingBottom: SPACING.md,
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray[200],

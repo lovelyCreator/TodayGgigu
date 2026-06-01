@@ -924,6 +924,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
         {isLoadingTopCategories && categoriesToDisplay.length === 0 ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="small" color={COLORS.primary} />
+            <Text style={styles.loadingText}>{t('loading.categories')}</Text>
           </View>
         ) : (
           <FlatList
@@ -960,6 +961,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
         {sections.length === 0 && isLoadingAllL2 ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="small" color={COLORS.primary} />
+            <Text style={styles.loadingText}>{t('loading.categories')}</Text>
           </View>
         ) : (
           <View style={styles.rightColumnInner}>
@@ -1241,6 +1243,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  loadingText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
+    textAlign: 'center',
   },
   companyTabsContainer: {
     backgroundColor: COLORS.white,

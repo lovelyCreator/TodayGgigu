@@ -42,7 +42,7 @@ console.log('  5) 디버깅 중에는 yarn metro:free8081 을 쓴 직후, 반드
 console.log('');
 console.log('추가 점검:');
 console.log('  - MainActivity.getMainComponentName / iOS withModuleName ===');
-console.log('    AppRegistry.registerComponent 첫 인자 (현재: todaymall)');
+console.log('    AppRegistry.registerComponent 첫 인자 (현재: todayggigu)');
 console.log('  - Cursor/VSCode RN 확장이 저장 시 reload를 내면 앱 없을 때 동일 경고');
 console.log('  - Windows 방화벽이 node(Metro) 수신을 막으면 앱이 소켓에 못 붙을 수 있음');
 console.log('');

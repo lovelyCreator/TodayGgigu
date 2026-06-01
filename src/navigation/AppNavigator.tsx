@@ -97,7 +97,7 @@ import FollowedStoreScreen from '../screens/main/profileScreen/FollowedStoreScre
 import ChatScreen from '../screens/lazy/ChatScreen.lazy';
 import ChatErrorBoundary from '../components/ChatErrorBoundary';
 // import EditProductScreen from '../screens/main/EditProductScreen';
-import CategoryTabScreen from '../screens/lazy/CategoryTabScreen.lazy';
+import CategoryTabScreen from '../screens/main/CategoryTabScreen';
 import ProductDiscoveryScreen from '../screens/lazy/ProductDiscoveryScreen.lazy';
 import SubCategoryScreen from '../screens/main/SubCategoryScreen';
 import FinanceScreen from '../screens/lazy/FinanceScreen.lazy';

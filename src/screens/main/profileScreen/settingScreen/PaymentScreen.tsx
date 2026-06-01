@@ -35,7 +35,13 @@ import { useCreateOrderMutation } from '../../../../hooks/useCreateOrderMutation
 import { useCreateOrderDirectPurchaseMutation } from '../../../../hooks/useCreateOrderDirectPurchaseMutation';
 import { useToast } from '../../../../context/ToastContext';
 import { formatPriceKRW, formatKRWDirect, formatDepositBalance } from '../../../../utils/i18nHelpers';
-import { addressApi, buildAddressSubmitBody, buildCreateOrderLineItems } from '../../../../services/addressApi';
+import {
+  addressApi,
+  buildAddressSubmitBody,
+  buildCreateOrderLineItems,
+  getAddressSaveSuccessMessage,
+  resolveAddressSaveError,
+} from '../../../../services/addressApi';
 
 interface PaymentScreenParams {
   items: Array<{
@@ -1364,7 +1370,7 @@ const PaymentScreen: React.FC = () => {
                     }
 
                     if (response.success) {
-                      showToast(selectedAddress?.id ? 'Address updated successfully' : 'Address added successfully', 'success');
+                      showToast(getAddressSaveSuccessMessage(Boolean(selectedAddress?.id), t), 'success');
                       setAddressEditModalVisible(false);
                       // Update user context with new addresses
                       if (response.data?.addresses) {
@@ -1395,11 +1401,11 @@ const PaymentScreen: React.FC = () => {
                       setIsDefaultAddress(false);
                     } else {
                       console.error('Address save failed:', response.error);
-                      showToast(response.error || 'Failed to save address', 'error');
+                      showToast(resolveAddressSaveError(response.error, t), 'error');
                     }
                   } catch (error: any) {
                     console.error('Address save error:', error);
-                    showToast(error?.message || 'Failed to save address', 'error');
+                    showToast(resolveAddressSaveError(error, t), 'error');
                   } finally {
                     setIsSavingAddress(false);
                   }

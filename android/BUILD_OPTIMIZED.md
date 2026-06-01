@@ -22,10 +22,10 @@ cd android
 ./gradlew assembleRelease
 ```
 Output: Multiple APKs in `android/app/build/outputs/apk/release/`:
-- `todayGgigu-1.0-armeabi-v7a-release.apk` (~20-30MB)
-- `todayGgigu-1.0-arm64-v8a-release.apk` (~20-30MB)
-- `todayGgigu-1.0-x86-release.apk` (~20-30MB)
-- `todayGgigu-1.0-x86_64-release.apk` (~20-30MB)
+- `todayggigu-1.0-armeabi-v7a-release.apk` (~20-30MB)
+- `todayggigu-1.0-arm64-v8a-release.apk` (~20-30MB)
+- `todayggigu-1.0-x86-release.apk` (~20-30MB)
+- `todayggigu-1.0-x86_64-release.apk` (~20-30MB)
 
 **Note:** Install the APK that matches your device's architecture:
 - Most modern devices: `arm64-v8a`

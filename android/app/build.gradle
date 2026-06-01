@@ -80,7 +80,7 @@ if (keystorePropertiesFile.exists()) {
 }
 def releaseKeystoreFile = keystoreProperties['storeFile']
         ? rootProject.file(keystoreProperties['storeFile'])
-        : file('todaymall.keystore')
+        : file('todayggigu.keystore')
 def hasReleaseKeystore = releaseKeystoreFile.exists()
 
 android {
@@ -118,7 +118,7 @@ android {
             release {
                 storeFile releaseKeystoreFile
                 storePassword keystoreProperties['storePassword'] ?: '123456'
-                keyAlias keystoreProperties['keyAlias'] ?: 'todaymall_alias'
+                keyAlias keystoreProperties['keyAlias'] ?: 'todayggigu_alias'
                 keyPassword keystoreProperties['keyPassword'] ?: '123456'
             }
         }
@@ -134,7 +134,7 @@ android {
                 signingConfig signingConfigs.release
             } else {
                 println('\n[TodayGgigu] WARNING: Release keystore not found at: ' + releaseKeystoreFile.absolutePath)
-                println('[TodayGgigu] Copy todaymall.keystore to android/app/ or set storeFile in android/keystore.properties')
+                println('[TodayGgigu] Copy todayggigu.keystore to android/app/ or set storeFile in android/keystore.properties')
                 println('[TodayGgigu] Falling back to DEBUG signing — not valid for Play Store upload.\n')
                 signingConfig signingConfigs.debug
             }
@@ -192,7 +192,7 @@ android {
             if (output.outputFile != null && output.outputFile.name.endsWith('.apk')) {
                 def abiFilter = output.getFilter(com.android.build.OutputFile.ABI)
                 def abiName = abiFilter != null ? abiFilter : "universal"
-                output.outputFileName = "todaymall-${variant.versionName}-${abiName}-${variant.buildType.name}.apk"
+                output.outputFileName = "todayggigu-${variant.versionName}-${abiName}-${variant.buildType.name}.apk"
             }
         }
     }

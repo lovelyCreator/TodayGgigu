@@ -396,7 +396,7 @@ const OrderDetailScreen: React.FC = () => {
                       country: 'South Korea',
                     });
                     if (res.success) {
-                      showToast(t('profile.addressUpdatedSuccessfully'), 'success');
+                      showToast(t('profile.addressModal.updateSuccess'), 'success');
                       setAddressModalVisible(false);
                       // Re-fetch order to get updated address
                       const refreshed = await orderApi.getOrderById(order.id);

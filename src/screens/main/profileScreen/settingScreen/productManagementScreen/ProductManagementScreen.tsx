@@ -508,20 +508,31 @@ const ProductManagementScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {renderHeader()}
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {renderFilters()}
-        {renderToolbar()}
-        {renderBody()}
-      </ScrollView>
-      {renderPickerModal()}
-    </SafeAreaView>
+    <View style={styles.root}>
+      <SafeAreaView style={styles.safeTop} edges={['top']}>
+        {renderHeader()}
+      </SafeAreaView>
+      <View style={styles.body}>
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {renderFilters()}
+          {renderToolbar()}
+          {renderBody()}
+        </ScrollView>
+        {renderPickerModal()}
+      </View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  safeTop: {
+    backgroundColor: COLORS.white,
+  },
+  body: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
@@ -531,7 +542,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.white,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray[100],
   },

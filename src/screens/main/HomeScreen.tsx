@@ -1004,9 +1004,7 @@ const HomeScreen: React.FC = () => {
             }
           >
             <Text style={styles.uosViewAllText}>
-              {t('home.viewAllOrderInfo') || (
-                locale === 'ko' ? '전체 주문 정보 보기' : locale === 'zh' ? '查看全部订单信息' : 'View all order info'
-              )}
+              {t('home.viewAllOrderInfo')}
             </Text>
             <Icon name="chevron-forward" size={14} color={COLORS.text.secondary} />
           </TouchableOpacity>

@@ -57,7 +57,7 @@ const GOOGLE_REDIRECT_URI = "https://auth.expo.io/@roy_hensley/todaymall";
 
 // Configure Google Sign-In
 // IMPORTANT: Create an Android OAuth Client in Google Cloud Console with:
-// - Package name: com.app.todaymall (must match build.gradle)
+// - Package name: com.todayggigu.kr (must match build.gradle applicationId)
 // - SHA-1: Get from running: cd android && gradlew.bat signingReport
 // 
 // You need BOTH:
@@ -88,7 +88,7 @@ const APPLE_REDIRECT_URI = makeRedirectUri({
 const TWITTER_CLIENT_ID = 'dURqNDZQVDRTQjJYbWt2cUwtOFU6MTpjaQ';
 const TWITTER_CLIENT_SECRET = '7KcFO61dXldQA8Em1JQqWJK4VaJqL-DO46e25gObmnPGHbrfgZ';
 const TWITTER_REDIRECT_URI = makeRedirectUri({
-  native: 'com.app.todaymall://oauthredirect',
+  native: 'com.todayggigu.kr://oauthredirect',
 });
 const KAKAO_CLIENT_ID = 'YOUR_KAKAO_REST_API_KEY';
 const KAKAO_REDIRECT_URI = makeRedirectUri({
