@@ -228,6 +228,16 @@ const pickPreferredAddress = (
   return addresses.find((a) => a.defaultAddress) || addresses[0];
 };
 
+// Map language codes to flag emojis (mirrors ProfileScreen / HomeScreen).
+const getCartLanguageFlag = (locale: string): string => {
+  const flags: { [key: string]: string } = {
+    en: '🇺🇸',
+    ko: '🇰🇷',
+    zh: '🇨🇳',
+  };
+  return flags[locale] || '🇺🇸';
+};
+
 const CartScreen: React.FC = () => {
   const { t, locale } = useTranslation();
   const navigation = useNavigation<any>();
@@ -1594,6 +1604,13 @@ const CartScreen: React.FC = () => {
       <View style={styles.pageHeader}>
         <Icon name="cart-outline" size={22} color={COLORS.secondary} />
         <Text style={styles.pageHeaderTitle}>{t('cart.title')}</Text>
+        <TouchableOpacity
+          style={styles.pageHeaderLangBtn}
+          onPress={() => navigation.navigate('LanguageSettings')}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.pageHeaderLangFlag}>{getCartLanguageFlag(locale)}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* HEADER */}
@@ -2462,6 +2479,16 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.secondary,
     marginLeft: 8,
+  },
+  pageHeaderLangBtn: {
+    marginLeft: 'auto',
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pageHeaderLangFlag: {
+    fontSize: 24,
   },
   // HEADER
   header: {

@@ -256,7 +256,7 @@ const OrderDetailScreen: React.FC = () => {
             <View style={styles.detailValueRow}>
               <Text style={styles.detailValue} numberOfLines={1}>{order.orderNumber}</Text>
               <TouchableOpacity onPress={() => copy(order.orderNumber)}>
-                <Text style={styles.copyBtn}>{t('home.buyList.copy')}</Text>
+                <Text style={styles.copyBtn}>{t('buyList.copy')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -293,7 +293,7 @@ const OrderDetailScreen: React.FC = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.addressModalContent}>
             <View style={styles.addressModalHeader}>
-              <Text style={styles.addressModalTitle}>{t('home.buyList.editAddress')}</Text>
+              <Text style={styles.addressModalTitle}>{t('buyList.editAddress')}</Text>
               <TouchableOpacity onPress={() => setAddressModalVisible(false)}>
                 <Icon name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
@@ -322,7 +322,7 @@ const OrderDetailScreen: React.FC = () => {
               <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Postal code:</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder={t('home.buyList.postalCode')}
+                placeholder={t('buyList.postalCode')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.zonecode}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, zonecode: v }))}
@@ -332,7 +332,7 @@ const OrderDetailScreen: React.FC = () => {
               <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Detail address:</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder={t('home.buyList.searchAddress')}
+                placeholder={t('buyList.searchAddress')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.detailAddress}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, detailAddress: v }))}
@@ -341,7 +341,7 @@ const OrderDetailScreen: React.FC = () => {
               <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Recipient name:</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder={t('home.buyList.upTo25Chars')}
+                placeholder={t('buyList.upTo25Chars')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.recipient}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, recipient: v }))}
@@ -365,7 +365,7 @@ const OrderDetailScreen: React.FC = () => {
               <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Customs clearance code:</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder={t('home.buyList.enterCustomsCode')}
+                placeholder={t('buyList.enterCustomsCode')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.customsCode}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, customsCode: v }))}

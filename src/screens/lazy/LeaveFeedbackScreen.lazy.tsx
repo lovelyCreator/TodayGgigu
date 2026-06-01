@@ -1,12 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the LeaveFeedbackScreen component
-const LazyLeaveFeedbackScreen = lazy(() => import('../main/profileScreen/LeaveFeedbackScreen'));
+const LazyLeaveFeedbackScreen = lazy(
+  () => import('../main/profileScreen/LeaveFeedbackScreen'),
+);
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const LeaveFeedbackScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading feedback form..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="form" />}>
     <LazyLeaveFeedbackScreen {...props} />
   </Suspense>
 );

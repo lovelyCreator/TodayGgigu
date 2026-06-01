@@ -1,12 +1,10 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the OtpVerificationScreen component
 const LazyOtpVerificationScreen = lazy(() => import('../auth/OtpVerificationScreen'));
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const OtpVerificationScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading OTP verification..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="form" />}>
     <LazyOtpVerificationScreen {...props} />
   </Suspense>
 );

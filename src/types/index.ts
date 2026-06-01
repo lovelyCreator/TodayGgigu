@@ -325,7 +325,14 @@ export type CartScreenParams = {
 export type MainTabParamList = {
   Home: undefined;
   Category: undefined;
-  Message: undefined;
+  Message:
+    | {
+        /** Optional deep-link target — 'order' is the default (first tab). */
+        initialTab?: 'order' | 'general' | 'fileDownload';
+        orderId?: string;
+        orderNumber?: string;
+      }
+    | undefined;
   Cart: CartScreenParams | undefined;
   Profile: undefined;
 };

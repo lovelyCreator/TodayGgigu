@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../../components/Icon';
+import { ScreenSkeleton } from '../../components/Skeleton';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
@@ -320,14 +321,9 @@ const SubCategoryScreen: React.FC = () => {
   };
 
   const renderContent = () => {
-    // Show loading indicator
+    // Show skeleton placeholder while subcategories/products are fetched.
     if (isLoading) {
-      return (
-        <View style={styles.centeredContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.loadingText}>{t('home.loading')}</Text>
-        </View>
-      );
+      return <ScreenSkeleton variant="grid" showHeader={false} />;
     }
 
     // If subcategories are passed, we don't need categoryId

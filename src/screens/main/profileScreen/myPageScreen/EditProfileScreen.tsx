@@ -5,6 +5,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { launchCamera, launchImageLibrary, MediaType, ImagePickerResponse, CameraOptions, ImageLibraryOptions } from 'react-native-image-picker';
 import Icon from '../../../../components/Icon';
 import ImagePickerModal from '../../../../components/ImagePickerModal';
+import { ScreenSkeleton } from '../../../../components/Skeleton';
 import DatePickerModal from '../../../../components/DatePickerModal';
 import { COLORS, FONTS, SPACING } from '../../../../constants';
 import { RootStackParamList } from '../../../../types';
@@ -275,21 +276,7 @@ const EditProfileScreen: React.FC = () => {
   );
 
   if (loadingProfile) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{t('profile.editProfileTitle')}</Text>
-          <View style={styles.placeholder} />
-        </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FF6B00" />
-          <Text style={styles.loadingText}>{t('profile.loadingProfile')}</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return <ScreenSkeleton variant="form" />;
   }
 
   return (

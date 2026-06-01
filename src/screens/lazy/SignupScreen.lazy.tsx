@@ -1,12 +1,10 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the SignupScreen component
 const LazySignupScreen = lazy(() => import('../auth/SignupScreen'));
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const SignupScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading signup..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="form" />}>
     <LazySignupScreen {...props} />
   </Suspense>
 );

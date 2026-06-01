@@ -1,12 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the PaymentMethodsScreen component
-const LazyPaymentMethodsScreen = lazy(() => import('../main/profileScreen/settingScreen/PaymentMethodsScreen'));
+const LazyPaymentMethodsScreen = lazy(
+  () => import('../main/profileScreen/settingScreen/PaymentMethodsScreen'),
+);
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const PaymentMethodsScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading payment methods..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="list" />}>
     <LazyPaymentMethodsScreen {...props} />
   </Suspense>
 );

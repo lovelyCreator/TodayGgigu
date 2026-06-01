@@ -1,12 +1,10 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the ChatScreen component
 const LazyChatScreen = lazy(() => import('../main/chatScreen/ChatScreen'));
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const ChatScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading chat..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="list" />}>
     <LazyChatScreen {...props} />
   </Suspense>
 );

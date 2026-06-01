@@ -1,12 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the SearchResultsScreen component
-const LazySearchResultsScreen = lazy(() => import('../main/searchScreen/SearchResultsScreen'));
+const LazySearchResultsScreen = lazy(
+  () => import('../main/searchScreen/SearchResultsScreen'),
+);
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const SearchResultsScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading search results..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="grid" />}>
     <LazySearchResultsScreen {...props} />
   </Suspense>
 );

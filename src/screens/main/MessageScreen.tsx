@@ -58,6 +58,16 @@ interface MessageScreenProps {
   onEmbeddedBack?: () => void;
 }
 
+// Map language codes to flag emojis (mirrors ProfileScreen / HomeScreen / CartScreen).
+const getMessageLanguageFlag = (locale: string): string => {
+  const flags: { [key: string]: string } = {
+    en: '🇺🇸',
+    ko: '🇰🇷',
+    zh: '🇨🇳',
+  };
+  return flags[locale] || '🇺🇸';
+};
+
 const MessageScreen: React.FC<MessageScreenProps> = ({ initialTabOverride, onEmbeddedBack }) => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -411,6 +421,13 @@ const MessageScreen: React.FC<MessageScreenProps> = ({ initialTabOverride, onEmb
       <View style={styles.headerRight}>
         <TouchableOpacity
           style={styles.headerIcon}
+          onPress={() => navigation.navigate('LanguageSettings')}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.headerLangFlag}>{getMessageLanguageFlag(locale)}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.headerIcon}
           onPress={() => navigation.navigate('Search')}
           activeOpacity={0.7}
         >
@@ -745,6 +762,9 @@ const styles = StyleSheet.create({
   },
   headerIcon: {
     padding: SPACING.xs,
+  },
+  headerLangFlag: {
+    fontSize: 22,
   },
 
   // Tabs

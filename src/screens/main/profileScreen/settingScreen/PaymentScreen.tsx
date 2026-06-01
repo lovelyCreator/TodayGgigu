@@ -96,10 +96,14 @@ interface PaymentScreenParams {
 const PaymentScreen: React.FC = () => {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
-  const params = route.params as PaymentScreenParams;
-  const { 
-    items = [], 
-    totalAmount = 0, 
+  // Some entry points (e.g. BuyList's "Pay Now" button on an existing order)
+  // navigate to this screen without route params. Fall back to an empty
+  // object so destructuring below cannot crash with
+  // "Cannot read property 'items' of undefined".
+  const params = (route.params ?? {}) as PaymentScreenParams;
+  const {
+    items = [],
+    totalAmount = 0,
     fromCart = false,
     estimatedShippingCost: paramShipping = 0,
     estimatedShippingCostBySeller: paramShippingBySeller = {},

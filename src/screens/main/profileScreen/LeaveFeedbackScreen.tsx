@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import Icon from '../../../components/Icon';
+import { ScreenSkeleton } from '../../../components/Skeleton';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 
@@ -140,11 +141,7 @@ const LeaveFeedbackScreen: React.FC = () => {
 
   const renderProductInfo = () => {
     if (loading) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.red} />
-        </View>
-      );
+      return <ScreenSkeleton variant="form" showHeader={false} />;
     }
     
     if (!product) {

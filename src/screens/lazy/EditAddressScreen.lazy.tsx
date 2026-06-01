@@ -1,12 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the EditAddressScreen component
-const LazyEditAddressScreen = lazy(() => import('../main/profileScreen/settingScreen/EditAddressScreen'));
+const LazyEditAddressScreen = lazy(
+  () => import('../main/profileScreen/settingScreen/EditAddressScreen'),
+);
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const EditAddressScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading address editor..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="form" />}>
     <LazyEditAddressScreen {...props} />
   </Suspense>
 );

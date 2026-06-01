@@ -1,10 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-const LazyLiveSellerDetailScreen = lazy(() => import('../main/liveScreen/LiveSellerDetailScreen'));
+const LazyLiveSellerDetailScreen = lazy(
+  () => import('../main/liveScreen/LiveSellerDetailScreen'),
+);
 
 const LiveSellerDetailScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading live seller..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="detail" />}>
     <LazyLiveSellerDetailScreen {...props} />
   </Suspense>
 );

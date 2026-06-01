@@ -1618,7 +1618,7 @@ const BuyListScreen = () => {
               style={styles.primaryButton}
               onPress={() => navigation.navigate('Payment' as never)}
             >
-              <Text style={styles.primaryButtonText}>{t('cart.pay') || 'Pay'}</Text>
+              <Text style={styles.primaryButtonText}>{t('cart.pay') || 'Pay Now'}</Text>
             </TouchableOpacity>
           ) : (order.progressStatus === 'INTERNATIONAL_SHIPPED' || order.progressStatus === 'ORDER_RECEIVED') ? (
             <TouchableOpacity

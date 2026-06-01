@@ -28,6 +28,7 @@ import { useNotes } from '../../../hooks/useNotes';
 import { useGeneralInquiry } from '../../../hooks/useGeneralInquiry';
 import { inquiryApi } from '../../../services/inquiryApi';
 import { wishlistApi } from '../../../services/wishlistApi';
+import { depositApi } from '../../../services/depositApi';
 import { productsApi } from '../../../services/productsApi';
 import { MemberAvatar, NotificationBadge, ProductCard } from '../../../components';
 import { useRecommendationsMutation } from '../../../hooks/useRecommendationsMutation';
@@ -42,7 +43,6 @@ import { mapLocaleToOrdersLang } from '../../../services/orderApi';
 import { mergeProfileOrderCounts } from '../../../utils/orderCounts';
 import { getProfileMoreToLoveGridLayout } from '../../../utils/profileMoreToLoveLayout';
 import HeadsetMicIcon from '../../../assets/icons/HeadsetMicIcon';
-import LocationIcon from '../../../assets/icons/LocationIcon';
 import SettingsIcon from '../../../assets/icons/SettingsIcon';
 import CoinIcon from '../../../assets/icons/CoinIcon';
 import CouponIcon from '../../../assets/icons/CouponIcon';
@@ -91,6 +91,9 @@ const ProfileScreen: React.FC = () => {
   const hasLoggedStats = useRef(false);
   const { unreadCount: socketUnreadCount } = useSocket(); // Get total unread count from socket context
   const [notificationCount, setNotificationCount] = useState(0); // Local state for notification count (from REST API)
+  // Deposit balance sourced from the same API the DepositScreen uses, so the
+  // value shown in the stats card stays in sync with the deposit detail page.
+  const [depositBalance, setDepositBalance] = useState<number | null>(null);
   const { notes: broadcastNotes } = useNotes(); // Get broadcast notes count
   const { unreadCount: generalInquiryUnreadCount } = useGeneralInquiry(); // Get general inquiry unread count
   const [orderCounts, setOrderCounts] = useState({
@@ -167,6 +170,26 @@ const ProfileScreen: React.FC = () => {
         }
       };
       fetchUnreadCounts();
+
+      // Pull deposit balance from the same endpoint DepositScreen uses so the
+      // stats card never falls out of sync with the deposit detail page.
+      // Re-runs on every focus, so charging/withdrawing on the deposit page
+      // and coming back here reflects immediately.
+      const fetchDepositBalance = async () => {
+        if (!isAuthenticated || isGuest) return;
+        try {
+          const response = await depositApi.getBalance();
+          if (response.success && response.data) {
+            const d = response.data as any;
+            const value =
+              d.depositBalance ?? d.balance ?? d.totalDeposit ?? 0;
+            setDepositBalance(typeof value === 'number' ? value : Number(value) || 0);
+          }
+        } catch (error) {
+          // console.error('Failed to fetch deposit balance:', error);
+        }
+      };
+      fetchDepositBalance();
 
       // Get order counts from API (fetch larger page size to calculate accurate counts)
       getOrders({ page: 1, pageSize: 100, lang: mapLocaleToOrdersLang(normalizedLocale) });
@@ -558,18 +581,23 @@ const ProfileScreen: React.FC = () => {
           </View>
         {/* )} */}
         <View style={styles.headerIcons}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.headerIcon}
             onPress={() => navigation.navigate('LanguageSettings')}
           >
-            <LocationIcon width={24} height={24} color={COLORS.text.primary} />
+            <Text style={styles.flagText}>{getLanguageFlag(currentLocale)}</Text>
           </TouchableOpacity>
           <NotificationBadge
             customIcon={<HeadsetMicIcon width={24} height={24} color={COLORS.text.primary} />}
             count={notificationCount}
             badgeColor={COLORS.red}
             onPress={() => {
-              navigation.navigate('CustomerService');
+              // Route the inquiry icon to the Message tab's 1:1 (general)
+              // section — same deep-link target as the product detail page.
+              navigation.navigate('Main', {
+                screen: 'Message',
+                params: { initialTab: 'general' },
+              });
             }}
           />
           {isAuthenticated && (
@@ -672,15 +700,7 @@ const ProfileScreen: React.FC = () => {
           <View style={{flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center'}}>
             <Text style={styles.statLabel}>{t('profile.deposit')}:</Text>
             <Text style={styles.statValue}>
-              {(() => {
-                const depositBalance = (user as any)?.depositBalance ?? (user as any)?.deposit;
-                if (typeof depositBalance === 'number') return formatDepositBalance(depositBalance);
-                if (typeof depositBalance === 'string') {
-                  const numValue = parseFloat(depositBalance);
-                  return isNaN(numValue) ? depositBalance : formatDepositBalance(numValue);
-                }
-                return formatDepositBalance(0);
-              })()}
+              {formatDepositBalance(depositBalance ?? 0)}
             </Text>
           </View>
         </TouchableOpacity>

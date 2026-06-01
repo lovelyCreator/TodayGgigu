@@ -33,6 +33,7 @@ import {
 } from '../../utils/productPlatform';
 import { useAppSelector } from '../../store/hooks';
 import { ActivityIndicator } from 'react-native';
+import { ScreenSkeleton } from '../../components/Skeleton';
 import { Product } from '../../types';
 import { useProductDetailMutation } from '../../hooks/useProductDetailMutation';
 import { useRelatedRecommendationsMutation } from '../../hooks/useRelatedRecommendationsMutation';
@@ -1468,14 +1469,11 @@ const ProductDetailScreen: React.FC = () => {
       .replace('{price}', formatPriceKRW(product.price || 0));
   }, [product?.name, product?.price, t]);
 
-  // Early return - MUST be after ALL hooks
+  // Early return - MUST be after ALL hooks.
+  // Skeleton shape matches the upcoming detail layout so the transition feels
+  // like content filling in rather than a swap from a spinner.
   if (loading || !product) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={{ marginTop: SPACING.md, color: COLORS.text.secondary }}>{t('product.loadingProduct')}</Text>
-      </View>
-    );
+    return <ScreenSkeleton variant="detail" />;
   }
 
   const isLiked = isProductLiked(product);
@@ -2597,12 +2595,20 @@ const ProductDetailScreen: React.FC = () => {
             <SellerShopIcon width={30} height={30} color={COLORS.text.primary} />
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.supportAgentButton}
-            onPress={() => navigation.navigate('CustomerService')}
+            onPress={() =>
+              // Open the Message tab and land on its second tab (1:1 / general
+              // inquiry), so tapping this icon from a product page goes straight
+              // to the user's general inquiry list.
+              navigation.navigate('Main', {
+                screen: 'Message',
+                params: { initialTab: 'general' },
+              })
+            }
           >
             <SupportAgentIcon width={30} height={30} color={COLORS.text.primary} />
-          </TouchableOpacity>        
+          </TouchableOpacity>
           
           {/* Cart Icon Button */}
           <TouchableOpacity 

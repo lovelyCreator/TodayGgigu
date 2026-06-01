@@ -1,12 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the ChangePasswordScreen component
-const LazyChangePasswordScreen = lazy(() => import('../main/profileScreen/myPageScreen/ChangePasswordScreen'));
+const LazyChangePasswordScreen = lazy(
+  () => import('../main/profileScreen/myPageScreen/ChangePasswordScreen'),
+);
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const ChangePasswordScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading password change..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="form" />}>
     <LazyChangePasswordScreen {...props} />
   </Suspense>
 );

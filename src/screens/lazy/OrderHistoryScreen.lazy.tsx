@@ -1,12 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the OrderHistoryScreen component
-const LazyOrderHistoryScreen = lazy(() => import('../main/profileScreen/settingScreen/OrderHistoryScreen'));
+const LazyOrderHistoryScreen = lazy(
+  () => import('../main/profileScreen/settingScreen/OrderHistoryScreen'),
+);
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const OrderHistoryScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading order history..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="list" />}>
     <LazyOrderHistoryScreen {...props} />
   </Suspense>
 );

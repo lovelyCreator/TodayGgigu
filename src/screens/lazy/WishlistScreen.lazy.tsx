@@ -1,12 +1,10 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the WishlistScreen component
 const LazyWishlistScreen = lazy(() => import('../main/WishlistScreen'));
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const WishlistScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading wishlist..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="grid" />}>
     <LazyWishlistScreen {...props} />
   </Suspense>
 );

@@ -1606,7 +1606,18 @@ const HomeScreen: React.FC = () => {
                 customIcon={<HeadsetMicIcon width={26} height={26} color={COLORS.black} />}
                 count={unreadCount}
                 badgeColor={LOGISTICS_ORANGE}
-                onPress={() => navigation.navigate('CustomerService' as never)}
+                onPress={() =>
+                  // Route the header inquiry icon to the Message tab's 1:1
+                  // (general) section — same deep-link target as ProductDetail
+                  // bottom bar and ProfileScreen header. This file's
+                  // navigation prop is loosely typed (`useNavigation<any>`-style
+                  // usage elsewhere), so cast through `any` to pass the nested
+                  // navigator params object.
+                  (navigation as any).navigate('Main', {
+                    screen: 'Message',
+                    params: { initialTab: 'general' },
+                  })
+                }
               />
             </View>
           </View>

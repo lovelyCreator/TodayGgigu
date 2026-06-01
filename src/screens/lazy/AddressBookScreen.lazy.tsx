@@ -1,12 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the AddressBookScreen component
-const LazyAddressBookScreen = lazy(() => import('../main/profileScreen/settingScreen/AddressBookScreen'));
+const LazyAddressBookScreen = lazy(
+  () => import('../main/profileScreen/settingScreen/AddressBookScreen'),
+);
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const AddressBookScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading address book..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="list" />}>
     <LazyAddressBookScreen {...props} />
   </Suspense>
 );

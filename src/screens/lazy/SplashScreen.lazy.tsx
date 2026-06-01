@@ -1,12 +1,10 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-// Lazy load the SplashScreen component
 const LazySplashScreen = lazy(() => import('../main/SplashScreen'));
 
-// Export a component that wraps the lazy-loaded component with Suspense
 const SplashScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="plain" showHeader={false} />}>
     <LazySplashScreen {...props} />
   </Suspense>
 );

@@ -11,6 +11,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import Icon from '../../../../components/Icon';
+import { ScreenSkeleton } from '../../../../components/Skeleton';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 
@@ -208,14 +209,7 @@ const PaymentMethodsScreen: React.FC = () => {
   );
 
   if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        {renderHeader()}
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
-      </SafeAreaView>
-    );
+    return <ScreenSkeleton variant="list" />;
   }
 
   return (

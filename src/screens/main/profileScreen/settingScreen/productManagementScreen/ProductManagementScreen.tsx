@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Icon from '../../../../../components/Icon';
+import { ScreenSkeleton } from '../../../../../components/Skeleton';
 import { COLORS, FONTS, SPACING } from '../../../../../constants';
 import { RootStackParamList } from '../../../../../types';
 import { useTranslation } from '../../../../../hooks/useTranslation';
@@ -412,11 +413,8 @@ const ProductManagementScreen: React.FC = () => {
 
   const renderBody = () => {
     if (loading) {
-      return (
-        <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color={COLORS.red} />
-        </View>
-      );
+      // Skeleton fills the list area while the seller's products are fetched.
+      return <ScreenSkeleton variant="grid" showHeader={false} />;
     }
     if (error) {
       return (

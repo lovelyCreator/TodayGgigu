@@ -19,6 +19,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../../constants';
 import ProductImage from '../../../components/ProductImage';
+import { ScreenSkeleton } from '../../../components/Skeleton';
 import { RootStackParamList, Product, SearchFilters } from '../../../types';
 
 type SearchResultsScreenRouteProp = RouteProp<RootStackParamList, 'Search'>;
@@ -194,13 +195,7 @@ const SearchResultsScreen: React.FC = () => {
   );
 
   if (loading && products.length === 0) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text>Loading...</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return <ScreenSkeleton variant="grid" />;
   }
 
   return (

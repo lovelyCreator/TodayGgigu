@@ -1,10 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { ScreenSkeleton } from '../../components/Skeleton';
 
-const LazyLiveSellerSearchScreen = lazy(() => import('../main/liveScreen/LiveSellerSearchScreen'));
+const LazyLiveSellerSearchScreen = lazy(
+  () => import('../main/liveScreen/LiveSellerSearchScreen'),
+);
 
 const LiveSellerSearchScreenWithSuspense = (props: any) => (
-  <Suspense fallback={<LoadingSpinner message="Loading seller search..." />}>
+  <Suspense fallback={<ScreenSkeleton variant="list" />}>
     <LazyLiveSellerSearchScreen {...props} />
   </Suspense>
 );
