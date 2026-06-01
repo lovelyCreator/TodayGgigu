@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Animated,
   FlatList,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -34,10 +35,12 @@ import { useWishlistStatus } from '../../../hooks/useWishlistStatus';
 import { useAddToWishlistMutation } from '../../../hooks/useAddToWishlistMutation';
 import { useDeleteFromWishlistMutation } from '../../../hooks/useDeleteFromWishlistMutation';
 import { usePlatformStore } from '../../../store/platformStore';
+import { useToast } from '../../../context/ToastContext';
 import { formatPriceKRW, formatDepositBalance } from '../../../utils/i18nHelpers';
 import { useGetOrdersMutation } from '../../../hooks/useGetOrdersMutation';
 import { mapLocaleToOrdersLang } from '../../../services/orderApi';
 import { mergeProfileOrderCounts } from '../../../utils/orderCounts';
+import { getProfileMoreToLoveGridLayout } from '../../../utils/profileMoreToLoveLayout';
 import HeadsetMicIcon from '../../../assets/icons/HeadsetMicIcon';
 import LocationIcon from '../../../assets/icons/LocationIcon';
 import SettingsIcon from '../../../assets/icons/SettingsIcon';
@@ -70,6 +73,12 @@ import AffiliateMarketingIcon from '../../../assets/icons/AffiliateMarketingIcon
 type ProfileScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Main'>;
 
 const ProfileScreen: React.FC = () => {
+  const { width: windowWidth } = useWindowDimensions();
+  const moreToLoveGrid = useMemo(
+    () => getProfileMoreToLoveGridLayout(windowWidth),
+    [windowWidth],
+  );
+
   const navigation = useNavigation<ProfileScreenNavigationProp>();
   const { user, isAuthenticated, isGuest } = useAuth();
   const currentLocale = useAppSelector((state) => state.i18n.locale) as string;
@@ -117,10 +126,22 @@ const ProfileScreen: React.FC = () => {
   const currentRecommendationsPageRef = useRef<number>(1); // Track current page for callbacks
   const isLoadingMoreRecommendationsRef = useRef(false); // Prevent multiple simultaneous loads
   
-  // Wishlist hooks
-  const { isProductLiked } = useWishlistStatus();
-  const { mutate: addToWishlist } = useAddToWishlistMutation();
-  const { mutate: deleteFromWishlist } = useDeleteFromWishlistMutation();
+  const { showToast } = useToast();
+
+  const refreshWishlistSummary = useCallback(async () => {
+    if (!isAuthenticated || isGuest || !user) return;
+    try {
+      const wishlistRes = await wishlistApi.getWishlist({ discounted: false });
+      if (wishlistRes?.success && wishlistRes?.data) {
+        const data = wishlistRes.data as any;
+        setWishlistCount(data.total ?? data.wishlist?.length ?? 0);
+        const firstItem = data.wishlist?.[0];
+        setWishlistFirstImage(firstItem?.imageUrl || firstItem?.image || '');
+      }
+    } catch {
+      // ignore
+    }
+  }, [isAuthenticated, isGuest, user]);
 
   // If user is not logged in, redirect to Auth (Login) when Profile gains focus
   useFocusEffect(
@@ -156,7 +177,7 @@ const ProfileScreen: React.FC = () => {
         try {
           const [wishlistRes, viewedRes] = await Promise.allSettled([
             wishlistApi.getWishlist({ discounted: false }),
-            productsApi.getRecentlyViewedProducts(100),
+            productsApi.getRecentlyViewedProducts(100, normalizedLocale),
           ]);
           console.log("viewed products: ", viewedRes)
           if (wishlistRes.status === 'fulfilled' && wishlistRes.value?.success && wishlistRes.value?.data) {
@@ -208,6 +229,30 @@ const ProfileScreen: React.FC = () => {
     });
     return text;
   };
+
+  const { isProductLiked, refreshExternalIds, addExternalId, removeExternalId } = useWishlistStatus();
+  const { mutate: addToWishlist } = useAddToWishlistMutation({
+    onSuccess: async () => {
+      showToast(t('home.productAddedToWishlist'), 'success');
+      await refreshExternalIds();
+      await refreshWishlistSummary();
+    },
+    onError: async (error) => {
+      await refreshExternalIds();
+      showToast(error || t('home.failedToAddToWishlist'), 'error');
+    },
+  });
+  const { mutate: deleteFromWishlist } = useDeleteFromWishlistMutation({
+    onSuccess: async () => {
+      showToast(t('home.productRemovedFromWishlist'), 'success');
+      await refreshExternalIds();
+      await refreshWishlistSummary();
+    },
+    onError: async (error) => {
+      await refreshExternalIds();
+      showToast(error || t('home.failedToRemoveFromWishlist'), 'error');
+    },
+  });
 
   // Map language codes to flag emojis
   const getLanguageFlag = (locale: string) => {
@@ -268,8 +313,15 @@ const ProfileScreen: React.FC = () => {
       if (productsArray.length > 0) {
         // Map API response to Product format
         const mappedProducts = productsArray.map((item: any): Product => {
-          const price = parseFloat(item.priceInfo?.price || item.priceInfo?.consignPrice || 0);
-          const originalPrice = parseFloat(item.priceInfo?.consignPrice || item.priceInfo?.price || 0);
+          const priceInfo = item.priceInfo;
+          const originalPrice = priceInfo
+            ? parseFloat(priceInfo.price || priceInfo.consignPrice || '0')
+            : parseFloat(item.price || '0');
+          const price = priceInfo
+            ? parseFloat(
+                priceInfo.promotionPrice || priceInfo.price || priceInfo.consignPrice || '0',
+              )
+            : originalPrice;
           const discount = originalPrice > price && originalPrice > 0
             ? Math.round(((originalPrice - price) / originalPrice) * 100)
             : 0;
@@ -279,7 +331,7 @@ const ProfileScreen: React.FC = () => {
             externalId: item.offerId?.toString() || '',
             offerId: item.offerId?.toString() || '',
             name: normalizedLocale === 'zh' ? (item.subject || item.subjectTrans || '') : (item.subjectTrans || item.subject || ''),
-            image: item.imageUrl || '',
+            image: item.imageUrl || item.image || '',
             price: price,
             originalPrice: originalPrice,
             discount: discount,
@@ -401,39 +453,48 @@ const ProfileScreen: React.FC = () => {
     setRecommendationsOffset((prev) => prev + 1);
   }, [recommendationsHasMore, recommendationsLoading]);
 
-  // Toggle wishlist function
-  const toggleWishlist = async (product: Product) => {
-    if (!user || isGuest) {
-      return;
-    }
-
-    const externalId = 
-      (product as any).externalId?.toString() ||
-      (product as any).offerId?.toString() ||
-      '';
-
-    if (!externalId) {
-      return;
-    }
-
-    const isLiked = isProductLiked(product);
-    const source = (product as any).source || selectedPlatform || '1688';
-    const country = currentLocale || 'en';
-
-    if (isLiked) {
-      deleteFromWishlist(externalId);
-    } else {
-      const imageUrl = product.image || '';
-      const price = product.price || 0;
-      const title = product.name || '';
-
-      if (!imageUrl || !title || price <= 0) {
+  const toggleWishlist = useCallback(
+    async (product: Product) => {
+      if (!user || isGuest) {
+        showToast(t('home.pleaseLogin'), 'warning');
         return;
       }
 
-      addToWishlist({ offerId: externalId, platform: source });
-    }
-  };
+      const externalId =
+        (product as any).externalId?.toString() ||
+        (product as any).offerId?.toString() ||
+        product.id?.toString() ||
+        '';
+
+      if (!externalId) {
+        showToast(t('home.invalidProductId'), 'error');
+        return;
+      }
+
+      const isLiked = isProductLiked(product);
+      const source = (product as any).source || selectedPlatform || '1688';
+
+      if (isLiked) {
+        await removeExternalId(externalId);
+        deleteFromWishlist(externalId);
+      } else {
+        await addExternalId(externalId);
+        addToWishlist({ offerId: externalId, platform: source });
+      }
+    },
+    [
+      user,
+      isGuest,
+      showToast,
+      t,
+      isProductLiked,
+      selectedPlatform,
+      removeExternalId,
+      deleteFromWishlist,
+      addExternalId,
+      addToWishlist,
+    ],
+  );
 
   // Helper function to navigate to product detail
   const navigateToProductDetail = async (
@@ -928,15 +989,8 @@ const ProfileScreen: React.FC = () => {
       return null;
     }
     
-    const handleLike = async () => {
-      if (!user || isGuest) {
-        return;
-      }
-      try {
-        await toggleWishlist(product);
-      } catch (error) {
-        // Error toggling wishlist
-      }
+    const handleLike = () => {
+      toggleWishlist(product);
     };
     
     return (
@@ -944,6 +998,7 @@ const ProfileScreen: React.FC = () => {
         key={`moretolove-${product.id || index}`}
         product={product}
         variant="moreToLove"
+        cardWidth={moreToLoveGrid.cardWidth}
         onPress={() => handleProductPress(product)}
         onLikePress={handleLike}
         isLiked={isProductLiked(product)}
@@ -952,7 +1007,7 @@ const ProfileScreen: React.FC = () => {
         showRating={true}
       />
     );
-  }, [user, isGuest, toggleWishlist, handleProductPress, isProductLiked]);
+  }, [user, isGuest, toggleWishlist, handleProductPress, isProductLiked, moreToLoveGrid.cardWidth]);
 
   // Render footer for "More to Love" loading indicator
   const renderMoreToLoveFooter = () => {
@@ -1040,10 +1095,17 @@ const ProfileScreen: React.FC = () => {
   const renderMoreToLove = () => {
     const productsToDisplay = recommendationsProducts;
     const sectionTitle = t('profile.worthViewingProducts');
+    const moreToLoveSectionStyle = {
+      paddingHorizontal: moreToLoveGrid.horizontalInset,
+    };
+    const moreToLoveProductRowStyle = {
+      gap: moreToLoveGrid.columnGap,
+      marginBottom: moreToLoveGrid.rowGap,
+    };
 
     if (recommendationsLoading && productsToDisplay.length === 0) {
       return (
-        <View style={styles.moreToLoveSection}>
+        <View style={[styles.moreToLoveSection, moreToLoveSectionStyle]}>
           <Text style={styles.sectionTitle}>{sectionTitle}</Text>
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="small" color={COLORS.primary} />
@@ -1055,7 +1117,7 @@ const ProfileScreen: React.FC = () => {
 
     if (recommendationsError && productsToDisplay.length === 0) {
       return (
-        <View style={styles.moreToLoveSection}>
+        <View style={[styles.moreToLoveSection, moreToLoveSectionStyle]}>
           <Text style={styles.sectionTitle}>{sectionTitle}</Text>
           <View style={styles.loadingContainer}>
             <Text style={styles.errorDetailText}>
@@ -1091,7 +1153,7 @@ const ProfileScreen: React.FC = () => {
     }
 
     return (
-      <View style={styles.moreToLoveSection}>
+      <View style={[styles.moreToLoveSection, moreToLoveSectionStyle]}>
         <Text style={styles.sectionTitle}>{sectionTitle}</Text>
         <FlatList
           data={productsToDisplay}
@@ -1100,7 +1162,7 @@ const ProfileScreen: React.FC = () => {
           numColumns={2}
           scrollEnabled={false}
           nestedScrollEnabled
-          columnWrapperStyle={styles.productRow}
+          columnWrapperStyle={moreToLoveProductRowStyle}
           removeClippedSubviews
           maxToRenderPerBatch={10}
           windowSize={5}
@@ -1634,7 +1696,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.red,
   },
   moreToLoveSection: {
-    paddingHorizontal: SPACING.md,
     paddingTop: 0,
     paddingBottom: SPACING.lg,
     marginTop: 10,
@@ -1675,10 +1736,6 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.md,
     color: COLORS.white,
     fontWeight: '600',
-  },
-  productRow: {
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.xs,
   },
   loadingMoreContainer: {
     paddingVertical: SPACING.lg,

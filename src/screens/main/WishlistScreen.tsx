@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import {
   Modal,
 } from 'react-native';
 import Icon from '../../components/Icon';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import TuneIcon from '../../assets/icons/TuneIcon';
 import ImageSearchResultsModal from './searchScreen/ImageSearchResultsModal';
 
@@ -26,16 +26,33 @@ import { useAppSelector } from '../../store/hooks';
 import { useGetWishlistMutation } from '../../hooks/useGetWishlistMutation';
 import { useDeleteFromWishlistMutation } from '../../hooks/useDeleteFromWishlistMutation';
 import { useDeleteFromWishlistBatchMutation } from '../../hooks/useDeleteFromWishlistBatchMutation';
-import { useAddToCartMutation } from '../../hooks/useAddToCartMutation';
+import { cartApi, type AddToCartRequest } from '../../services/cartApi';
+import {
+  normalizeWishlistTimeFilter,
+  type WishlistApiTimeFilter,
+} from '../../services/wishlistApi';
 import { useWishlistStatus } from '../../hooks/useWishlistStatus';
 import { useToast } from '../../context/ToastContext';
 import { translations } from '../../i18n/translations';
-import { getLocalizedText } from '../../utils/i18nHelpers';
+import ProductShareModal from '../../components/ProductShareModal';
+import { buildProductSharePageUrl } from '../../utils/productShareLinks';
+import {
+  formatPriceKRW,
+  getLocalizedText,
+  resolveViewedProductTitle,
+} from '../../utils/i18nHelpers';
+import { normalizeLocale } from '../../i18n/translate';
 
 const { width } = Dimensions.get('window');
 
-const WISHLIST_COLLECTION_TIME_KEYS = ['7d', '30d', '90d', '180d', '365d'] as const;
-type WishlistCollectionTimeKey = (typeof WISHLIST_COLLECTION_TIME_KEYS)[number];
+const WISHLIST_COLLECTION_TIME_KEYS: readonly WishlistApiTimeFilter[] = [
+  '7d',
+  '30d',
+  '90d',
+  '6m',
+  '1y',
+];
+type WishlistCollectionTimeKey = WishlistApiTimeFilter;
 
 const WishlistScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -47,7 +64,6 @@ const WishlistScreen: React.FC = () => {
   const [storeGroups, setStoreGroups] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [hasProcessedProductDetail, setHasProcessedProductDetail] = useState(false);
-  const hasFetchedRef = useRef(false);
   const [selectedPlatformTab, setSelectedPlatformTab] = useState('All');
   const [showItemStatusModal, setShowItemStatusModal] = useState(false);
   const itemStatusButtonRef = useRef<View>(null);
@@ -72,6 +88,13 @@ const WishlistScreen: React.FC = () => {
   const [similarSearchVisible, setSimilarSearchVisible] = useState(false);
   const [similarSearchBase64, setSimilarSearchBase64] = useState('');
   const [similarSearchUri, setSimilarSearchUri] = useState('');
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [shareTarget, setShareTarget] = useState<{
+    productUrl: string;
+    productName: string;
+    shareMessage: string;
+  } | null>(null);
+  const [isBulkAddingToCart, setIsBulkAddingToCart] = useState(false);
   
   const { refreshExternalIds } = useWishlistStatus();
   const { showToast } = useToast();
@@ -79,6 +102,7 @@ const WishlistScreen: React.FC = () => {
   // Get platform and locale (defined early so they can be used in callbacks)
   const { selectedPlatform } = usePlatformStore();
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
+  const appLocale = normalizeLocale(locale);
   
   // Translation function (defined early so it can be used in callbacks)
   const t = useCallback((key: string) => {
@@ -101,8 +125,8 @@ const WishlistScreen: React.FC = () => {
         '7d': t('profile.wishlistWithin7Days'),
         '30d': t('profile.wishlistWithin30Days'),
         '90d': t('profile.wishlistWithin90Days'),
-        '180d': t('profile.wishlistSixMonthsAgo'),
-        '365d': t('profile.wishlistOneYearAgo'),
+        '6m': t('profile.wishlistSixMonthsAgo'),
+        '1y': t('profile.wishlistOneYearAgo'),
       };
       return labels[key];
     },
@@ -123,8 +147,21 @@ const WishlistScreen: React.FC = () => {
     return String(value);
   }, [locale]);
 
+  const resolveWishlistItemTitle = useCallback(
+    (item: Record<string, unknown>) => {
+      const fromFields = resolveViewedProductTitle(item, appLocale);
+      if (fromFields) return fromFields;
+      return resolveText(item.subjectMultiLang ?? item.title) || '';
+    },
+    [appLocale, resolveText],
+  );
+
   const mapWishlistItem = useCallback((item: any) => {
-    const nameStr = resolveText(item.subjectMultiLang ?? item.title) || '';
+    const raw =
+      item && typeof item === 'object'
+        ? (item as Record<string, unknown>)
+        : {};
+    const nameStr = resolveWishlistItemTitle(raw);
     const storeNameStr = resolveText(item.storeNameMultiLang ?? item.storeName) || '';
     return {
       id: item.externalId?.toString() || item._id?.toString() || '',
@@ -155,103 +192,235 @@ const WishlistScreen: React.FC = () => {
       storeId: item.storeId, storeName: storeNameStr,
       originalData: item,
     };
-  }, [resolveText]);
-  
-  // Add to cart mutation (calls cart API)
-  const { mutate: addToCartApi, isLoading: isAddToCartLoading } = useAddToCartMutation({
-    onSuccess: () => {
-      showToast(t('product.addedToCart') || 'Added to cart', 'success');
-    },
-    onError: (error) => {
-      showToast(error || t('product.failedToAdd') || 'Failed to add to cart', 'error');
-    },
-  });
+  }, [resolveText, resolveWishlistItemTitle]);
 
-  // Build AddToCartRequest from wishlist item and call API (uses originalData.skuInfo when available)
-  const addToCart = async (product: any, quantity: number = 1) => {
-    const offerIdNum = parseInt(product.externalId || product.offerId || product.id || '0', 10);
-    if (!offerIdNum) {
-      showToast(t('product.invalidProductId') || 'Invalid product', 'error');
-      return;
-    }
-    const raw = product.originalData;
-    const price = product.price ?? raw?.price ?? 0;
-    const priceStr = String(price);
-    const skuInfoFromApi = raw?.skuInfo;
-    const skuInfo = skuInfoFromApi
-      ? {
-          skuId: skuInfoFromApi.skuId ?? offerIdNum,
-          specId: skuInfoFromApi.specId ?? String(offerIdNum),
-          price: skuInfoFromApi.price ?? priceStr,
-          amountOnSale: skuInfoFromApi.amountOnSale ?? 999999,
-          consignPrice: skuInfoFromApi.consignPrice ?? skuInfoFromApi.price ?? priceStr,
-          cargoNumber: skuInfoFromApi.cargoNumber,
-          skuAttributes: (skuInfoFromApi.skuAttributes || []).map((attr: any) => ({
-            attributeId: attr.attributeId ?? 0,
-            attributeName: attr.attributeName ?? '',
-            attributeNameTrans: attr.attributeNameTrans ?? attr.attributeName ?? '',
-            value: attr.value ?? '',
-            valueTrans: attr.valueTrans ?? attr.value ?? '',
-            skuImageUrl: attr.skuImageUrl,
-          })),
-          fenxiaoPriceInfo: skuInfoFromApi.fenxiaoPriceInfo || { offerPrice: priceStr },
-        }
-      : {
-          skuId: offerIdNum,
-          specId: String(offerIdNum),
-          price: priceStr,
-          amountOnSale: 999999,
-          consignPrice: priceStr,
-          skuAttributes: [] as Array<{ attributeId: number; attributeName: string; attributeNameTrans: string; value: string; valueTrans: string; skuImageUrl?: string }>,
-          fenxiaoPriceInfo: { offerPrice: priceStr },
-        };
-    const request = {
-      offerId: offerIdNum,
-      categoryId: parseInt(raw?.categoryId || product.category?.id || '0', 10) || 0,
-      subject: product.name || product.title || raw?.subject || '',
-      subjectTrans: product.name || product.title || raw?.subjectTrans || raw?.subject || '',
-      imageUrl: product.image || product.images?.[0] || raw?.imageUrl || '',
-      promotionUrl: raw?.promotionUrl,
-      skuInfo,
-      companyName: product.seller?.name || product.storeName || raw?.storeName || (typeof raw?.companyName === 'string' ? raw.companyName : ''),
-      sellerOpenId: product.seller?.id || product.storeId || raw?.storeId || raw?.sellerOpenId || '',
-      quantity,
-      minOrderQuantity: raw?.minOrderQuantity ?? product.minOrderQuantity ?? 1,
-    };
-    return addToCartApi(request);
-  };
+  const remapWishlistItemTitles = useCallback(
+    (items: any[]) =>
+      items.map((product) => {
+        const raw = product?.originalData;
+        if (!raw || typeof raw !== 'object') return product;
+        const nameStr = resolveWishlistItemTitle(raw as Record<string, unknown>);
+        return { ...product, name: nameStr, title: nameStr };
+      }),
+    [resolveWishlistItemTitle],
+  );
+
+  useEffect(() => {
+    setWishlistItems((prev) => remapWishlistItemTitles(prev));
+    setStoreGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        items: remapWishlistItemTitles(group.items || []),
+      })),
+    );
+  }, [appLocale, remapWishlistItemTitles]);
   
+  const buildAddToCartRequest = useCallback(
+    (product: any, quantity: number = 1): AddToCartRequest | null => {
+      const offerIdNum = parseInt(
+        product.externalId || product.offerId || product.id || '0',
+        10,
+      );
+      if (!offerIdNum) return null;
+
+      const raw = product.originalData;
+      const price = product.price ?? raw?.price ?? 0;
+      const priceStr = String(price);
+      const skuInfoFromApi = raw?.skuInfo;
+      const skuInfo = skuInfoFromApi
+        ? {
+            skuId: skuInfoFromApi.skuId ?? offerIdNum,
+            specId: skuInfoFromApi.specId ?? String(offerIdNum),
+            price: skuInfoFromApi.price ?? priceStr,
+            amountOnSale: skuInfoFromApi.amountOnSale ?? 999999,
+            consignPrice:
+              skuInfoFromApi.consignPrice ?? skuInfoFromApi.price ?? priceStr,
+            cargoNumber: skuInfoFromApi.cargoNumber,
+            skuAttributes: (skuInfoFromApi.skuAttributes || []).map(
+              (attr: any) => ({
+                attributeId: attr.attributeId ?? 0,
+                attributeName: attr.attributeName ?? '',
+                attributeNameTrans:
+                  attr.attributeNameTrans ?? attr.attributeName ?? '',
+                value: attr.value ?? '',
+                valueTrans: attr.valueTrans ?? attr.value ?? '',
+                skuImageUrl: attr.skuImageUrl,
+              }),
+            ),
+            fenxiaoPriceInfo: skuInfoFromApi.fenxiaoPriceInfo || {
+              offerPrice: priceStr,
+            },
+          }
+        : {
+            skuId: offerIdNum,
+            specId: String(offerIdNum),
+            price: priceStr,
+            amountOnSale: 999999,
+            consignPrice: priceStr,
+            skuAttributes: [] as Array<{
+              attributeId: number;
+              attributeName: string;
+              attributeNameTrans: string;
+              value: string;
+              valueTrans: string;
+              skuImageUrl?: string;
+            }>,
+            fenxiaoPriceInfo: { offerPrice: priceStr },
+          };
+
+      return {
+        offerId: offerIdNum,
+        source: product.source || selectedPlatform || '1688',
+        categoryId:
+          parseInt(raw?.categoryId || product.category?.id || '0', 10) || 0,
+        subject: product.name || product.title || raw?.subject || '',
+        subjectTrans:
+          product.name ||
+          product.title ||
+          raw?.subjectTrans ||
+          raw?.subject ||
+          '',
+        imageUrl: product.image || product.images?.[0] || raw?.imageUrl || '',
+        promotionUrl: raw?.promotionUrl,
+        skuInfo,
+        companyName:
+          product.seller?.name ||
+          product.storeName ||
+          raw?.storeName ||
+          (typeof raw?.companyName === 'string' ? raw.companyName : ''),
+        sellerOpenId:
+          product.seller?.id ||
+          product.storeId ||
+          raw?.storeId ||
+          raw?.sellerOpenId ||
+          '',
+        quantity,
+        minOrderQuantity:
+          raw?.minOrderQuantity ?? product.minOrderQuantity ?? 1,
+      };
+    },
+    [selectedPlatform],
+  );
+
+  const addProductToCart = useCallback(
+    async (
+      product: any,
+      quantity: number = 1,
+      options?: { silent?: boolean },
+    ): Promise<boolean> => {
+      const request = buildAddToCartRequest(product, quantity);
+      if (!request) {
+        if (!options?.silent) {
+          showToast(t('product.invalidProductId') || 'Invalid product', 'error');
+        }
+        return false;
+      }
+
+      try {
+        const response = await cartApi.addToCart(request);
+        if (response.success && response.data) {
+          return true;
+        }
+        if (!options?.silent) {
+          showToast(
+            response.message ||
+              t('product.failedToAdd') ||
+              'Failed to add to cart',
+            'error',
+          );
+        }
+        return false;
+      } catch {
+        if (!options?.silent) {
+          showToast(
+            t('product.failedToAdd') || 'Failed to add to cart',
+            'error',
+          );
+        }
+        return false;
+      }
+    },
+    [buildAddToCartRequest, showToast, t],
+  );
+
+  const addToCart = useCallback(
+    async (product: any, quantity: number = 1) => {
+      const ok = await addProductToCart(product, quantity);
+      if (ok) {
+        showToast(t('product.addedToCart') || 'Added to cart', 'success');
+      }
+      return ok;
+    },
+    [addProductToCart, showToast, t],
+  );
+  
+  const buildWishlistParams = useCallback(
+    (grouped = groupByStore) => ({
+      discounted: false,
+      sort: sortBy === 'newest' ? 'recently_saved' : 'earliest',
+      timeFilter: normalizeWishlistTimeFilter(
+        tempFilters.collectionTime.length > 0
+          ? tempFilters.collectionTime[0]
+          : '1y',
+      ),
+      ...(grouped ? { groupByStore: true } : {}),
+    }),
+    [groupByStore, sortBy, tempFilters.collectionTime],
+  );
+
   // Get wishlist mutation
   const { mutate: fetchWishlist, isLoading: wishlistLoading } = useGetWishlistMutation({
     onSuccess: (data) => {
-      // Handle grouped response
-      if (data?.wishlistByStore && Array.isArray(data.wishlistByStore)) {
-        const mappedGroups = data.wishlistByStore.map((group: any) => ({
+      const byStore = Array.isArray(data?.wishlistByStore)
+        ? data.wishlistByStore
+        : [];
+      const flat = Array.isArray(data?.wishlist) ? data.wishlist : [];
+
+      // API may return wishlistByStore: [] together with wishlist: [...] — [] is truthy in JS,
+      // so only use the grouped branch when it actually has groups (or groupByStore is on).
+      if (groupByStore && byStore.length > 0) {
+        const mappedGroups = byStore.map((group: any) => ({
           storeId: group.storeId,
-          storeName: resolveText(group.storeNameMultiLang ?? group.storeName) || group.storeName,
-          items: group.items.map((item: any) => mapWishlistItem(item)),
+          storeName:
+            resolveText(group.storeNameMultiLang ?? group.storeName) ||
+            group.storeName,
+          items: (group.items || []).map((item: any) => mapWishlistItem(item)),
         }));
         setStoreGroups(mappedGroups);
+        setWishlistItems(mappedGroups.flatMap((group) => group.items));
         return;
       }
-      // Handle flat response
-      if (data?.wishlist) {
-        setWishlistItems(data.wishlist.map((item: any) => mapWishlistItem(item)));
-      } else {
-        setWishlistItems([]);
-      }
+
+      setStoreGroups([]);
+      setWishlistItems(flat.map((item: any) => mapWishlistItem(item)));
     },
     onError: (error) => {
       showToast(error || t('profile.wishlistFailedToFetch'), 'error');
     },
   });
 
+  const fetchWishlistRef = useRef(fetchWishlist);
+  fetchWishlistRef.current = fetchWishlist;
+  const buildWishlistParamsRef = useRef(buildWishlistParams);
+  buildWishlistParamsRef.current = buildWishlistParams;
+  const isFetchingWishlistRef = useRef(false);
+
+  const reloadWishlist = useCallback(() => {
+    if (!isAuthenticated || isFetchingWishlistRef.current) return;
+    isFetchingWishlistRef.current = true;
+    fetchWishlistRef
+      .current(buildWishlistParamsRef.current())
+      .finally(() => {
+        isFetchingWishlistRef.current = false;
+      });
+  }, [isAuthenticated]);
+
   // Delete from wishlist mutation
   const { mutate: deleteFromWishlist } = useDeleteFromWishlistMutation({
     onSuccess: () => {
       showToast(t('product.productRemovedFromWishlist'), 'success');
       refreshExternalIds();
-      fetchWishlist();
+      reloadWishlist();
     },
     onError: (error) => {
       showToast(error || t('product.failedToRemoveFromWishlist'), 'error');
@@ -263,7 +432,7 @@ const WishlistScreen: React.FC = () => {
     onSuccess: () => {
       showToast(t('product.productRemovedFromWishlist'), 'success');
       refreshExternalIds();
-      fetchWishlist();
+      reloadWishlist();
       setSelectedItems([]);
     },
     onError: (error) => {
@@ -272,9 +441,7 @@ const WishlistScreen: React.FC = () => {
   });
 
   const refreshWishlist = () => {
-    if (isAuthenticated) {
-      fetchWishlist();
-    }
+    reloadWishlist();
   };
 
   const toggleWishlist = async (product: any) => {
@@ -315,16 +482,21 @@ const WishlistScreen: React.FC = () => {
     });
   };
 
-  // Fetch wishlist only once when component mounts
-  useEffect(() => {
-    if (isAuthenticated && !hasFetchedRef.current) {
-      fetchWishlist();
-      hasFetchedRef.current = true;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  const skipFilterReloadRef = useRef(true);
 
-  // Re-fetch with groupByStore param when toggle changes — handled by the combined effect above
+  useFocusEffect(
+    useCallback(() => {
+      reloadWishlist();
+    }, [reloadWishlist]),
+  );
+
+  useEffect(() => {
+    if (skipFilterReloadRef.current) {
+      skipFilterReloadRef.current = false;
+      return;
+    }
+    reloadWishlist();
+  }, [sortBy, tempFilters.collectionTime, groupByStore, reloadWishlist]);
 
   // If not authenticated, show login prompt
   if (!isAuthenticated) {
@@ -363,7 +535,7 @@ const WishlistScreen: React.FC = () => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchWishlist(buildWishlistParams(groupByStore));
+    await fetchWishlist(buildWishlistParams());
     setRefreshing(false);
   };
 
@@ -462,10 +634,7 @@ const WishlistScreen: React.FC = () => {
         </Text>
       </View>
       <View style={styles.headerRight}>
-        <TouchableOpacity style={styles.headerIcon}>
-          <Icon name="search" size={24} color={COLORS.black} />
-        </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.headerIcon}
           onPress={() => {
             if (isManagementMode) {
@@ -479,9 +648,6 @@ const WishlistScreen: React.FC = () => {
           <Text style={styles.managementText}>
             {isManagementMode ? t('profile.wishlistExit') : t('profile.wishlistManagement')}
           </Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.headerIcon}>
-          <Icon name="ellipsis-horizontal" size={24} color={COLORS.black} />
         </TouchableOpacity>
       </View>
     </View>
@@ -610,23 +776,10 @@ const WishlistScreen: React.FC = () => {
     );
   };
 
-  // Build API params from current filter state
-  const buildWishlistParams = (grouped = false) => ({
-    discounted: false,
-    sort: sortBy === 'newest' ? 'recently_saved' : 'earliest',
-    timeFilter: tempFilters.collectionTime.length > 0
-      ? (tempFilters.collectionTime[0] as WishlistCollectionTimeKey)
-      : '90d',
-    ...(grouped ? { groupByStore: true } : {}),
-  });
-
-  // Re-fetch when sort or collection time filter changes
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchWishlist(buildWishlistParams(groupByStore));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortBy, tempFilters.collectionTime, groupByStore]);
+  const hasWishlistContent =
+    groupByStore && storeGroups.length > 0
+      ? storeGroups.some((group) => (group.items?.length ?? 0) > 0)
+      : wishlistItems.length > 0;
 
   // Filter wishlist items by platform (client-side only — API handles sort/time)
   const filteredItems = wishlistItems
@@ -645,6 +798,126 @@ const WishlistScreen: React.FC = () => {
       const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
       return sortBy === 'newest' ? dateB - dateA : dateA - dateB;
     });
+
+  const findWishlistItemById = useCallback(
+    (id: string) => {
+      const fromFiltered = filteredItems.find(
+        (i: any) => i.id === id || i._id === id,
+      );
+      if (fromFiltered) return fromFiltered;
+      for (const group of storeGroups) {
+        const item = group.items?.find(
+          (i: any) => i.id === id || i._id === id,
+        );
+        if (item) return item;
+      }
+      return wishlistItems.find((i: any) => i.id === id || i._id === id);
+    },
+    [filteredItems, storeGroups, wishlistItems],
+  );
+
+  const handleShare = useCallback(() => {
+    if (selectedItems.length === 0) {
+      showToast(t('profile.wishlistSelectToShare'), 'warning');
+      return;
+    }
+
+    const product = findWishlistItemById(selectedItems[0]);
+    const productId =
+      product?.offerId || product?.externalId || product?.id || '';
+    const productName = product?.name || product?.title || '';
+
+    if (!productId || !productName) {
+      showToast(t('product.invalidProductData'), 'error');
+      return;
+    }
+
+    const source = product.source || selectedPlatform || '1688';
+    const productUrl = buildProductSharePageUrl({
+      productId: String(productId),
+      source,
+      country: locale,
+    });
+    const shareMessage = t('product.shareMessage')
+      .replace('{productName}', productName)
+      .replace('{price}', formatPriceKRW(product.price || 0));
+
+    setShareTarget({ productUrl, productName, shareMessage });
+    setShareModalVisible(true);
+  }, [
+    selectedItems,
+    findWishlistItemById,
+    selectedPlatform,
+    locale,
+    t,
+    showToast,
+  ]);
+
+  const managementVisibleItems = useMemo(() => {
+    if (groupByStore && storeGroups.length > 0) {
+      return storeGroups.flatMap((group) => group.items || []);
+    }
+    return filteredItems;
+  }, [groupByStore, storeGroups, filteredItems]);
+
+  const handleAddSelectedToCart = useCallback(async () => {
+    if (selectedItems.length === 0) {
+      showToast(t('profile.wishlistSelectToAddCart'), 'warning');
+      return;
+    }
+
+    const products = selectedItems
+      .map((id) => findWishlistItemById(id))
+      .filter(Boolean);
+
+    if (products.length === 0) {
+      showToast(t('product.invalidProductData'), 'error');
+      return;
+    }
+
+    setIsBulkAddingToCart(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const product of products) {
+      const ok = await addProductToCart(product, 1, { silent: true });
+      if (ok) {
+        successCount += 1;
+      } else {
+        failCount += 1;
+      }
+    }
+
+    setIsBulkAddingToCart(false);
+
+    if (successCount > 0 && failCount === 0) {
+      showToast(
+        formatWithCount('profile.wishlistAddedToCartCount', successCount),
+        'success',
+      );
+    } else if (successCount > 0 && failCount > 0) {
+      showToast(
+        (t('profile.wishlistPartialAddToCart') || '')
+          .replace('{success}', String(successCount))
+          .replace('{failed}', String(failCount)),
+        'warning',
+      );
+    } else {
+      showToast(
+        t('profile.wishlistAddToCartFailed') ||
+          t('product.failedToAdd') ||
+          'Failed to add to cart',
+        'error',
+      );
+    }
+  }, [
+    selectedItems,
+    findWishlistItemById,
+    addProductToCart,
+    showToast,
+    t,
+    formatWithCount,
+  ]);
 
   const renderProductItem = ({ item, index }: { item: any; index: number }) => {
     const isSelected = selectedItems.includes(item.id);
@@ -753,7 +1026,7 @@ const WishlistScreen: React.FC = () => {
       {renderInfoBar()}
       {renderFilterBar()}
       
-      {wishlistItems.length === 0 ? (
+      {!hasWishlistContent ? (
         renderEmptyState()
       ) : groupByStore ? (
         // Group by store — use API response
@@ -793,20 +1066,25 @@ const WishlistScreen: React.FC = () => {
       )}
       
       {/* Management Mode Footer */}
-      {isManagementMode && wishlistItems.length > 0 && (
+      {isManagementMode && managementVisibleItems.length > 0 && (
         <View style={styles.managementFooter}>
           <TouchableOpacity 
             style={styles.selectAllButton}
             onPress={() => {
-              if (selectedItems.length === filteredItems.length) {
+              if (
+                selectedItems.length === managementVisibleItems.length &&
+                managementVisibleItems.length > 0
+              ) {
                 setSelectedItems([]);
               } else {
-                setSelectedItems(filteredItems.map(item => item.id));
+                setSelectedItems(
+                  managementVisibleItems.map((item) => item.id),
+                );
               }
             }}
           >
-            <View style={[styles.checkbox, selectedItems.length === filteredItems.length && filteredItems.length > 0 && styles.checkboxChecked]}>
-              {selectedItems.length === filteredItems.length && filteredItems.length > 0 && (
+            <View style={[styles.checkbox, selectedItems.length === managementVisibleItems.length && managementVisibleItems.length > 0 && styles.checkboxChecked]}>
+              {selectedItems.length === managementVisibleItems.length && managementVisibleItems.length > 0 && (
                 <Icon name="checkmark" size={16} color={COLORS.white} />
               )}
             </View>
@@ -814,37 +1092,24 @@ const WishlistScreen: React.FC = () => {
           </TouchableOpacity>
           
           <View style={styles.footerActions}>
-            <TouchableOpacity 
-              style={[styles.footerButton, isAddToCartLoading && styles.footerButtonDisabled]}
-              disabled={isAddToCartLoading || selectedItems.length === 0}
-              onPress={() => {
-                if (selectedItems.length === 0) {
-                  showToast(t('profile.wishlistSelectToAddCart'), 'warning');
-                  return;
-                }
-                const itemsToAdd = selectedItems
-                  .map((id) => filteredItems.find((i) => i.id === id || i._id === id))
-                  .filter(Boolean);
-                itemsToAdd.forEach((item) => addToCart(item, 1));
-              }}
+            <TouchableOpacity
+              style={[
+                styles.footerButton,
+                isBulkAddingToCart && styles.footerButtonDisabled,
+              ]}
+              disabled={isBulkAddingToCart || selectedItems.length === 0}
+              onPress={handleAddSelectedToCart}
             >
-              {isAddToCartLoading ? (
+              {isBulkAddingToCart ? (
                 <ActivityIndicator size="small" color={COLORS.white} />
               ) : (
                 <Text style={styles.footerButtonText}>{t('profile.wishlistAddToCart')}</Text>
               )}
             </TouchableOpacity>
             
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.footerButton}
-              onPress={() => {
-                // Share functionality
-                if (selectedItems.length === 0) {
-                  showToast(t('profile.wishlistSelectToShare'), 'warning');
-                } else {
-                  showToast(formatWithCount('profile.wishlistSharingCount', selectedItems.length), 'success');
-                }
-              }}
+              onPress={handleShare}
             >
               <Text style={styles.footerButtonText}>{t('profile.wishlistShare')}</Text>
             </TouchableOpacity>
@@ -979,6 +1244,17 @@ const WishlistScreen: React.FC = () => {
           onClose={() => setSimilarSearchVisible(false)}
           imageUri={similarSearchUri}
           imageBase64={similarSearchBase64}
+        />
+      )}
+
+      {shareTarget && (
+        <ProductShareModal
+          visible={shareModalVisible}
+          onClose={() => setShareModalVisible(false)}
+          productUrl={shareTarget.productUrl}
+          productName={shareTarget.productName}
+          shareMessage={shareTarget.shareMessage}
+          onShareError={(msg) => showToast(msg, 'error')}
         />
       )}
 

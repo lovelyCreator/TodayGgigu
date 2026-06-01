@@ -4,12 +4,14 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   FlatList,
   Image,
   Modal,
   ActivityIndicator,
+  StatusBar,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../../../components/Icon';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../../constants';
@@ -18,20 +20,18 @@ import { translations } from '../../../i18n/translations';
 import { productsApi } from '../../../services/productsApi';
 import { wishlistApi } from '../../../services/wishlistApi';
 import { useToast } from '../../../context/ToastContext';
-
-interface ViewedProduct {
-  productId: string;
-  source: string;
-  viewedAt: string;
-  photoUrl: string;
-  title: string;
-  price: number;
-  platform: string;
-}
+import ProductShareModal from '../../../components/ProductShareModal';
+import { buildProductSharePageUrl } from '../../../utils/productShareLinks';
+import {
+  formatPriceKRW,
+  type RecentlyViewedProduct,
+} from '../../../utils/i18nHelpers';
+import { normalizeLocale } from '../../../i18n/translate';
 
 const ViewedProductsScreen: React.FC = () => {
   const navigation = useNavigation();
   const locale = useAppSelector((s) => s.i18n.locale);
+  const appLocale = normalizeLocale(locale);
   const { showToast } = useToast();
   const t = (key: string) => {
     const keys = key.split('.');
@@ -51,7 +51,7 @@ const ViewedProductsScreen: React.FC = () => {
   const [filteredDate, setFilteredDate] = useState<string | null>(null); // Track applied date filter
   const filterButtonRef = useRef<any>(null);
   const [filterButtonLayout, setFilterButtonLayout] = useState({ x: 0, y: 0, width: 0, height: 0 });
-  const [viewedProducts, setViewedProducts] = useState<ViewedProduct[]>([]);
+  const [viewedProducts, setViewedProducts] = useState<RecentlyViewedProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -60,11 +60,17 @@ const ViewedProductsScreen: React.FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const isLoadingMoreRef = useRef(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [shareTarget, setShareTarget] = useState<{
+    productUrl: string;
+    productName: string;
+    shareMessage: string;
+  } | null>(null);
 
-  // Fetch viewed products on mount
+  // Fetch viewed products on mount and when app language changes
   useEffect(() => {
     fetchViewedProducts(1, true);
-  }, []);
+  }, [appLocale]);
 
   // Load more when currentPage changes
   useEffect(() => {
@@ -83,7 +89,7 @@ const ViewedProductsScreen: React.FC = () => {
       }
       
       const limit = 20;
-      const response = await productsApi.getRecentlyViewedProducts(limit);
+      const response = await productsApi.getRecentlyViewedProducts(limit, appLocale);
       
       if (response.success && response.data) {
         const newProducts = response.data.items;
@@ -135,7 +141,7 @@ const ViewedProductsScreen: React.FC = () => {
     }
     acc[date].push(product);
     return acc;
-  }, {} as Record<string, ViewedProduct[]>);
+  }, {} as Record<string, RecentlyViewedProduct[]>);
 
   // Convert to array and sort by date (newest first)
   const sortedGroups = Object.entries(groupedProducts).sort((a, b) => 
@@ -197,10 +203,39 @@ const ViewedProductsScreen: React.FC = () => {
     }
   };
 
+  const getShareCountry = () => appLocale;
+
   const handleShare = () => {
-    // TODO: Implement share
-    console.log('Share:', Array.from(selectedProductIds));
-    showToast(t('profile.shareFeatureComingSoon'), 'info');
+    if (selectedProductIds.size === 0) {
+      showToast(t('profile.wishlistSelectToShare'), 'warning');
+      return;
+    }
+
+    const selectedProducts = viewedProducts.filter((p) =>
+      selectedProductIds.has(p.productId),
+    );
+    const product = selectedProducts[0];
+    if (!product?.productId || !product.title) {
+      showToast(t('product.invalidProductData'), 'error');
+      return;
+    }
+
+    const source = product.source || product.platform || '1688';
+    const productUrl = buildProductSharePageUrl({
+      productId: product.productId,
+      source,
+      country: getShareCountry(),
+    });
+    const shareMessage = t('product.shareMessage')
+      .replace('{productName}', product.title)
+      .replace('{price}', formatPriceKRW(product.price || 0));
+
+    setShareTarget({
+      productUrl,
+      productName: product.title,
+      shareMessage,
+    });
+    setShareModalVisible(true);
   };
 
   const handleDelete = async () => {
@@ -393,16 +428,10 @@ const ViewedProductsScreen: React.FC = () => {
         <Text style={styles.headerTitle}>{t('profile.viewedProducts')}</Text>
       </View>
       <View style={styles.headerRight}>
-        <TouchableOpacity style={styles.headerIconButton}>
-          <Icon name="search" size={24} color={COLORS.text.primary} />
-        </TouchableOpacity>
         <TouchableOpacity onPress={() => setIsManagementMode(!isManagementMode)}>
           <Text style={styles.managementText}>
             {isManagementMode ? t('profile.done') : t('profile.management')}
           </Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.headerIconButton}>
-          <Icon name="ellipsis-horizontal" size={24} color={COLORS.text.primary} />
         </TouchableOpacity>
       </View>
     </View>
@@ -447,7 +476,7 @@ const ViewedProductsScreen: React.FC = () => {
     );
   };
 
-  const renderProductItem = ({ item }: { item: ViewedProduct }) => {
+  const renderProductItem = ({ item }: { item: RecentlyViewedProduct }) => {
     const isSelected = selectedProductIds.has(item.productId);
     
     return (
@@ -456,7 +485,8 @@ const ViewedProductsScreen: React.FC = () => {
         onPress={() => {
           if (!isManagementMode) {
             // Navigate to product detail
-            const country = locale === 'ko' ? 'ko' : locale === 'zh' ? 'en' : 'en';
+            const country =
+              appLocale === 'ko' ? 'ko' : appLocale === 'zh' ? 'zh' : 'en';
             (navigation as any).navigate('ProductDetail', {
               productId: item.productId,
               source: item.source,
@@ -494,7 +524,7 @@ const ViewedProductsScreen: React.FC = () => {
     );
   };
 
-  const renderDateSection = ({ item }: { item: [string, ViewedProduct[]] }) => {
+  const renderDateSection = ({ item }: { item: [string, RecentlyViewedProduct[]] }) => {
     const [date, products] = item;
     const dateSelected = products.every(p => selectedProductIds.has(p.productId));
     
@@ -545,45 +575,55 @@ const ViewedProductsScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      {renderFilterButton()}
-      
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
-      ) : viewedProducts.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>{t('profile.noViewedProducts')}</Text>
-        </View>
-      ) : displayedProducts.length === 0 && filteredDate ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>{t('profile.noProductsOnDate').replace('{date}', new Date(filteredDate).toLocaleDateString())}</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={sortedGroups}
-          renderItem={renderDateSection}
-          keyExtractor={(item) => item[0]}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.listContent}
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={
-            loadingMore ? (
-              <View style={styles.loadingMoreContainer}>
-                <ActivityIndicator size="small" color={COLORS.primary} />
-                <Text style={styles.loadingMoreText}>{t('profile.loadingMore')}</Text>
-              </View>
-            ) : null
-          }
-        />
-      )}
-      
+    <View style={styles.container}>
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={COLORS.white}
+        translucent={Platform.OS === 'android'}
+      />
+      <SafeAreaView style={styles.topSafeArea} edges={['top', 'left', 'right']}>
+        {renderHeader()}
+        {renderFilterButton()}
+      </SafeAreaView>
+
+      <View style={styles.body}>
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+          </View>
+        ) : viewedProducts.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>{t('profile.noViewedProducts')}</Text>
+          </View>
+        ) : displayedProducts.length === 0 && filteredDate ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>{t('profile.noProductsOnDate').replace('{date}', new Date(filteredDate).toLocaleDateString())}</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={sortedGroups}
+            renderItem={renderDateSection}
+            keyExtractor={(item) => item[0]}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.listContent}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              loadingMore ? (
+                <View style={styles.loadingMoreContainer}>
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                  <Text style={styles.loadingMoreText}>{t('profile.loadingMore')}</Text>
+                </View>
+              ) : null
+            }
+          />
+        )}
+      </View>
+
       {isManagementMode && viewedProducts.length > 0 && (
+        <SafeAreaView style={styles.footerSafeArea} edges={['bottom']}>
         <View style={styles.footer}>
           {selectedProductIds.size > 0 ? (
             <>
@@ -673,6 +713,7 @@ const ViewedProductsScreen: React.FC = () => {
             </View>
           )}
         </View>
+        </SafeAreaView>
       )}
 
       {/* Delete All Confirmation Modal */}
@@ -772,6 +813,17 @@ const ViewedProductsScreen: React.FC = () => {
         </TouchableOpacity>
       )}
 
+      {shareTarget && (
+        <ProductShareModal
+          visible={shareModalVisible}
+          onClose={() => setShareModalVisible(false)}
+          productUrl={shareTarget.productUrl}
+          productName={shareTarget.productName}
+          shareMessage={shareTarget.shareMessage}
+          onShareError={(msg) => showToast(msg, 'error')}
+        />
+      )}
+
       {/* Success Modal */}
       <Modal
         visible={showSuccessModal}
@@ -784,12 +836,19 @@ const ViewedProductsScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  topSafeArea: {
+    backgroundColor: COLORS.white,
+  },
+  body: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
@@ -814,8 +873,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    paddingTop: SPACING['2xl'],
+    paddingVertical: SPACING.sm,
     backgroundColor: COLORS.white,
     // borderBottomWidth: 1,
     // borderBottomColor: COLORS.gray[200],
@@ -838,9 +896,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACING.sm,
   },
-  headerIconButton: {
-    padding: SPACING.xs,
-  },
   managementText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
@@ -850,9 +905,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    marginTop: SPACING.sm,
+    paddingTop: SPACING.xs,
+    paddingBottom: SPACING.sm,
     gap: SPACING.sm,
+    backgroundColor: COLORS.white,
+  },
+  footerSafeArea: {
+    backgroundColor: COLORS.white,
   },
   filterButton: {
     flex: 1,
@@ -885,6 +944,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   listContent: {
+    paddingTop: SPACING.xs,
     paddingBottom: SPACING.xl,
   },
   loadingMoreContainer: {
@@ -897,7 +957,7 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
   },
   dateSection: {
-    marginTop: SPACING.md,
+    marginTop: SPACING.sm,
   },
   dateLabelRow: {
     flexDirection: 'row',
@@ -964,7 +1024,7 @@ const styles = StyleSheet.create({
   },
   productTitle: {
     fontSize: FONTS.sizes.xs,
-    color: COLORS.red,
+    color: COLORS.black,
     fontWeight: '400',
     lineHeight: 16,
   },

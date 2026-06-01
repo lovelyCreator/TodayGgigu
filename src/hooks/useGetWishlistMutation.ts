@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { wishlistApi, WishlistResponse, GetWishlistParams } from '../services/wishlistApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../constants';
@@ -26,6 +26,13 @@ export const useGetWishlistMutation = (
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
   const [isError, setIsError] = useState<boolean>(false);
 
+  const onSuccessRef = useRef(options?.onSuccess);
+  const onErrorRef = useRef(options?.onError);
+  useEffect(() => {
+    onSuccessRef.current = options?.onSuccess;
+    onErrorRef.current = options?.onError;
+  });
+
   const mutate = useCallback(async (params?: GetWishlistParams) => {
     setIsLoading(true);
     setIsSuccess(false);
@@ -39,28 +46,37 @@ export const useGetWishlistMutation = (
         setData(response.data);
         setIsSuccess(true);
         
-        // Update external IDs in AsyncStorage
-        if (response.data.wishlist && Array.isArray(response.data.wishlist)) {
-          const externalIds = response.data.wishlist.map((item: any) => item.externalId?.toString() || '').filter(Boolean);
-          await AsyncStorage.setItem(STORAGE_KEYS.WISHLIST_EXTERNAL_IDS, JSON.stringify(externalIds));
+        const wishlistItems = Array.isArray(response.data.wishlist)
+          ? response.data.wishlist
+          : Array.isArray(response.data.wishlistByStore)
+            ? response.data.wishlistByStore.flatMap((group) => group.items || [])
+            : [];
+        if (wishlistItems.length > 0) {
+          const externalIds = wishlistItems
+            .map((item: any) => item.externalId?.toString() || '')
+            .filter(Boolean);
+          await AsyncStorage.setItem(
+            STORAGE_KEYS.WISHLIST_EXTERNAL_IDS,
+            JSON.stringify(externalIds),
+          );
         }
         
-        options?.onSuccess?.(response.data);
+        onSuccessRef.current?.(response.data);
       } else {
         const errorMessage = response.message || 'Failed to fetch wishlist';
         setError(errorMessage);
         setIsError(true);
-        options?.onError?.(errorMessage);
+        onErrorRef.current?.(errorMessage);
       }
     } catch (err: any) {
       const errorMessage = 'An unexpected error occurred. Please try again.';
       setError(errorMessage);
       setIsError(true);
-      options?.onError?.(errorMessage);
+      onErrorRef.current?.(errorMessage);
     } finally {
       setIsLoading(false);
     }
-  }, [options]);
+  }, []);
 
   return {
     mutate,

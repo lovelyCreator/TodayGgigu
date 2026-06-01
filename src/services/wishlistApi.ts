@@ -56,12 +56,40 @@ export interface WishlistResponse {
   total?: number;
 }
 
+/** Values accepted by GET /wishlist `timeFilter` query param. */
+export const WISHLIST_API_TIME_FILTERS = ['7d', '30d', '90d', '6m', '1y'] as const;
+export type WishlistApiTimeFilter = (typeof WISHLIST_API_TIME_FILTERS)[number];
+
+const LEGACY_WISHLIST_TIME_FILTER_MAP: Record<string, WishlistApiTimeFilter> = {
+  '7d': '7d',
+  '30d': '30d',
+  '90d': '90d',
+  '180d': '6m',
+  '365d': '1y',
+  '6m': '6m',
+  '1y': '1y',
+};
+
+export function normalizeWishlistTimeFilter(
+  value?: string | null,
+): WishlistApiTimeFilter {
+  if (!value) return '1y';
+  const mapped = LEGACY_WISHLIST_TIME_FILTER_MAP[value];
+  if (mapped) return mapped;
+  if ((WISHLIST_API_TIME_FILTERS as readonly string[]).includes(value)) {
+    return value as WishlistApiTimeFilter;
+  }
+  return '1y';
+}
+
 export interface GetWishlistParams {
   discounted?: boolean;
   options?: string;
   sort?: string;
-  timeFilter?: string;
+  timeFilter?: WishlistApiTimeFilter | string;
   groupByStore?: boolean;
+  /** Max items to return (backend may cap; omit for server default). */
+  limit?: number;
 }
 
 export const wishlistApi = {
@@ -117,10 +145,10 @@ export const wishlistApi = {
         }
       }
 
-      const discounted = params?.discounted ?? true;
+      const discounted = params?.discounted ?? false;
       const options = params?.options ?? '';
       const sort = params?.sort ?? 'recently_saved';
-      const timeFilter = params?.timeFilter ?? '90d';
+      const timeFilter = normalizeWishlistTimeFilter(params?.timeFilter);
       const queryParams: Record<string, string> = {
         discounted: String(discounted),
         options,
@@ -128,6 +156,9 @@ export const wishlistApi = {
         timeFilter,
       };
       if (params?.groupByStore) queryParams.groupByStore = 'true';
+      if (params?.limit != null && params.limit > 0) {
+        queryParams.limit = String(params.limit);
+      }
       const query = new URLSearchParams(queryParams).toString();
       const url = `${API_BASE_URL}/wishlist?${query}`;
       const signatureHeaders = await buildSignatureHeaders('GET', url);
@@ -140,23 +171,60 @@ export const wishlistApi = {
         },
       });
 
-      // console.log('Get wishlist response:', response.data);
+      if (__DEV__) {
+        const payload = response.data?.data;
+        const flatItems = Array.isArray(payload?.wishlist)
+          ? payload.wishlist
+          : Array.isArray(payload?.wishlistByStore)
+            ? payload.wishlistByStore.flatMap(
+                (g: WishlistByStore) => g.items || [],
+              )
+            : [];
+        console.log('[wishlistApi.getWishlist]', {
+          requestUrl: url,
+          total: payload?.total ?? flatItems.length,
+          itemCount: flatItems.length,
+          sample: flatItems[0]
+            ? {
+                externalId: flatItems[0].externalId,
+                source: flatItems[0].source,
+                title: flatItems[0].title,
+                price: flatItems[0].price,
+                storeName: flatItems[0].storeName,
+                createdAt: flatItems[0].createdAt,
+                productDetailFetchedAt: flatItems[0].productDetailFetchedAt,
+              }
+            : null,
+        });
+      }
 
-      if (!response.data || !response.data.data) {
+      const payload = response.data;
+      if (
+        !payload ||
+        (payload.status != null && payload.status !== 'success') ||
+        payload.data == null
+      ) {
         return {
           success: false,
-          message: 'No wishlist data received',
+          message:
+            payload?.message ||
+            (typeof payload === 'string' ? payload : 'No wishlist data received'),
           data: undefined,
         };
       }
 
       return {
         success: true,
-        data: response.data.data,
-        message: response.data.message || 'Wishlist retrieved successfully',
+        data: payload.data,
+        message: payload.message || 'Wishlist retrieved successfully',
       };
     } catch (error: any) {
-      // console.error('Get wishlist error:', error);
+      if (__DEV__) {
+        console.warn('[wishlistApi.getWishlist] error', {
+          status: error.response?.status,
+          data: error.response?.data,
+        });
+      }
       const errorMessage = error.response?.data?.message || error.message || 'Failed to get wishlist';
       return {
         success: false,

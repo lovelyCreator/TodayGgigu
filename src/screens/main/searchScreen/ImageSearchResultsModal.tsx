@@ -81,11 +81,10 @@ const ImageSearchResultsModal: React.FC<ImageSearchResultsModalProps> = ({
   const [selectedSort, setSelectedSort] = useState<string>('best_match');
   const PAGE_SIZE = 40; // per platform per page
 
-  // Sort options - Best Match and Price only (no Popular)
   const sortOptions = [
-    { label: 'Best Match', value: 'best_match' },
-    { label: 'Price: Low to High', value: 'price_low' },
-    { label: 'Price: High to Low', value: 'price_high' },
+    { label: t('search.sortOptions.bestMatch'), value: 'best_match' },
+    { label: t('live.priceLowToHigh'), value: 'price_low' },
+    { label: t('live.priceHighToLow'), value: 'price_high' },
   ];
   
   const { showToast } = useToast();

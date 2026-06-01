@@ -10,7 +10,6 @@ import {
   FlatList,
   Modal,
   StatusBar,
-  Share,
   Platform,
   Animated,
 } from 'react-native';
@@ -23,6 +22,8 @@ import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS, SERVER_BASE_URL } from 
 import { useAuth } from '../../context/AuthContext';
 
 import { ProductCard, SearchButton } from '../../components';
+import ProductShareModal from '../../components/ProductShareModal';
+import { buildProductSharePageUrl } from '../../utils/productShareLinks';
 import { PhotoCaptureModal } from '../../components';
 import { usePlatformStore } from '../../store/platformStore';
 import {
@@ -186,6 +187,7 @@ const ProductDetailScreen: React.FC = () => {
   });
 
   // Image search state
+  const [shareModalVisible, setShareModalVisible] = useState(false);
   const [similarSearchVisible, setSimilarSearchVisible] = useState(false);
   const [similarSearchBase64, setSimilarSearchBase64] = useState<string>('');
   const [similarSearchUri, setSimilarSearchUri] = useState<string>('');
@@ -221,8 +223,8 @@ const ProductDetailScreen: React.FC = () => {
         }
       }
     },
-    onError: (error) => {
-      showToast(error || t('product.failedToAddToWishlist'), 'error');
+    onError: () => {
+      showToast(t('product.failedToAddToWishlist'), 'error');
     },
   });
 
@@ -246,8 +248,8 @@ const ProductDetailScreen: React.FC = () => {
         }
       }
     },
-    onError: (error) => {
-      showToast(error || t('product.failedToRemoveFromWishlist'), 'error');
+    onError: () => {
+      showToast(t('product.failedToRemoveFromWishlist'), 'error');
     },
   });
   
@@ -1441,6 +1443,31 @@ const ProductDetailScreen: React.FC = () => {
     );
   }, [similarProductsLoadingMore]);
 
+  const shareProductId = useMemo(
+    () =>
+      (offerId || productId || product?.offerId || product?.id || '').toString(),
+    [offerId, productId, product?.offerId, product?.id],
+  );
+
+  const productShareUrl = useMemo(
+    () =>
+      shareProductId
+        ? buildProductSharePageUrl({
+            productId: shareProductId,
+            source: sourceRef.current,
+            country: countryRef.current,
+          })
+        : '',
+    [shareProductId, route.params?.source, route.params?.country, selectedPlatform, locale],
+  );
+
+  const productShareMessage = useMemo(() => {
+    if (!product?.name) return '';
+    return t('product.shareMessage')
+      .replace('{productName}', product.name)
+      .replace('{price}', formatPriceKRW(product.price || 0));
+  }, [product?.name, product?.price, t]);
+
   // Early return - MUST be after ALL hooks
   if (loading || !product) {
     return (
@@ -1680,19 +1707,12 @@ const ProductDetailScreen: React.FC = () => {
     }
   };
 
-  const handleShare = async () => {
-    try {
-      const shareContent = {
-        message: t('product.shareMessage')
-          .replace('{productName}', product.name)
-          .replace('{price}', formatPriceKRW(product.price)),
-        url: `https://todaymall.com/product/${productId}`, // Replace with your actual app URL
-      };
-      
-      await Share.share(shareContent);
-    } catch (error) {
-      // Error sharing - silently fail
+  const handleShare = () => {
+    if (!shareProductId || !product?.name) {
+      showToast(t('product.invalidProductData'), 'error');
+      return;
     }
+    setShareModalVisible(true);
   };
 
   const renderHeader = () => {
@@ -1831,7 +1851,7 @@ const ProductDetailScreen: React.FC = () => {
     if (productCode) {
       await Clipboard.setString(productCode);
       setIsCopied(true);
-      // Reset icon after 2 seconds
+      showToast(t('product.productCodeCopied'), 'success');
       setTimeout(() => {
         setIsCopied(false);
       }, 2000);
@@ -1921,10 +1941,14 @@ const ProductDetailScreen: React.FC = () => {
           )}
           {productCode && (
             <View style={styles.productCodeBadge}>
-              <Text style={styles.productCodeBadgeText}>{t('product.productCodeLabel')} {productCode}</Text>
+              <Text style={styles.productCodeBadgeText}>
+                {t('product.productCodeLabel')} {productCode}
+              </Text>
               <TouchableOpacity
                 onPress={handleCopyProductCode}
                 style={styles.copyIconButton}
+                accessibilityRole="button"
+                accessibilityLabel={t('product.copy')}
               >
                 {isCopied ? (
                   <CheckIcon size={18} color={COLORS.red} isSelected={true} />
@@ -1974,11 +1998,13 @@ const ProductDetailScreen: React.FC = () => {
       {/* Product Code with Copy Button */}
       {product.productCode && (
         <View style={styles.productCodeContainer}>
-          <Text style={styles.productCodeLabel}>{t('product.productCodeLabel')} </Text>
+          <Text style={styles.productCodeLabel}>{t('product.productCodeLabel')}</Text>
           <Text style={styles.productCodeText}>{product.productCode}</Text>
           <TouchableOpacity
             style={styles.copyButton}
             onPress={handleCopyProductCode}
+            accessibilityRole="button"
+            accessibilityLabel={t('product.copy')}
           >
             {isCopied ? (
               <CheckIcon size={16} color="#10B981" isSelected={true} circleColor="#10B981" />
@@ -2750,6 +2776,15 @@ const ProductDetailScreen: React.FC = () => {
 
       {renderBottomBar()}
       {renderImageViewer()}
+
+      <ProductShareModal
+        visible={shareModalVisible}
+        onClose={() => setShareModalVisible(false)}
+        productUrl={productShareUrl}
+        productName={product?.name || ''}
+        shareMessage={productShareMessage}
+        onShareError={(msg) => showToast(msg, 'error')}
+      />
 
       {/* Similar product image search modal */}
       {similarSearchVisible && (

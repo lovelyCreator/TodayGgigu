@@ -120,6 +120,162 @@ export const coerceDisplayText = (
   return text;
 };
 
+/** Map app / device locale to products API country/lang (en | ko | zh). */
+export const mapLocaleToProductsCountry = (locale?: string | null): AppLocale => {
+  if (locale === 'ko' || locale === 'kr') return 'ko';
+  if (locale === 'zh') return 'zh';
+  return 'en';
+};
+
+/** Recently-viewed / 1688-style product title for the active locale. */
+export const resolveViewedProductTitle = (
+  item: Record<string, unknown>,
+  locale: AppLocale,
+): string => {
+  const fromMulti = coerceDisplayText(item.subjectMultiLang, locale, '');
+  if (fromMulti) return fromMulti;
+
+  if (locale === 'zh') {
+    return (
+      coerceDisplayText(item.subject, locale, '') ||
+      coerceDisplayText(item.titleZh, locale, '') ||
+      coerceDisplayText(item.title, locale, '') ||
+      coerceDisplayText(item.subjectTrans, locale, '') ||
+      coerceDisplayText(item.name, locale, '') ||
+      ''
+    );
+  }
+
+  if (locale === 'ko') {
+    return (
+      coerceDisplayText(item.titleKo, locale, '') ||
+      coerceDisplayText(item.subjectTrans, locale, '') ||
+      fromMulti ||
+      coerceDisplayText(item.titleEn, locale, '') ||
+      coerceDisplayText(item.productName, locale, '') ||
+      coerceDisplayText(item.title, locale, '') ||
+      coerceDisplayText(item.subject, locale, '') ||
+      coerceDisplayText(item.name, locale, '') ||
+      ''
+    );
+  }
+
+  return (
+    coerceDisplayText(item.titleEn, locale, '') ||
+    coerceDisplayText(item.subjectTrans, locale, '') ||
+    fromMulti ||
+    coerceDisplayText(item.titleKo, locale, '') ||
+    coerceDisplayText(item.productName, locale, '') ||
+    coerceDisplayText(item.title, locale, '') ||
+    coerceDisplayText(item.subject, locale, '') ||
+    coerceDisplayText(item.name, locale, '') ||
+    ''
+  );
+};
+
+export type RecentlyViewedProduct = {
+  productId: string;
+  source: string;
+  viewedAt: string;
+  photoUrl: string;
+  title: string;
+  price: number;
+  platform: string;
+  raw: Record<string, unknown>;
+};
+
+export const mapRecentlyViewedItem = (
+  raw: Record<string, unknown>,
+  locale: AppLocale,
+): RecentlyViewedProduct => {
+  const nested =
+    raw.product && typeof raw.product === 'object'
+      ? (raw.product as Record<string, unknown>)
+      : null;
+  const merged: Record<string, unknown> = nested ? { ...nested, ...raw } : { ...raw };
+  return {
+    productId: String(raw.productId ?? nested?.productId ?? nested?.offerId ?? ''),
+    source: String(raw.source ?? raw.platform ?? '1688'),
+    viewedAt: String(raw.viewedAt ?? ''),
+    photoUrl: String(raw.photoUrl ?? raw.imageUrl ?? nested?.imageUrl ?? ''),
+    title: resolveViewedProductTitle(merged, locale),
+    price: Number(raw.price ?? nested?.price ?? 0),
+    platform: String(raw.platform ?? raw.source ?? '1688'),
+    raw: merged,
+  };
+};
+
+export const remapRecentlyViewedTitles = (
+  items: RecentlyViewedProduct[],
+  locale: AppLocale,
+): RecentlyViewedProduct[] =>
+  items.map((item) => ({
+    ...item,
+    title: resolveViewedProductTitle(item.raw, locale),
+  }));
+
+/** Localized product name from getProductDetail response (1688 / Taobao / OwnMall). */
+export const extractLocalizedTitleFromProductDetail = (
+  detailData: unknown,
+  locale: AppLocale,
+): string => {
+  if (!detailData || typeof detailData !== 'object') return '';
+  const data = detailData as Record<string, unknown>;
+
+  const taobaoTitle = (data.multi_language_info as Record<string, unknown> | undefined)?.title;
+  if (typeof taobaoTitle === 'string' && taobaoTitle.trim()) {
+    return taobaoTitle.trim();
+  }
+  if (typeof data.title === 'string' && data.title.trim() && !data.product) {
+    return data.title.trim();
+  }
+
+  const product =
+    data.product && typeof data.product === 'object'
+      ? (data.product as Record<string, unknown>)
+      : data;
+
+  if (locale === 'zh') {
+    const title =
+      coerceDisplayText(product.titleZh, locale, '') ||
+      coerceDisplayText(product.subject, locale, '') ||
+      coerceDisplayText(product.subjectTrans, locale, '') ||
+      coerceDisplayText(product.name, locale, '');
+    if (title) return title;
+  } else if (locale === 'ko') {
+    const title =
+      coerceDisplayText(product.titleKo, locale, '') ||
+      coerceDisplayText(product.subjectTrans, locale, '') ||
+      coerceDisplayText(product.titleEn, locale, '') ||
+      coerceDisplayText(product.subject, locale, '');
+    if (title) return title;
+  } else {
+    const title =
+      coerceDisplayText(product.titleEn, locale, '') ||
+      coerceDisplayText(product.subjectTrans, locale, '') ||
+      coerceDisplayText(product.titleKo, locale, '') ||
+      coerceDisplayText(product.subject, locale, '');
+    if (title) return title;
+  }
+
+  return resolveViewedProductTitle(product, locale);
+};
+
+/** True when list payload only has Chinese (or empty) title and detail fetch is needed. */
+export const shouldEnrichViewedProductTitle = (
+  item: RecentlyViewedProduct,
+  locale: AppLocale,
+): boolean => {
+  if (locale === 'zh') {
+    return !resolveViewedProductTitle(item.raw, locale);
+  }
+  const fromRaw = resolveViewedProductTitle(item.raw, locale);
+  if (!fromRaw) return true;
+  const listTitle = String(item.raw.title ?? item.raw.subject ?? '').trim();
+  if (listTitle && fromRaw === listTitle) return true;
+  return /[\u3400-\u9fff]/.test(fromRaw);
+};
+
 const collectOrderItemCompanyNameCandidates = (
   item: Record<string, unknown>,
 ): unknown[] => {

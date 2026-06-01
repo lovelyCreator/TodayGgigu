@@ -16,9 +16,43 @@ import { API_BASE_URL, CATEGORIES_BASE_URL } from '../constants';
 import { buildSignatureHeaders } from './signature';
 import { normalizeProductImageUrl } from '../utils/productImageUrl';
 import { extractL1Categories, extractL2Tree } from '../utils/categoryList';
+import {
+  mapLocaleToProductsCountry,
+  mapRecentlyViewedItem,
+  type RecentlyViewedProduct,
+} from '../utils/i18nHelpers';
 
 // In-memory cache for category tree (clears on app restart)
 const categoryTreeCache: Record<string, CategoriesTreeResponse> = {};
+
+const PRODUCT_DETAIL_REQUEST_TIMEOUT_MS = 30000;
+
+const getHttpErrorStatus = (error: unknown): number | undefined => {
+  const err = error as { response?: { status?: number } };
+  return err?.response?.status;
+};
+
+const buildProductApiErrorMessage = (
+  error: unknown,
+  fallback: string,
+): string => {
+  const status = getHttpErrorStatus(error);
+  if (status === 504 || status === 502 || status === 503) {
+    return 'The server is taking too long. Please try again in a moment.';
+  }
+  if (status === 404) {
+    return 'Product not found.';
+  }
+  const err = error as { response?: { data?: { message?: string } } };
+  const apiMessage = err?.response?.data?.message;
+  if (typeof apiMessage === 'string' && apiMessage.trim()) {
+    return apiMessage;
+  }
+  if (status) {
+    return `${fallback} (HTTP ${status})`;
+  }
+  return fallback;
+};
 
 /**
  * Map the app's generic sort values to Taobao Global's accepted `sort` codes.
@@ -1466,6 +1500,7 @@ export const productsApi = {
             'Content-Type': 'application/json',
             ...signatureHeaders,
           },
+          timeout: PRODUCT_DETAIL_REQUEST_TIMEOUT_MS,
         }).catch((error) => {
           // console.error('📦 [Taobao Product Detail API] Error:', {
           //   message: error.message,
@@ -1636,6 +1671,7 @@ export const productsApi = {
           'Content-Type': 'application/json',
           ...signatureHeaders,
         },
+        timeout: PRODUCT_DETAIL_REQUEST_TIMEOUT_MS,
       });
       
       // Check if response data exists
@@ -1653,26 +1689,31 @@ export const productsApi = {
         message: 'Product detail retrieved successfully',
       };
     } catch (error: any) {
-      console.error('Get product detail error:', error.response ? {
-        status: error.response.status,
-        statusText: error.response.statusText,
-        data: error.response.data
-      } : error.request ? {
-        status: error.request.status,
-        statusText: error.request.statusText,
-        data: error.request.data
-      } : error);
+      if (__DEV__) {
+        const status = getHttpErrorStatus(error);
+        console.warn(
+          `[productsApi.getProductDetail] ${status ?? 'network'} ${productId} (${source})`,
+        );
+      }
 
       if (error.response) {
         return {
           success: false,
-          message: error.response.data?.message || `Failed to get product detail. Status: ${error.response.status}`,
+          message: buildProductApiErrorMessage(
+            error,
+            'Failed to get product detail',
+          ),
           data: null,
         };
       } else if (error.request) {
+        const isTimeout =
+          error.code === 'ECONNABORTED' ||
+          String(error.message || '').toLowerCase().includes('timeout');
         return {
           success: false,
-          message: 'Network error. Please check your connection and try again.',
+          message: isTimeout
+            ? 'The server is taking too long. Please try again in a moment.'
+            : 'Network error. Please check your connection and try again.',
           data: null,
         };
       } else {
@@ -1898,21 +1939,15 @@ export const productsApi = {
 
   // Get recently viewed products
   getRecentlyViewedProducts: async (
-    limit: number = 20
+    limit: number = 20,
+    locale?: string | null,
   ): Promise<ApiResponse<{
-    items: Array<{
-      productId: string;
-      source: string;
-      viewedAt: string;
-      photoUrl: string;
-      title: string;
-      price: number;
-      platform: string;
-    }>;
+    items: RecentlyViewedProduct[];
   }>> => {
     try {
+      const appLocale = mapLocaleToProductsCountry(locale);
       const token = await getStoredToken();
-      const url = `${API_BASE_URL}/products/recently-viewed?limit=${limit}`;
+      const url = `${API_BASE_URL}/products/recently-viewed?limit=${limit}&country=${appLocale}`;
       const signatureHeaders = await buildSignatureHeaders('GET', url);
       const response = await axios.get(url, {
         headers: {
@@ -1923,9 +1958,15 @@ export const productsApi = {
       });
       
       if (response.data && response.data.status === 'success' && response.data.data) {
+        const rawItems = Array.isArray(response.data.data.items)
+          ? response.data.data.items
+          : [];
+        const items = rawItems.map((item: Record<string, unknown>) =>
+          mapRecentlyViewedItem(item, appLocale),
+        );
         return {
           success: true,
-          data: response.data.data,
+          data: { items },
           message: 'Recently viewed products retrieved successfully',
         };
       }

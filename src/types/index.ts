@@ -412,7 +412,7 @@ export type RootStackParamList = {
   Deposit: undefined;
   Charge: undefined;
   PointDetail: undefined;
-  Coupon: undefined;
+  Coupon: { initialSection?: 'coupon' | 'point' } | undefined;
   BuyList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'error' | 'shipping_delay' | 'refunds' | 'purchase_agency' | 'warehouse' | 'international_shipping' | 'all' } | undefined;
   ProductManagement: undefined;
   UnitSurvey: undefined;

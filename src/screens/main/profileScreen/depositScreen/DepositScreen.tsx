@@ -32,6 +32,8 @@ interface Transaction {
   status: string;
 }
 
+const PRESET_CHARGE_AMOUNTS = [10000, 50000, 100000, 500000, 1000000] as const;
+
 const DepositScreen = () => {
   const navigation = useNavigation();
   const { t } = useTranslation();
@@ -288,26 +290,30 @@ const DepositScreen = () => {
   };
 
   const handlePresetCharge = (amount: number) => {
-    setChargeAmount(amount.toString());
+    setChargeAmount((prev) => {
+      const current = parseInt(prev.replace(/[^\d]/g, ''), 10) || 0;
+      return String(current + amount);
+    });
+  };
+
+  const openChargeModal = () => {
+    setChargeAmount('');
+    setChargeNote('');
+    setShowChargeModal(true);
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor="transparent"
-        translucent={true}
-      />
-      {/* Header with Gradient */}
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={16} color={COLORS.black} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
+    <View style={styles.root}>
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+      <SafeAreaView style={styles.safeTop} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Icon name="arrow-back" size={16} color={COLORS.black} />
+          </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('deposit.title')}</Text>
+          <View style={styles.headerSide} />
         </View>
-      </View>
+      </SafeAreaView>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Balance Card */}
@@ -315,7 +321,7 @@ const DepositScreen = () => {
           <View style={styles.mainBalanceContainer}>
             <Text style={styles.balanceLabel}>{t('deposit.totalBalance')}</Text>
             {balanceLoading ? (
-              <ActivityIndicator size="small" color={COLORS.primary} style={{ marginTop: 8 }} />
+              <ActivityIndicator size="small" color={COLORS.red} style={{ marginTop: 8 }} />
             ) : (
               <Text style={styles.mainBalanceAmount}>₩{totalDeposit.toLocaleString()}</Text>
             )}
@@ -336,12 +342,12 @@ const DepositScreen = () => {
           </View>
 
           <View style={styles.actionButtonsContainer}>
-            <TouchableOpacity style={styles.actionButton} onPress={() => setShowChargeModal(true)}>
+            <TouchableOpacity style={styles.actionButton} onPress={openChargeModal}>
               <Icon name="add-circle-outline" size={18} color={COLORS.white} />
               <Text style={styles.actionButtonText}>{t('deposit.charge')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionButton, styles.actionButtonSecondary]} onPress={() => setShowWithdrawModal(true)}>
-              <Icon name="remove-circle-outline" size={18} color={COLORS.primary} />
+              <Icon name="remove-circle-outline" size={18} color={COLORS.red} />
               <Text style={[styles.actionButtonText, styles.actionButtonSecondaryText]}>{t('deposit.withdraw')}</Text>
             </TouchableOpacity>
           </View>
@@ -407,11 +413,10 @@ const DepositScreen = () => {
           {/* Transaction List */}
           {transactionsLoading ? (
             <View style={styles.emptyState}>
-              <ActivityIndicator size="large" color={COLORS.primary} />
+              <ActivityIndicator size="large" color={COLORS.red} />
             </View>
           ) : filteredTransactions.length === 0 ? (
             <View style={styles.emptyState}>
-              <Icon name="receipt" size={48} color={COLORS.gray[300]} />
               <Text style={styles.emptyText}>{t('deposit.noTransactions')}</Text>
             </View>
           ) : (
@@ -419,7 +424,11 @@ const DepositScreen = () => {
               {filteredTransactions.map((transaction) => (
                 <View key={transaction.id} style={styles.transactionCard}>
                   <View style={[styles.transactionIcon, transaction.type === 'charge' ? styles.chargeIcon : styles.dischargeIcon]}>
-                    <Icon name={transaction.type === 'charge' ? 'arrow-down' : 'arrow-up'} size={16} color={transaction.type === 'charge' ? '#22C55E' : '#EF4444'} />
+                    <Icon
+                      name={transaction.type === 'charge' ? 'arrow-down' : 'arrow-up'}
+                      size={16}
+                      color={transaction.type === 'charge' ? '#22C55E' : COLORS.red}
+                    />
                   </View>
                   <View style={styles.transactionInfo}>
                     <Text style={styles.transactionDescription} numberOfLines={1}>{transaction.description}</Text>
@@ -457,25 +466,34 @@ const DepositScreen = () => {
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
               <Text style={styles.modalSectionLabel}>{t('deposit.selectAmount')}</Text>
               
-              {/* Preset Amount Buttons */}
+              {/* Preset Amount Buttons: 3 + 2 rows */}
               <View style={styles.presetAmountsContainer}>
-                {[10000, 50000, 100000, 500000, 1000000].map((amount) => (
-                  <TouchableOpacity
-                    key={amount}
-                    style={[
-                      styles.presetAmountButton,
-                      chargeAmount === amount.toString() && styles.presetAmountButtonActive
-                    ]}
-                    onPress={() => handlePresetCharge(amount)}
-                  >
-                    <Text style={[
-                      styles.presetAmountText,
-                      chargeAmount === amount.toString() && styles.presetAmountTextActive
-                    ]}>
-                      ₩{amount.toLocaleString()}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                <View style={styles.presetAmountRow}>
+                  {PRESET_CHARGE_AMOUNTS.slice(0, 3).map((amount) => (
+                    <TouchableOpacity
+                      key={amount}
+                      style={styles.presetAmountButton}
+                      onPress={() => handlePresetCharge(amount)}
+                    >
+                      <Text style={styles.presetAmountText}>
+                        ₩{amount.toLocaleString()}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={styles.presetAmountRow}>
+                  {PRESET_CHARGE_AMOUNTS.slice(3, 5).map((amount) => (
+                    <TouchableOpacity
+                      key={amount}
+                      style={styles.presetAmountButton}
+                      onPress={() => handlePresetCharge(amount)}
+                    >
+                      <Text style={styles.presetAmountText}>
+                        ₩{amount.toLocaleString()}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
               {/* Custom Amount Input */}
@@ -616,20 +634,25 @@ const DepositScreen = () => {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
     backgroundColor: '#F5F5F5',
+  },
+  safeTop: {
+    backgroundColor: COLORS.white,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
-    paddingVertical: 24,
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.xs,
     backgroundColor: COLORS.white,
   },
   backButton: {
@@ -637,15 +660,18 @@ const styles = StyleSheet.create({
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
+    backgroundColor: COLORS.white,
   },
   headerTitle: {
+    flex: 1,
     fontSize: FONTS.sizes.lg,
     fontWeight: '700',
     color: COLORS.black,
+    textAlign: 'center',
+  },
+  headerSide: {
+    width: 36,
+    height: 36,
   },
   scrollView: {
     flex: 1,
@@ -669,7 +695,7 @@ const styles = StyleSheet.create({
   mainBalanceAmount: {
     fontSize: 32,
     fontWeight: '800',
-    color: COLORS.primary || '#FF6B35',
+    color: COLORS.red,
     marginTop: 4,
   },
   balanceTypesContainer: {
@@ -710,13 +736,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 12,
     borderRadius: 8,
-    backgroundColor: COLORS.primary || '#FF6B35',
+    backgroundColor: COLORS.red,
     gap: 6,
   },
   actionButtonSecondary: {
     backgroundColor: COLORS.white,
     borderWidth: 1,
-    borderColor: COLORS.primary || '#FF6B35',
+    borderColor: COLORS.red,
   },
   actionButtonText: {
     fontSize: FONTS.sizes.sm,
@@ -724,7 +750,7 @@ const styles = StyleSheet.create({
     color: COLORS.white,
   },
   actionButtonSecondaryText: {
-    color: COLORS.primary || '#FF6B35',
+    color: COLORS.red,
   },
   // Transaction Section
   sectionContainer: {
@@ -825,7 +851,6 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.gray[400],
-    marginTop: SPACING.sm,
   },
   transactionsList: {
     gap: 8,
@@ -850,7 +875,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ECFDF5',
   },
   dischargeIcon: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: COLORS.lightRed,
   },
   transactionInfo: {
     flex: 1,
@@ -877,7 +902,7 @@ const styles = StyleSheet.create({
     color: '#22C55E',
   },
   dischargeAmount: {
-    color: '#EF4444',
+    color: COLORS.red,
   },
   transactionStatus: {
     fontSize: 10,
@@ -922,13 +947,15 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   presetAmountsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: SPACING.sm,
     marginBottom: SPACING.lg,
   },
+  presetAmountRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
   presetAmountButton: {
-    flex: 0.32,
+    flex: 1,
     paddingVertical: 16,
     borderRadius: 12,
     borderWidth: 1,
@@ -937,8 +964,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   presetAmountButtonActive: {
-    backgroundColor: '#FF6B00',
-    borderColor: '#FF6B00',
+    backgroundColor: COLORS.red,
+    borderColor: COLORS.red,
   },
   presetAmountText: {
     fontSize: FONTS.sizes.sm,
@@ -1001,7 +1028,7 @@ const styles = StyleSheet.create({
     borderColor: '#E0E0E0',
   },
   modalSubmitButton: {
-    backgroundColor: '#FF6B00',
+    backgroundColor: COLORS.red,
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
@@ -1026,7 +1053,7 @@ const styles = StyleSheet.create({
   },
   warningText: {
     fontSize: FONTS.sizes.sm,
-    color: '#FF6B6B',
+    color: COLORS.red,
     lineHeight: 20,
     marginTop: SPACING.lg,
     marginBottom: SPACING.lg,
