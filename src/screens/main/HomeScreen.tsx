@@ -33,6 +33,7 @@ import { SearchButton, NotificationBadge, ImagePickerModal, MemberAvatar } from 
 import { usePlatformStore } from '../../store/platformStore';
 import { useAppSelector } from '../../store/hooks';
 import { translations } from '../../i18n/translations';
+import { openProductDetail } from '../../utils/openProductDetail';
 import HeadsetMicIcon from '../../assets/icons/HeadsetMicIcon';
 import MenuIcon from '../../assets/icons/MenuIcon';
 import TodayGgiguWordmarkIcon from '../../assets/icons/TodayGgiguWordmarkIcon';
@@ -275,13 +276,16 @@ const HomeScreen: React.FC = () => {
   const navigateToProductDetail = async (
     productId: string | number,
     source: string = selectedPlatform,
-    country: string = locale
+    country: string = locale,
+    thumbnailUrl?: string,
   ) => {
-    // Navigate directly without fetching product detail
-    navigation.navigate('ProductDetail', {
+    // Centralised entry — prefetches the thumbnail and forwards it to
+    // ProductDetailScreen so the hero slot paints instantly.
+    openProductDetail(navigation as any, {
       productId: productId.toString(),
-      source: source,
-      country: country,
+      source,
+      country,
+      thumbnailUrl,
     });
   };
   useEffect(() => {
@@ -1023,7 +1027,16 @@ const HomeScreen: React.FC = () => {
           </View>
           <TouchableOpacity
             style={styles.uosInquiryBtn}
-            onPress={() => (navigation as any).navigate('CustomerService')}
+            onPress={() =>
+              // Send the "상담문의 / Inquiry" pill to the Message tab's first
+              // tab (order inquiries). The icons elsewhere on this screen
+              // route to the 'general' (1:1) tab, so this button intentionally
+              // targets 'order' instead.
+              (navigation as any).navigate('Main', {
+                screen: 'Message',
+                params: { initialTab: 'order' },
+              })
+            }
             activeOpacity={0.85}
           >
             <Svg width={14} height={14} viewBox="0 0 16 16" fill="none">

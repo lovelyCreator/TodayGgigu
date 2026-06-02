@@ -14,6 +14,7 @@ import {
   Modal,
 } from 'react-native';
 import Icon from '../../../../components/Icon';
+import { ScreenSkeleton } from '../../../../components/Skeleton';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../../../constants';
@@ -2018,12 +2019,11 @@ const BuyListScreen = () => {
       >
         <View style={styles.content}>
 
-          {/* Loading State */}
+          {/* Loading State — show a list-shaped skeleton in the body while
+              orders are being fetched, so the page never flips back to a
+              spinner after the lazy-route skeleton fades out. */}
           {isLoading && orders.length === 0 ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={COLORS.primary} />
-              <Text style={styles.loadingText}>Loading orders...</Text>
-            </View>
+            <ScreenSkeleton variant="list" showHeader={false} />
           ) : (
             <>
               {/* Orders List or Empty State */}

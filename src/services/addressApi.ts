@@ -57,20 +57,23 @@ export type AddressFormValidationKey =
   | 'contactRequired'
   | 'customsRequired';
 
-/** First missing/invalid field for address modal save (i18n key under `profile.addressModal.*`). */
+/**
+ * First missing/invalid field for address modal save (i18n key under
+ * `profile.addressModal.*`).
+ *
+ * Only the detailed address is strictly required — other fields fall back to
+ * sane defaults inside `buildAddressSubmitBody` (recipient → '-',
+ * contact → '01000000000', etc.), so the user can save with just the detail
+ * line filled in.
+ */
 export const getAddressFormValidationErrorKey = (
   form: Pick<
     AddressFormInput,
     'mainAddress' | 'detailedAddress' | 'zipCode' | 'recipient' | 'contact' | 'personalCustomsCode'
   >,
 ): AddressFormValidationKey | null => {
-  if (!form.mainAddress.trim()) return 'regionRequired';
   const detail = form.detailedAddress.trim();
   if (!detail || detail.length < 2) return 'detailRequired';
-  if (!form.zipCode.trim()) return 'postalRequired';
-  if (!form.recipient.trim()) return 'recipientRequired';
-  if (!form.contact.trim()) return 'contactRequired';
-  if (!form.personalCustomsCode.trim()) return 'customsRequired';
   return null;
 };
 

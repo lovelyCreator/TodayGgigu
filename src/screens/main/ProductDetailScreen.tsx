@@ -12,6 +12,7 @@ import {
   StatusBar,
   Platform,
   Animated,
+  InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -33,13 +34,18 @@ import {
 } from '../../utils/productPlatform';
 import { useAppSelector } from '../../store/hooks';
 import { ActivityIndicator } from 'react-native';
-import { ScreenSkeleton } from '../../components/Skeleton';
+import { ProductDetailBodySkeleton } from '../../components/Skeleton';
+import { openProductDetail } from '../../utils/openProductDetail';
+import LazyMount from '../../components/LazyMount';
+import RevealOnMount from '../../components/RevealOnMount';
+import { useGalleryPrefetch, useViewablePrefetch } from '../../hooks/useImagePrefetch';
+import { useStaggeredReveal } from '../../hooks/useStaggeredReveal';
 import { Product } from '../../types';
 import { useProductDetailMutation } from '../../hooks/useProductDetailMutation';
 import { useRelatedRecommendationsMutation } from '../../hooks/useRelatedRecommendationsMutation';
 import { useSearchProductsMutation } from '../../hooks/useSearchProductsMutation';
 import { useAddToCartMutation } from '../../hooks/useAddToCartMutation';
-import { AddToCartRequest } from '../../services/cartApi';
+import { AddToCartRequest, cartApi } from '../../services/cartApi';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useToast } from '../../context/ToastContext';
 import { formatPriceKRW, getLocalizedText } from '../../utils/i18nHelpers';
@@ -135,7 +141,14 @@ const pickVariantRowImage = (sku: any, galleryFirst: string): string => {
 const ProductDetailScreen: React.FC = () => {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
-  const { productId, offerId, productData: initialProductData, source: routeSource, country: routeCountry } = route.params || {};
+  const {
+    productId,
+    offerId,
+    productData: initialProductData,
+    source: routeSource,
+    country: routeCountry,
+    thumbnailUrl: routeThumbnailUrl,
+  } = route.params || {};
   // console.log("[ProductDetailScreen] routeSource:", routeSource);
   
   // ALL HOOKS MUST BE CALLED BEFORE ANY CONDITIONAL RETURNS OR HOOKS THAT USE THEM
@@ -160,13 +173,31 @@ const ProductDetailScreen: React.FC = () => {
     // Prefer explicit route params when provided, otherwise fallback to selectedPlatform/locale
     const rawSource = (route.params?.source as string) || selectedPlatform || '1688';
     sourceRef.current = (rawSource === 'live-commerce' || rawSource === 'companymall' || rawSource === 'myCompany' || rawSource?.toLowerCase() === 'mycompany') ? 'ownmall' : rawSource;
-    countryRef.current = (route.params?.country as string) || (locale === 'zh' ? 'zh' : locale === 'ko' ? 'ko' : 'en');
+    // Backend rejects `country=zh` on /products/detail and recommendations
+    // endpoints (HTTP 500), so we collapse 'zh' → 'en' everywhere this ref
+    // is used. The upstream `subject` field already carries the original
+    // Chinese text, so Chinese users still see Chinese product titles.
+    const rawCountry = (route.params?.country as string) || locale;
+    countryRef.current = rawCountry === 'ko' ? 'ko' : 'en';
   }, [route.params?.source, route.params?.country, selectedPlatform, locale]);
   
   // Use product data from navigation params if available, otherwise fetch
   const [product, setProduct] = useState<any>(initialProductData || null);
   const [loading, setLoading] = useState(!initialProductData);
   const [wishlistCount, setWishlistCount] = useState<number | null>(null);
+  // If this product already exists in the user's cart, the backend's GET
+  // /cart response gives us the EXACT shape it expects on POST /cart for
+  // the same offerId (correct {en,ko,zh} `companyName`, `subjectMultiLang`,
+  // `categoryName`, the canonical `imageUrl` without size suffix, …).
+  // We keep it here and use it as the source of truth when building the
+  // add-to-cart payload, bypassing all the lossy product-detail parsing
+  // that has been producing Korean text in the `zh` slot.
+  const [existingCartItem, setExistingCartItem] = useState<any | null>(null);
+  // (Removed: `companyNameZhCache` used to be populated by a secondary
+  //  `lang=zh` product-detail fetch, but the backend returns HTTP 500
+  //  for `country=zh`, so that fetch was removed. The Chinese company
+  //  name now comes exclusively from the existing-cart-row override or
+  //  from `_rawCompanyNameCandidates` collected during the primary fetch.)
 
   // Scroll-based header animation
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -275,6 +306,97 @@ const ProductDetailScreen: React.FC = () => {
     return String(value);
   };
 
+  /**
+   * Resolve the company name for DISPLAY in the user's UI locale.
+   *
+   * Walks every possible upstream location (multilang objects, raw
+   * candidates collected during product-detail mapping, seller.name)
+   * and returns the slot that matches the current `locale`. When the
+   * requested locale's slot is missing — common because the backend
+   * rejects `country=zh` so the zh slot is rarely populated for the
+   * Chinese UI — we fall through this priority order:
+   *
+   *   1. Exact `locale` slot in any multilang object.
+   *   2. Any candidate string whose character set matches the locale
+   *      (Chinese ideographs for 'zh', Hangul for 'ko', ASCII for 'en').
+   *   3. Any non-empty multilang slot (en → ko → zh → other).
+   *   4. `seller.name` (already locale-resolved via `resolveText`).
+   *   5. Literal 'Store' as a last-resort placeholder.
+   *
+   * The character-set match in step 2 is what makes Chinese UI users
+   * see "临沂彩屹商贸有限公司" even when the backend only sent the
+   * English `{ en: "..." }` slot — we pick up the original Chinese
+   * name from `_rawCompanyNameCandidates` (e.g. `subject` field,
+   * `metadata.original1688Data.companyName`).
+   */
+  const resolveCompanyDisplayName = (): string => {
+    if (!product) return '';
+    const containsChinese = (s: string) => /[一-鿿]/.test(s);
+    const containsHangul = (s: string) => /[가-힯ᄀ-ᇿ㄰-㆏]/.test(s);
+
+    const localeMatches = (s: string, target: 'en' | 'ko' | 'zh'): boolean => {
+      if (target === 'zh') return containsChinese(s);
+      if (target === 'ko') return containsHangul(s);
+      // 'en' → require NEITHER Chinese nor Hangul (Latin / ASCII text).
+      return !containsChinese(s) && !containsHangul(s);
+    };
+
+    const targetLocale: 'en' | 'ko' | 'zh' =
+      locale === 'zh' || locale === 'ko' ? (locale as 'zh' | 'ko') : 'en';
+
+    // 1) Direct multilang objects on the product.
+    const multilangSources: unknown[] = [
+      (product as any).companyName,
+      (product as any).companyNameMultiLang,
+      (product as any).metadata?.original1688Data?.companyNameMultiLang,
+    ];
+    for (const src of multilangSources) {
+      if (src && typeof src === 'object') {
+        const obj = src as Record<string, unknown>;
+        const slot = obj[targetLocale];
+        if (typeof slot === 'string' && slot.trim()) return slot.trim();
+      }
+    }
+
+    // 2) Candidate strings — find one matching the target locale.
+    const candidates: unknown[] = (product as any)._rawCompanyNameCandidates || [];
+    // Also include common direct paths that may not be in the array.
+    // `originalCompanyName` is the backend field that carries the
+    // ORIGINAL Chinese name; prioritise it for the Chinese display.
+    candidates.push(
+      (product as any).originalCompanyName,
+      (product as any).metadata?.original1688Data?.companyName,
+      (product as any).metadata?.original1688Data?.shopName,
+      (product as any).original1688Data?.companyName,
+      product.seller?.name,
+    );
+    for (const cand of candidates) {
+      if (typeof cand !== 'string') continue;
+      const text = cand.trim();
+      if (!text) continue;
+      if (localeMatches(text, targetLocale)) return text;
+    }
+
+    // 3) Any non-empty slot in the multilang objects (locale fallback).
+    for (const src of multilangSources) {
+      if (src && typeof src === 'object') {
+        const obj = src as Record<string, unknown>;
+        for (const key of ['en', 'ko', 'zh'] as const) {
+          const slot = obj[key];
+          if (typeof slot === 'string' && slot.trim()) return slot.trim();
+        }
+      }
+    }
+
+    // 4) Any candidate string at all (regardless of character set).
+    for (const cand of candidates) {
+      if (typeof cand === 'string' && cand.trim()) return cand.trim();
+    }
+
+    // 5) Last-resort placeholder.
+    return resolveText(product.seller?.name ?? '') || 'Store';
+  };
+
   const navigateToCartAfterBuyNow = useCallback(
     (cartResponse: { cart?: { items?: any[] } }) => {
       const cartItems = cartResponse?.cart?.items || [];
@@ -374,11 +496,9 @@ const ProductDetailScreen: React.FC = () => {
   const performFollowAction = async () => {
     setIsFollowingStore(true);
     try {
-      // Get company name from product metadata or seller
-      const companyName = (product as any).metadata?.original1688Data?.companyName || 
-                          product.seller?.name || 
-                          'Store';
-      
+      // Locale-aware company name (see `resolveCompanyDisplayName` above).
+      const companyName = resolveCompanyDisplayName() || 'Store';
+
       // Get shop ID and name
       const shopId = product.seller?.id || (product as any).sellerOpenId || '';
       const shopName = companyName;
@@ -436,6 +556,12 @@ const ProductDetailScreen: React.FC = () => {
   // Additional state declarations - MUST be before any hooks that use them
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [showFullSpecifications, setShowFullSpecifications] = useState(false);
+  // Window count for HTML-description images. Starts at 5 so the initial
+  // mount of `renderProductDetails` only touches 5 <ProductImage>'s even
+  // when the API returned 30+. A timer (in a useEffect below) grows this
+  // by 5 every ~250ms so the rest fill in without blocking the first paint,
+  // and the user can also tap "Show more" to jump straight to all of them.
+  const [descriptionImagesShown, setDescriptionImagesShown] = useState(5);
   const [currentStatIndex, setCurrentStatIndex] = useState(0);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [viewerImageIndex, setViewerImageIndex] = useState(0);
@@ -623,7 +749,16 @@ const ProductDetailScreen: React.FC = () => {
       );
     },
     onError: (error) => {
-      showToast(error || t('product.failedToLoadRelatedProducts'), 'error');
+      // Recommendations are an ancillary section — when the backend
+      // returns an error (e.g. 500 from a locale it doesn't support)
+      // we silently empty the grid instead of flashing a red toast on
+      // top of an otherwise-correct product page. The error is still
+      // recorded in __DEV__ logs for diagnostics.
+      if (__DEV__) {
+        console.warn('🛒 related recommendations failed:', error);
+      }
+      setRelatedProducts([]);
+      setRelatedProductsHasMore(false);
     },
   });
 
@@ -765,7 +900,31 @@ const ProductDetailScreen: React.FC = () => {
       if (data && data.product) {
         // Map API response to product format
         const apiProduct = data.product;
-        
+
+        // One-off diagnostic — surface every plausible source of the
+        // original Chinese company name in the upstream payload, so we
+        // can pick the right path in `buildAddToCartRequest`. Remove
+        // once `companyName.zh` is reliably filled.
+        if (__DEV__) {
+          console.log(
+            '🔍 product.companyName probe',
+            JSON.stringify({
+              companyName: apiProduct?.companyName,
+              originalCompanyName: apiProduct?.originalCompanyName,  // ← the key one
+              companyNameMultiLang: apiProduct?.companyNameMultiLang,
+              sellerLoginId: apiProduct?.sellerLoginId,
+              sellerName: apiProduct?.sellerName,
+              sellerOpenName: apiProduct?.sellerOpenName,
+              shopName: apiProduct?.shopName,
+              sellerDataInfo_companyName: apiProduct?.sellerDataInfo?.companyName,
+              sellerDataInfo_shopName: apiProduct?.sellerDataInfo?.shopName,
+              metadata_keys: apiProduct?.metadata ? Object.keys(apiProduct.metadata) : null,
+              original1688Data_companyName: apiProduct?.metadata?.original1688Data?.companyName,
+              raw_keys: Object.keys(apiProduct || {}),
+            }, null, 2),
+          );
+        }
+
         // Extract images from productImage.images
         const images = normalizeProductImageUrls(apiProduct.productImage?.images || []);
         const galleryFirst = images[0] || '';
@@ -843,13 +1002,53 @@ const ProductDetailScreen: React.FC = () => {
           sellerDataInfo: apiProduct.sellerDataInfo || {},
           minOrderQuantity: apiProduct.minOrderQuantity || 1,
           unitInfo: apiProduct.productSaleInfo?.unitInfo || {},
-          // Additional fields for cart API
+          // Additional fields for cart API.
+          // IMPORTANT: keep the RAW multi-language objects from the upstream
+          // API as well as the flattened/translated strings. The cart
+          // backend stores `companyName`/`subjectMultiLang`/`categoryName`
+          // as {en, ko, zh} objects (see the known-good response sample),
+          // and rejects payloads that send Korean text in the `zh` slot.
+          // Without preserving the original Chinese here we'd never be
+          // able to fill `companyName.zh` correctly downstream.
           categoryId: apiProduct.categoryId,
-          subject: apiProduct.subject || '',
+          categoryName: apiProduct.categoryName,                      // can be string or {en,ko,zh}
+          subject: apiProduct.subject || '',                          // raw upstream (often Chinese)
           subjectTrans: apiProduct.subjectTrans || apiProduct.subject || '',
+          subjectMultiLang: apiProduct.subjectMultiLang,              // {en,ko,zh} if present
+          companyName: apiProduct.companyName,                        // {en,ko,zh} or string
+          companyNameMultiLang: apiProduct.companyNameMultiLang,      // {en,ko,zh} if present
+          // Aggressively preserve any field that might hold the ORIGINAL
+          // Chinese company name. Different upstream APIs use different
+          // keys; `buildAddToCartRequest` will pick the first non-empty
+          // one that contains Chinese characters and place it in
+          // `companyName.zh`.
+          _rawCompanyNameCandidates: [
+            // The backend's /products/detail response carries the ORIGINAL
+            // Chinese company name in `originalCompanyName` (confirmed by
+            // the `🔍 product.companyName probe` log — `raw_keys` includes
+            // both "companyName" and "originalCompanyName"). The plain
+            // `companyName` field is translated to whatever `country=`
+            // we requested, so it cannot be used as the zh source.
+            apiProduct.originalCompanyName,
+            apiProduct.companyName,
+            apiProduct.companyNameMultiLang,
+            apiProduct.companyNameOriginal,
+            apiProduct.sellerName,
+            apiProduct.sellerOpenName,
+            apiProduct.shopName,
+            apiProduct.sellerDataInfo?.companyName,
+            apiProduct.sellerDataInfo?.shopName,
+            apiProduct.metadata?.original1688Data?.companyName,
+            apiProduct.metadata?.original1688Data?.shopName,
+            apiProduct.original1688Data?.companyName,
+          ].filter(Boolean),
+          // Also stash the original Chinese directly on the product for
+          // easy access in display helpers.
+          originalCompanyName: apiProduct.originalCompanyName,
+          originalSource: apiProduct.originalSource || apiProduct.source,
           promotionUrl: apiProduct.promotionUrl || '',
         };
-        
+
         setProduct(mappedProduct);
         setLoading(false);
         // Mark this productId as fetched
@@ -904,9 +1103,24 @@ const ProductDetailScreen: React.FC = () => {
   }, [product?.minOrderQuantity]);
 
   // Fetch product detail if productId is available and no initialProductData
-  // Dedupe key includes locale so a language switch re-fetches with the new language
+  // Dedupe key includes locale so a language switch re-fetches with the new language.
+  //
+  // Important: the backend's `/products/detail` endpoint does NOT accept
+  // `country=zh` — it returns HTTP 500 for the Chinese locale. So we
+  // collapse `zh` (and any unknown locale) to `en`, which the backend
+  // supports and which still returns the original Chinese `subject`
+  // alongside the English `subjectTrans`. Chinese UI users will see the
+  // original `subject` text, which is more accurate for them anyway.
+  const mapCountryForProductDetail = (raw?: string): string => {
+    const value = (raw || '').toLowerCase();
+    if (value === 'ko' || value === 'en') return value;
+    // 'zh', 'kr', '', undefined, etc. all fall through to 'en'.
+    return 'en';
+  };
+
   useEffect(() => {
-    const fetchCountry = (routeCountry as string) || locale;
+    const requestedCountry = (routeCountry as string) || locale;
+    const fetchCountry = mapCountryForProductDetail(requestedCountry);
     if (initialProductData) {
       setProduct(initialProductData);
       setLoading(false);
@@ -934,58 +1148,132 @@ const ProductDetailScreen: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId, offerId, initialProductData, routeSource, routeCountry, locale]);
   
-  // Fetch wishlist count when product is loaded
+  // Fetch wishlist count when product is loaded.
+  // Deferred until after interactions so it never competes with the first
+  // paint of the gallery/info sections — the count is a small badge in the
+  // bottom bar and can appear a few hundred ms later without being noticed.
   useEffect(() => {
-    const fetchWishlistCount = async () => {
-      if (!product) return;
-      
-      const externalId = product?.offerId || product?.externalId || product?.id || productId || offerId || '';
+    if (!product) return;
+
+    const handle = InteractionManager.runAfterInteractions(() => {
+      const externalId =
+        product?.offerId || product?.externalId || product?.id || productId || offerId || '';
       const fetchSource = sourceRef.current;
-      
       if (!externalId || !fetchSource) return;
-      
-      try {
-        const response = await productsApi.getWishlistCount(externalId.toString(), fetchSource);
-        if (response.success && response.data) {
-          setWishlistCount(response.data.count || 0);
-        } else {
+
+      productsApi
+        .getWishlistCount(externalId.toString(), fetchSource)
+        .then((response) => {
+          if (response.success && response.data) {
+            setWishlistCount(response.data.count || 0);
+          } else {
+            setWishlistCount(0);
+          }
+        })
+        .catch(() => {
           setWishlistCount(0);
-        }
-      } catch (error) {
-        // console.error('Failed to fetch wishlist count:', error);
-        setWishlistCount(0);
-      }
-    };
-    
-    fetchWishlistCount();
+        });
+    });
+
+    return () => handle.cancel?.();
   }, [product, productId, offerId, routeSource]);
 
-  // Fetch related products when productId is available
+  // Fetch the current cart once the product is loaded and remember any
+  // existing item that matches this offerId. When the user later taps
+  // "Add to cart" we forward the canonical fields from that existing
+  // cart row (companyName, subjectMultiLang, categoryName, imageUrl, …)
+  // verbatim — this guarantees the POST payload matches the shape the
+  // backend itself produced via GET /cart, eliminating the 500s caused
+  // by mismatched multilang keys.
+  useEffect(() => {
+    if (!product) return;
+    if (!isAuthenticated) return;
+
+    const handle = InteractionManager.runAfterInteractions(() => {
+      cartApi
+        .getCart(locale)
+        .then((res) => {
+          if (!res.success || !res.data?.cart) {
+            setExistingCartItem(null);
+            return;
+          }
+          const items: any[] = (res.data.cart as any).items || [];
+          const currentOfferId =
+            product?.offerId?.toString() ||
+            product?.id?.toString() ||
+            productId?.toString() ||
+            offerId?.toString() ||
+            '';
+          if (!currentOfferId) {
+            setExistingCartItem(null);
+            return;
+          }
+          const match = items.find(
+            (it) => it?.offerId?.toString() === currentOfferId,
+          );
+          setExistingCartItem(match || null);
+        })
+        .catch(() => setExistingCartItem(null));
+    });
+
+    return () => handle.cancel?.();
+  }, [product, productId, offerId, locale, isAuthenticated]);
+
+  // (Previously: a secondary `lang=zh` product-detail fetch was used here
+  //  to recover the Chinese company name. Removed because the backend's
+  //  `/products/detail` endpoint returns HTTP 500 for `country=zh`. The
+  //  Chinese company name is now sourced from:
+  //    1. The existing cart row (GET /cart returns the canonical
+  //       `companyName.zh`).
+  //    2. The primary `country=en` product-detail response's `subject`
+  //       field — which carries the original Chinese title — and
+  //       `_rawCompanyNameCandidates`, which includes any zh slot the
+  //       backend chose to send along with the English response.)
+
+  // Fetch related products when productId is available.
+  // Deferred via InteractionManager so the recommendations grid (the
+  // heaviest section by far — 10–20 product cards with images) doesn't
+  // delay the user's first interaction. The `<LazyMount>` wrapping in the
+  // FlatList layout already keeps it out of the initial render; this also
+  // keeps it out of the initial network burst.
   useEffect(() => {
     const currentProductId = productId?.toString() || offerId?.toString() || '';
-    if (currentProductId && product) {
-      // Map locale to language code
-      const language = locale === 'zh' ? 'zh' : locale === 'ko' ? 'ko' : 'en';
-      const fetchSource = sourceRef.current; // Use ref to avoid infinite loops
-      
+    if (!currentProductId || !product) return;
+
+    const handle = InteractionManager.runAfterInteractions(() => {
+      // Same constraint as the primary product-detail fetch: the
+      // recommendations / search endpoints reject `language=zh` with
+      // HTTP 500 (which then surfaces as a red toast in the UI when
+      // the user opens a product page in the Chinese locale). Map
+      // `zh` → `en`; the recommendation cards still render fine and
+      // the Chinese user sees the upstream `subject` field anyway.
+      const language = locale === 'ko' ? 'ko' : 'en';
+      const fetchSource = sourceRef.current;
+
       if (fetchSource === 'taobao') {
-        // For Taobao, use search API with category name as keyword
         const searchKeyword = product.category?.name || '';
         if (searchKeyword) {
-          // console.log('🔍 [ProductDetailScreen] Fetching related products via search API for Taobao:', {
-          //   keyword: searchKeyword,
-          //   source: fetchSource,
-          //   language,
-          // });
-          searchProducts(searchKeyword, fetchSource, language, 1, 20, undefined, undefined, undefined, undefined, false); // requireAuth = false for product detail page
+          searchProducts(
+            searchKeyword,
+            fetchSource,
+            language,
+            1,
+            20,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            false,
+          );
         }
       } else {
-        // For non-Taobao, use related recommendations API
         fetchRelatedRecommendations(currentProductId, 1, 10, language, fetchSource);
       }
-    }
+    });
+
+    return () => handle.cancel?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId, offerId, locale, product, routeSource]); // Use routeSource instead of source to avoid infinite loops
+  }, [productId, offerId, locale, product, routeSource]);
   
   // Load more similar products - MUST be before early return
   const loadMoreSimilarProducts = useCallback(() => {
@@ -1201,6 +1489,57 @@ const ProductDetailScreen: React.FC = () => {
     getApiProductImages,
   ]);
 
+  // Image prefetch — warm the cache for the neighbours of whichever gallery
+  // image is on screen. Inline gallery uses `selectedImageIndex`, the
+  // fullscreen viewer uses `viewerImageIndex`; both hooks share the same
+  // requested-URL dedupe set internally.
+  useGalleryPrefetch(displayGalleryImages, selectedImageIndex, 1);
+  useGalleryPrefetch(displayGalleryImages, viewerImageIndex, 1);
+
+  // Prefetch handler for the related-products grid. Fires only for cards
+  // that actually enter the viewport, so we don't burn bandwidth on every
+  // recommendation up front.
+  const handleRelatedViewable = useViewablePrefetch<Product | any>(
+    (item) => (item as any)?.image || (item as any)?.imageUrl,
+  );
+
+  // Staggered reveal — defeats "everything mounts at once" by spreading
+  // section mounts across multiple frames after the product data arrives.
+  //
+  //   stage 0 : gallery + info + price + variations (critical path)
+  //   stage 1 : + seller card
+  //   stage 2 : + product details (HTML + description images, heaviest)
+  //   stage 3 : + related products grid
+  //
+  // Each step waits ~120ms so the JS thread can finish layout/paint of the
+  // previous step before being asked to mount the next one. The result is
+  // that the first frame the user sees only contains the critical sections,
+  // and the heavy content fills in progressively without a single big jank.
+  const revealStage = useStaggeredReveal(4, 120, !!product);
+
+  // Reset the description-image window whenever the underlying product
+  // changes (e.g. pushing into a related product), so the next product also
+  // starts from the cheap first-paint window.
+  useEffect(() => {
+    setDescriptionImagesShown(5);
+  }, [product?.id, product?.offerId]);
+
+  // After the details stage is reached, grow the visible description-image
+  // window in small batches so the remaining covers stream in without
+  // freezing the JS thread. Stops once the window covers everything.
+  useEffect(() => {
+    if (revealStage < 2) return;
+    const total = product?.description
+      ? extractImagesFromHtml(product.description).length
+      : 0;
+    if (descriptionImagesShown >= total) return;
+
+    const id = setTimeout(() => {
+      setDescriptionImagesShown((n) => Math.min(total, n + 5));
+    }, 250);
+    return () => clearTimeout(id);
+  }, [revealStage, descriptionImagesShown, product?.description]);
+
   const resolveGalleryImagesForColorUri = useCallback(
     (colorUri: string): string[] => {
       const normalized = normalizeProductImageUrl(colorUri);
@@ -1361,7 +1700,9 @@ const ProductDetailScreen: React.FC = () => {
       selectedPlatform === 'taobao'
         ? (item as any).source || 'taobao'
         : (item as any).source || selectedPlatform || '1688';
-    const itemCountry = locale === 'zh' ? 'zh' : locale === 'ko' ? 'ko' : 'en';
+    // zh → en (backend rejects country=zh; the pushed ProductDetail
+    // would otherwise 500 just like the current one used to).
+    const itemCountry = locale === 'ko' ? 'ko' : 'en';
 
     navigation.push('ProductDetail', {
       productId: productIdToUse?.toString() || item.id?.toString() || '',
@@ -1469,11 +1810,65 @@ const ProductDetailScreen: React.FC = () => {
       .replace('{price}', formatPriceKRW(product.price || 0));
   }, [product?.name, product?.price, t]);
 
-  // Early return - MUST be after ALL hooks.
-  // Skeleton shape matches the upcoming detail layout so the transition feels
-  // like content filling in rather than a swap from a spinner.
+  // Early return — MUST be after ALL hooks.
+  //
+  // Critical-path first-paint strategy:
+  //   1. If the caller passed a `thumbnailUrl` (via openProductDetail), paint
+  //      it RIGHT NOW into the hero slot. The bytes are already in cache
+  //      from the prefetch fired at click time, so this is a synchronous
+  //      paint — the user sees the same picture they tapped on, instantly.
+  //   2. Underneath the hero, draw <ProductDetailBodySkeleton> so the rest
+  //      of the page has visible structure while the detail API resolves.
+  //   3. Header (back/share) is rendered on top so the user can navigate
+  //      back before the data arrives.
+  //
+  // Once `product` arrives, the full FlatList layout (RecyclerView + LazyMount
+  // + Image Prefetch) takes over — the hero we drew here gets replaced by the
+  // real <renderImageGallery> ScrollView seamlessly because both use the same
+  // <ProductImage> component pointed at the same URL.
   if (loading || !product) {
-    return <ScreenSkeleton variant="detail" />;
+    return (
+      <View style={styles.container}>
+        {/* Minimal header — only the back button. The full header (share,
+            wishlist count, etc.) needs product data so it's deferred until
+            the real render path below. Defining the header inline here also
+            avoids forward-referencing `renderHeader`, which is declared
+            later in the component body. */}
+        <View
+          style={[
+            styles.safeArea,
+            { paddingTop: insets.top, backgroundColor: COLORS.white },
+          ]}
+          pointerEvents="box-none"
+        >
+          <View style={{ flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 8 }}>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={false}
+          contentContainerStyle={{ paddingBottom: 200 + insets.bottom }}
+        >
+          {routeThumbnailUrl ? (
+            <View style={{ width, height: width, backgroundColor: COLORS.gray[100] }}>
+              <ProductImage
+                uri={routeThumbnailUrl}
+                style={{ width, height: width } as any}
+                resizeMode="cover"
+              />
+            </View>
+          ) : null}
+          <ProductDetailBodySkeleton hasHeroImage={!!routeThumbnailUrl} />
+        </ScrollView>
+      </View>
+    );
   }
 
   const isLiked = isProductLiked(product);
@@ -1548,34 +1943,356 @@ const ProductDetailScreen: React.FC = () => {
       }
     }
 
+    const productIdForUrl = product.offerId || product.id || productId || offerId || '';
+
+    // For products WITHOUT options (no variations, no SKU list), the
+    // backend convention — confirmed by the known-good cart response
+    // sample — is to set `skuId` and `specId` equal to the offerId
+    // itself, so the request is still well-formed and references a
+    // valid product. Without this fallback the cart endpoint received
+    // `skuId=0 / specId='0'`, which our validator (correctly) blocked
+    // with "잠시 후 다시 시도해 주세요" — making no-option products
+    // impossible to add.
+    const hasNoOptions =
+      rawVariants.length === 0 && productSkuInfos.length === 0;
+    const defaultSkuFromOffer = hasNoOptions
+      ? productIdForUrl.toString()
+      : '0';
+
     const finalSkuId =
-      skuIdFromVariant || selectedSku?.skuId || selectedVariant?.skuId || selectedVariant?.id || '0';
+      skuIdFromVariant ||
+      selectedSku?.skuId ||
+      selectedVariant?.skuId ||
+      selectedVariant?.id ||
+      defaultSkuFromOffer;
     const isTaobao = source === 'taobao';
     const finalSpecId = isTaobao
       ? finalSkuId.toString()
-      : selectedSku?.specId?.toString() || finalSkuId.toString();
+      : selectedSku?.specId?.toString() ||
+        (hasNoOptions ? productIdForUrl.toString() : finalSkuId.toString());
     const finalPrice =
       variantPrice || selectedSku?.price || selectedSku?.consignPrice || product.price || 0;
-    const productIdForUrl = product.offerId || product.id || productId || offerId || '';
     const promotionUrl = isTaobao
       ? `${SERVER_BASE_URL}/${productIdForUrl}`
       : (product as any).promotionUrl || '';
     const skuIdValue = typeof finalSkuId === 'string' ? parseInt(finalSkuId, 10) || 0 : finalSkuId;
 
-    return {
+    // Build the multi-language objects the backend expects. Three rules
+    // (derived from the known-good payload sample):
+    //
+    //   1. If the source value is already a {en,ko,zh} object, forward
+    //      only those three keys verbatim.
+    //   2. If it's a plain string, decide which locale slot it belongs in
+    //      based on its CHARACTER SET, not the user's current UI locale:
+    //        - contains CJK ideographs only      → `zh`
+    //        - contains Hangul                   → `ko`
+    //        - otherwise (ASCII / Latin)         → `en`
+    //      The previous version dropped every string into the UI locale's
+    //      slot, which produced `subjectMultiLang.ko = "<chinese text>"` —
+    //      the backend then rejected it (probably a Hangul validator) and
+    //      returned HTTP 500.
+    //   3. Empty / nullish input returns an empty object.
+    type LocaleSlot = 'en' | 'ko' | 'zh';
+    const localeFromText = (text: string): LocaleSlot => {
+      if (/[가-힯ᄀ-ᇿ㄰-㆏]/.test(text)) return 'ko';
+      if (/[一-鿿]/.test(text)) return 'zh';
+      return 'en';
+    };
+    const buildMultiLang = (value: unknown): { en?: string; ko?: string; zh?: string } => {
+      if (value == null) return {};
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return {};
+        return { [localeFromText(trimmed)]: trimmed } as {
+          en?: string;
+          ko?: string;
+          zh?: string;
+        };
+      }
+      if (typeof value === 'object') {
+        const obj = value as Record<string, unknown>;
+        const out: { en?: string; ko?: string; zh?: string } = {};
+        if (typeof obj.en === 'string' && obj.en.trim()) out.en = obj.en.trim();
+        if (typeof obj.ko === 'string' && obj.ko.trim()) out.ko = obj.ko.trim();
+        if (typeof obj.zh === 'string' && obj.zh.trim()) out.zh = obj.zh.trim();
+        return out;
+      }
+      return {};
+    };
+
+    // Subject / title — server's accepted format uses the TRANSLATED text
+    // for both `subject` and `subjectTrans`, with `subjectMultiLang`
+    // containing the language-keyed copy. `product.subject` is the raw
+    // upstream value (often Chinese), `product.subjectTrans` is the
+    // localised one — so prefer `subjectTrans` everywhere user-facing.
+    const subjectTransText = resolveText(
+      (product as any).subjectTrans || product.name || (product as any).subject || '',
+    );
+    const subjectOriginalText = resolveText(
+      (product as any).subject || (product as any).subjectOriginal || '',
+    );
+    // Subject multilang — the known-good payload sample contains ONLY the
+    // translated slot (`ko`). Send just that slot exactly mirroring the
+    // sample. (We avoid filling `zh` from a different source; the backend
+    // appears to dislike payloads with mixed-origin multilang content.)
+    const rawSubjectMultiLang = buildMultiLang(
+      (product as any).subjectMultiLang ?? (product as any).subjectMultilang,
+    );
+    const subjectMultiLang: { en?: string; ko?: string; zh?: string } =
+      // If the upstream API already gave us a multilang object, prefer it
+      // verbatim. Otherwise build a single-slot one from `subjectTrans`.
+      Object.keys(rawSubjectMultiLang).length > 0
+        ? rawSubjectMultiLang
+        : subjectTransText
+          ? ({ [localeFromText(subjectTransText)]: subjectTransText } as {
+              en?: string;
+              ko?: string;
+              zh?: string;
+            })
+          : {};
+    void subjectOriginalText;
+
+    // Company name — Android always tries to send the ORIGINAL Chinese
+    // name in the `zh` slot. Strict invariant: a value is only allowed in
+    // the `zh` slot if it ACTUALLY contains Chinese ideographs. Slots
+    // labelled `zh` but holding English/Korean text have been observed to
+    // trigger HTTP 500 — the backend appears to validate that the zh
+    // value matches a Chinese character set.
+    //
+    // We also forward `en` and `ko` slots when they're available and
+    // language-correct, so the cart row ends up with a complete
+    // multilang object (matching the known-good response sample).
+    const containsChinese = (s: string) => /[一-鿿]/.test(s);
+    const containsHangul = (s: string) => /[가-힯ᄀ-ᇿ㄰-㆏]/.test(s);
+
+    /** Pick the best Chinese-character string from a list of candidates. */
+    const findChineseCompanyName = (): string => {
+      // 1) Existing cart row's zh value — only trust it if it's actually
+      //    Chinese characters. (If the row is corrupted by a previous
+      //    buggy submit, fall through.)
+      const ec = existingCartItem as any;
+      if (
+        ec?.companyName?.zh &&
+        typeof ec.companyName.zh === 'string' &&
+        containsChinese(ec.companyName.zh)
+      ) {
+        return ec.companyName.zh.trim();
+      }
+
+      // 2) Walk the collected candidate list. For each candidate that's
+      //    an object, only accept its zh slot IF the value is Chinese.
+      const candidates: unknown[] = (product as any)._rawCompanyNameCandidates || [];
+      for (const cand of candidates) {
+        if (
+          cand &&
+          typeof cand === 'object' &&
+          typeof (cand as any).zh === 'string' &&
+          containsChinese((cand as any).zh)
+        ) {
+          return (cand as any).zh.trim();
+        }
+      }
+      // For candidates that are plain strings, check character set.
+      for (const cand of candidates) {
+        if (typeof cand === 'string' && containsChinese(cand)) {
+          return cand.trim();
+        }
+      }
+
+      // 3) Direct product fields — same strictness.
+      const direct = (product as any).companyName;
+      if (
+        direct &&
+        typeof direct === 'object' &&
+        typeof direct.zh === 'string' &&
+        containsChinese(direct.zh)
+      ) {
+        return direct.zh.trim();
+      }
+      if (typeof direct === 'string' && containsChinese(direct)) {
+        return direct.trim();
+      }
+
+      // 4) Seller name.
+      const sellerName = resolveText(product.seller?.name ?? '');
+      if (sellerName && containsChinese(sellerName)) {
+        return sellerName.trim();
+      }
+
+      // 5) Nothing Chinese found — return empty string so the caller can
+      //    omit the zh slot entirely instead of poisoning it with a
+      //    non-Chinese value (which would re-create the 500).
+      return '';
+    };
+
+    /** Pick the best Hangul string. */
+    const findKoreanCompanyName = (): string => {
+      const ec = existingCartItem as any;
+      if (
+        ec?.companyName?.ko &&
+        typeof ec.companyName.ko === 'string' &&
+        containsHangul(ec.companyName.ko)
+      ) {
+        return ec.companyName.ko.trim();
+      }
+      const candidates: unknown[] = (product as any)._rawCompanyNameCandidates || [];
+      for (const cand of candidates) {
+        if (
+          cand &&
+          typeof cand === 'object' &&
+          typeof (cand as any).ko === 'string' &&
+          containsHangul((cand as any).ko)
+        ) {
+          return (cand as any).ko.trim();
+        }
+      }
+      for (const cand of candidates) {
+        if (typeof cand === 'string' && containsHangul(cand)) return cand.trim();
+      }
+      const direct = (product as any).companyName;
+      if (
+        direct &&
+        typeof direct === 'object' &&
+        typeof direct.ko === 'string' &&
+        containsHangul(direct.ko)
+      ) {
+        return direct.ko.trim();
+      }
+      const sellerName = resolveText(product.seller?.name ?? '');
+      if (sellerName && containsHangul(sellerName)) return sellerName.trim();
+      return '';
+    };
+
+    /** Pick the best English / Latin string. */
+    const findEnglishCompanyName = (): string => {
+      const ec = existingCartItem as any;
+      if (
+        ec?.companyName?.en &&
+        typeof ec.companyName.en === 'string' &&
+        !containsChinese(ec.companyName.en) &&
+        !containsHangul(ec.companyName.en)
+      ) {
+        return ec.companyName.en.trim();
+      }
+      const candidates: unknown[] = (product as any)._rawCompanyNameCandidates || [];
+      for (const cand of candidates) {
+        if (
+          cand &&
+          typeof cand === 'object' &&
+          typeof (cand as any).en === 'string' &&
+          (cand as any).en.trim() &&
+          !containsChinese((cand as any).en) &&
+          !containsHangul((cand as any).en)
+        ) {
+          return (cand as any).en.trim();
+        }
+      }
+      for (const cand of candidates) {
+        if (
+          typeof cand === 'string' &&
+          cand.trim() &&
+          !containsChinese(cand) &&
+          !containsHangul(cand)
+        ) {
+          return cand.trim();
+        }
+      }
+      const direct = (product as any).companyName;
+      if (
+        direct &&
+        typeof direct === 'object' &&
+        typeof direct.en === 'string' &&
+        direct.en.trim() &&
+        !containsChinese(direct.en) &&
+        !containsHangul(direct.en)
+      ) {
+        return direct.en.trim();
+      }
+      if (
+        typeof direct === 'string' &&
+        direct.trim() &&
+        !containsChinese(direct) &&
+        !containsHangul(direct)
+      ) {
+        return direct.trim();
+      }
+      const sellerName = resolveText(product.seller?.name ?? '');
+      if (
+        sellerName &&
+        !containsChinese(sellerName) &&
+        !containsHangul(sellerName)
+      ) {
+        return sellerName.trim();
+      }
+      return '';
+    };
+
+    // Build the multilang object — each slot only gets filled when the
+    // value's character set matches the slot's locale. This guarantees
+    // the backend's per-slot validators (Chinese for zh, Hangul for ko,
+    // ASCII for en) never see a mismatched value.
+    const companyZh = findChineseCompanyName();
+    const companyKo = findKoreanCompanyName();
+    const companyEn = findEnglishCompanyName();
+    const companyMultiLang: { en?: string; ko?: string; zh?: string } = {};
+    if (companyZh) companyMultiLang.zh = companyZh;
+    if (companyKo) companyMultiLang.ko = companyKo;
+    if (companyEn) companyMultiLang.en = companyEn;
+
+    // Category — backend accepts `categoryName` (string, empty OK; or a
+    // {en,ko,zh} object as seen in the response sample). Forward whatever
+    // the upstream gave us; default to empty string to mirror the sample.
+    const rawCategoryName = (product as any).categoryName;
+    const categoryName: string | { en?: string; ko?: string; zh?: string } =
+      rawCategoryName && typeof rawCategoryName === 'object'
+        ? rawCategoryName
+        : typeof rawCategoryName === 'string' && rawCategoryName
+          ? rawCategoryName
+          : typeof product.category === 'object' && product.category
+            ? resolveText((product.category as any).name) || ''
+            : '';
+
+    const finalPriceStr = finalPrice.toString();
+
+    // Strip the `_NNNxNNN.jpg` size suffix that our image normaliser
+    // appends for 1688 CDN thumbnails. The backend stores the original
+    // URL (see the known-good payload sample) and likely re-fetches it
+    // from 1688 — the size variant URL is not a valid 1688 resource and
+    // makes that fetch fail, contributing to the 500.
+    const stripAlicdnSizeSuffix = (url: string): string =>
+      url ? url.replace(/_\d+x\d+\.(jpg|jpeg|png|webp)$/i, '') : url;
+    const rawImageUrl = product.images?.[0] || product.image || '';
+    const cleanImageUrl = stripAlicdnSizeSuffix(rawImageUrl);
+
+    const builtPayload: AddToCartRequest = {
       offerId: parseInt(productIdForUrl.toString() || '0', 10),
-      categoryId: parseInt((product as any).categoryId || product.category?.id || '0', 10),
-      subject: resolveText((product as any).subject || product.name || ''),
-      subjectTrans: resolveText((product as any).subjectTrans || product.name || ''),
-      imageUrl: product.images?.[0] || product.image || '',
+      categoryName,
+      // Both `subject` and `subjectTrans` carry the translated text — the
+      // known-good payload sample shows them identical. Sending the raw
+      // Chinese in `subject` (the previous behaviour) caused a 500 because
+      // the backend's Hangul-validator on the ko-locale path rejected it.
+      subject: subjectTransText,
+      subjectTrans: subjectTransText,
+      subjectMultiLang,
+      imageUrl: cleanImageUrl,
       promotionUrl,
       source,
+      // `originalSource` keeps the marketplace of record even if the client
+      // remaps `source` for routing — backend uses it for SKU lookups.
+      originalSource: (product as any).originalSource || source,
       skuInfo: {
         skuId: skuIdValue,
         specId: finalSpecId,
-        price: finalPrice.toString(),
-        amountOnSale: selectedSku?.amountOnSale || selectedVariant?.stock || 0,
-        consignPrice: finalPrice.toString(),
+        price: finalPriceStr,
+        // For products without options, fall back to a large stock figure
+        // (matches the backend's own convention — known-good payload sample
+        // shows `amountOnSale: 999999` for no-option products). `0` would
+        // make some downstream stock checks reject the line item.
+        amountOnSale:
+          selectedSku?.amountOnSale ||
+          selectedVariant?.stock ||
+          (hasNoOptions ? 999999 : 0),
+        consignPrice: finalPriceStr,
         cargoNumber: selectedSku?.cargoNumber || '',
         skuAttributes: (selectedSku?.skuAttributes || selectedVariant?.attributes || []).map(
           (attr: any) => ({
@@ -1586,18 +2303,92 @@ const ProductDetailScreen: React.FC = () => {
             value: attr.value || attr.value_name || attr.value_desc || '',
             valueTrans:
               attr.valueTrans || attr.value_name || attr.value_desc || attr.value || '',
-            skuImageUrl: attr.skuImageUrl || attr.image || '',
+            skuImageUrl: stripAlicdnSizeSuffix(attr.skuImageUrl || attr.image || ''),
           }),
         ),
-        fenxiaoPriceInfo: selectedSku?.fenxiaoPriceInfo || {
-          offerPrice: finalPrice.toString(),
-        },
+        // Backend expects BOTH `onePiecePrice` and `offerPrice` here.
+        fenxiaoPriceInfo: selectedSku?.fenxiaoPriceInfo
+          ? {
+              onePiecePrice:
+                selectedSku.fenxiaoPriceInfo.onePiecePrice ||
+                selectedSku.fenxiaoPriceInfo.offerPrice ||
+                finalPriceStr,
+              offerPrice:
+                selectedSku.fenxiaoPriceInfo.offerPrice ||
+                selectedSku.fenxiaoPriceInfo.onePiecePrice ||
+                finalPriceStr,
+            }
+          : {
+              onePiecePrice: finalPriceStr,
+              offerPrice: finalPriceStr,
+            },
       },
-      companyName: resolveText(product.seller?.name || (product as any).companyName || ''),
+      companyName: companyMultiLang,
       sellerOpenId: product.seller?.id || (product as any).sellerOpenId || '',
       quantity,
       minOrderQuantity,
     };
+
+    // OVERRIDE with canonical data from the existing cart row (if any).
+    // The cart backend's GET /cart response is the authoritative shape for
+    // POST /cart — by reusing the exact `companyName`, `subjectMultiLang`,
+    // `categoryName`, `imageUrl`, `subject`, `subjectTrans` it already
+    // stored for this offerId, we eliminate every class of "Korean text
+    // in zh slot" / "alicdn size suffix" mismatch that has been causing
+    // the 500. Only fields that come from the cart row are replaced;
+    // SKU-specific fields (skuId, specId, price, quantity, skuAttributes,
+    // fenxiaoPriceInfo) are kept from the user's current selection.
+    if (existingCartItem) {
+      const ec = existingCartItem as any;
+      // When the same product is already in the cart, the row stored by
+      // the backend is the authoritative shape. Copy each slot AS-IS but
+      // only if its content matches the slot's expected character set —
+      // a `zh` slot holding English text would re-create the 500 we're
+      // trying to fix.
+      if (ec.companyName && typeof ec.companyName === 'object') {
+        const merged: { en?: string; ko?: string; zh?: string } = {};
+        const zhVal =
+          typeof ec.companyName.zh === 'string' ? ec.companyName.zh.trim() : '';
+        const koVal =
+          typeof ec.companyName.ko === 'string' ? ec.companyName.ko.trim() : '';
+        const enVal =
+          typeof ec.companyName.en === 'string' ? ec.companyName.en.trim() : '';
+        if (zhVal && containsChinese(zhVal)) merged.zh = zhVal;
+        if (koVal && containsHangul(koVal)) merged.ko = koVal;
+        if (enVal && !containsChinese(enVal) && !containsHangul(enVal)) {
+          merged.en = enVal;
+        }
+        if (merged.zh || merged.ko || merged.en) {
+          builtPayload.companyName = merged;
+        }
+      }
+      if (ec.subjectMultiLang && typeof ec.subjectMultiLang === 'object') {
+        builtPayload.subjectMultiLang = ec.subjectMultiLang;
+      }
+      if (ec.categoryName !== undefined && ec.categoryName !== null) {
+        builtPayload.categoryName = ec.categoryName;
+      }
+      if (typeof ec.imageUrl === 'string' && ec.imageUrl) {
+        builtPayload.imageUrl = ec.imageUrl;
+      }
+      if (typeof ec.subject === 'string' && ec.subject) {
+        builtPayload.subject = ec.subject;
+      }
+      if (typeof ec.subjectTrans === 'string' && ec.subjectTrans) {
+        builtPayload.subjectTrans = ec.subjectTrans;
+      }
+      if (typeof ec.promotionUrl === 'string') {
+        builtPayload.promotionUrl = ec.promotionUrl;
+      }
+      if (typeof ec.source === 'string' && ec.source) {
+        builtPayload.source = ec.source;
+      }
+      if (typeof ec.sellerOpenId === 'string' && ec.sellerOpenId) {
+        builtPayload.sellerOpenId = ec.sellerOpenId;
+      }
+    }
+
+    return builtPayload;
   };
 
   const validateBeforeCartAction = (): boolean => {
@@ -1615,6 +2406,34 @@ const ProductDetailScreen: React.FC = () => {
         t('product.minOrderQuantity') || `Minimum order quantity is ${minOrderQuantity}`,
         'warning',
       );
+      return false;
+    }
+
+    // Build the payload once up-front so we can sanity-check the values
+    // BEFORE sending. The staggered reveal can make the cart button paint
+    // a few frames before `selectedSku`/`selectedVariant` settle for
+    // products without options — without this guard a request with
+    // skuId=0 / specId='0' reaches the backend and triggers a 500.
+    try {
+      const req = buildAddToCartRequest();
+      if (!req.offerId || req.offerId === 0) {
+        showToast(t('product.failedToAdd') || '상품 정보를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.', 'warning');
+        return false;
+      }
+      const skuId = req.skuInfo?.skuId;
+      if (!skuId || skuId === 0) {
+        // Most likely path here: variations exist on the product but no SKU
+        // matched the current selection yet. Tell the user to pick options.
+        const variationTypes = getVariationTypes();
+        if (variationTypes.length > 0) {
+          showToast(t('product.pleaseSelectOptions'), 'warning');
+        } else {
+          showToast(t('product.failedToAdd') || '상품 정보를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.', 'warning');
+        }
+        return false;
+      }
+    } catch {
+      showToast(t('product.failedToAdd') || '상품 정보를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.', 'warning');
       return false;
     }
 
@@ -1642,7 +2461,7 @@ const ProductDetailScreen: React.FC = () => {
     }
 
     try {
-      await addToCart(buildAddToCartRequest());
+      await addToCart(buildAddToCartRequest(), locale);
     } catch (error: any) {
       showToast(error?.message || t('product.failedToAdd'), 'error');
     }
@@ -1663,7 +2482,7 @@ const ProductDetailScreen: React.FC = () => {
     }
 
     try {
-      await addToCartForBuyNow(buildAddToCartRequest());
+      await addToCartForBuyNow(buildAddToCartRequest(), locale);
     } catch (error: any) {
       showToast(error?.message || t('product.failedToProceedToCheckout'), 'error');
     }
@@ -2196,10 +3015,11 @@ const ProductDetailScreen: React.FC = () => {
   };
 
   const renderSellerInfo = () => {
-    // Get company name from product metadata or seller
-    const companyName = (product as any).metadata?.original1688Data?.companyName || 
-                        product.seller?.name || 
-                        'Store';
+    // Locale-aware company name. Returns the slot matching the current
+    // UI locale (or character-set-matched fallback) — so the Chinese
+    // user sees Chinese name even when the backend's product-detail
+    // response only carried the English slot.
+    const companyName = resolveCompanyDisplayName() || 'Store';
     
     // Get seller rating
     const sellerRating = product.seller?.rating || 
@@ -2388,17 +3208,44 @@ const ProductDetailScreen: React.FC = () => {
             {/* {attributes.length > 0 && <View style={styles.sectionSeparator} />} */}
             {/* <Text style={styles.sectionSubtitle}>{t('product.productDescription')}</Text> */}
             <View style={styles.htmlContentContainer}>
-              {/* Display images from HTML description */}
+              {/* Description images — windowed via `descriptionImagesShown`
+                  so only a few <ProductImage>'s mount on first paint. The
+                  background timer in the useEffect above grows the window
+                  automatically; the "Show more" button lets the user jump
+                  to the full list if they're impatient. */}
               {descriptionImages.length > 0 && (
                 <View style={styles.descriptionImagesContainer}>
-                  {descriptionImages.map((imgUrl: string, index: number) => (
-                    <ProductImage
-                      key={index}
-                      uri={imgUrl}
-                      style={styles.descriptionImage as any}
-                      resizeMode="contain"
-                    />
-                  ))}
+                  {descriptionImages
+                    .slice(0, descriptionImagesShown)
+                    .map((imgUrl: string, index: number) => (
+                      // Each image fades in the first time it mounts. Images
+                      // that were already on screen keep their existing
+                      // Animated.Value (mounted = true), so only the new
+                      // batch added by the timer animates — earlier ones
+                      // stay put without re-animating.
+                      <RevealOnMount key={index} duration={220} translateY={12}>
+                        <ProductImage
+                          uri={imgUrl}
+                          style={styles.descriptionImage as any}
+                          resizeMode="contain"
+                        />
+                      </RevealOnMount>
+                    ))}
+                  {descriptionImagesShown < descriptionImages.length && (
+                    <TouchableOpacity
+                      onPress={() =>
+                        setDescriptionImagesShown(descriptionImages.length)
+                      }
+                      style={{ paddingVertical: SPACING.sm, alignItems: 'center' }}
+                    >
+                      <Text style={styles.readMoreText}>
+                        {t('product.readMore')}
+                        {' ('}
+                        {descriptionImages.length - descriptionImagesShown}
+                        {')'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
               
@@ -2440,16 +3287,23 @@ const ProductDetailScreen: React.FC = () => {
                     style={styles.similarProductItem}
                     onPress={() => {
                       const productIdToUse = (item as any).offerId || item.id;
-                      // Get source from product data, fallback to 'taobao' for Taobao-related products
                       const source = (item as any).source || 'taobao';
-                      const country =
-                        locale === 'zh' ? 'zh' : locale === 'ko' ? 'ko' : 'en';
-                      navigation.push('ProductDetail', {
-                        productId: productIdToUse?.toString() || item.id?.toString() || '',
-                        offerId: (item as any).offerId?.toString(),
-                        source,
-                        country,
-                      });
+                      // zh → en: backend's /products/detail doesn't accept
+                      // country=zh, so collapse to 'en' for the pushed page.
+                      const country = locale === 'ko' ? 'ko' : 'en';
+                      // Prefetch the recommended card's image and forward it
+                      // — gives the pushed ProductDetail an instant hero.
+                      openProductDetail(
+                        navigation,
+                        {
+                          productId: productIdToUse?.toString() || item.id?.toString() || '',
+                          offerId: (item as any).offerId?.toString(),
+                          source,
+                          country,
+                          thumbnailUrl: (item as any).image,
+                        },
+                        { usePush: true },
+                      );
                     }}
                   >
                     <View style={styles.simpleTaobaoCard}>
@@ -2480,16 +3334,21 @@ const ProductDetailScreen: React.FC = () => {
                     variant="moreToLove"
                     onPress={() => {
                       const productIdToUse = (item as any).offerId || item.id;
-                      // Get source from product data, fallback to selectedPlatform
                       const source = (item as any).source || selectedPlatform || '1688';
-                      const country =
-                        locale === 'zh' ? 'zh' : locale === 'ko' ? 'ko' : 'en';
-                      navigation.push('ProductDetail', {
-                        productId: productIdToUse?.toString() || item.id?.toString() || '',
-                        offerId: (item as any).offerId?.toString(),
-                        source,
-                        country,
-                      });
+                      // zh → en: backend's /products/detail doesn't accept
+                      // country=zh, so collapse to 'en' for the pushed page.
+                      const country = locale === 'ko' ? 'ko' : 'en';
+                      openProductDetail(
+                        navigation,
+                        {
+                          productId: productIdToUse?.toString() || item.id?.toString() || '',
+                          offerId: (item as any).offerId?.toString(),
+                          source,
+                          country,
+                          thumbnailUrl: (item as any).image,
+                        },
+                        { usePush: true },
+                      );
                     }}
                     onLikePress={() => toggleWishlist(item)}
                     isLiked={isProductLiked(item)}
@@ -2507,6 +3366,9 @@ const ProductDetailScreen: React.FC = () => {
             windowSize={5}
             initialNumToRender={6}
             updateCellsBatchingPeriod={50}
+            // Warm the cache for cards as they enter the viewport.
+            onViewableItemsChanged={handleRelatedViewable}
+            viewabilityConfig={{ itemVisiblePercentThreshold: 30 }}
           />
         )}
       </View>
@@ -2757,28 +3619,111 @@ const ProductDetailScreen: React.FC = () => {
         {renderHeader()}
       </Animated.View>
 
-      <Animated.ScrollView
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 200 + insets.bottom }}
-        scrollEventThrottle={16}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false }
-        )}
-      >
-        {renderImageGallery()}
-        {renderProductInfo()}
-        {/* {renderRatingRow()} */}
-        {renderPriceRow()}
-        {renderAllVariations()}
-        {/* {renderServiceCommitment()} */}
-        {routeSource !== 'live-commerce' && routeSource !== 'live' && renderSellerInfo()}
-        {/* {renderReviews()} */}
-        {renderProductDetails()}
-        {renderRelatedProducts()}
-        {/* {renderSimilarProducts()} */}
-      </Animated.ScrollView>
+      {/*
+        RecyclerView-style layout: each screen section is one item in the
+        FlatList, so React Native's virtualizer can unmount sections that
+        scroll off-screen (instead of keeping the entire page mounted as a
+        plain ScrollView would).
+
+        Heavy sections that aren't visible on first paint (`productDetails`,
+        `relatedProducts`) are wrapped in <LazyMount> so their subtree is
+        deferred until after interactions, keeping the initial paint cheap.
+      */}
+      {(() => {
+        // Stage-gated section list. Each section only enters the data array
+        // once `revealStage` has advanced far enough to allow it. Sections
+        // that aren't in the array are not rendered at all — this is what
+        // makes the first frame cheap (just the four critical sections
+        // instead of the full page tree).
+        const sections: Array<{
+          key: string;
+          render: () => React.ReactNode;
+          lazy?: boolean;
+          placeholderHeight?: number;
+          /** Wrap with <RevealOnMount> so the section fades + lifts into
+           *  place on first mount instead of popping in. Stage-0 critical
+           *  sections skip this so they paint instantly. */
+          reveal?: boolean;
+        }> = [
+          // stage 0 — critical path, always shown (no reveal animation;
+          // these are the first thing the user sees, must not be delayed)
+          { key: 'gallery', render: renderImageGallery },
+          { key: 'info', render: renderProductInfo },
+          { key: 'price', render: renderPriceRow },
+          { key: 'variations', render: renderAllVariations },
+        ];
+
+        const sellerEligible =
+          routeSource !== 'live-commerce' && routeSource !== 'live';
+
+        // stage 1 — seller card
+        if (revealStage >= 1 && sellerEligible) {
+          sections.push({ key: 'seller', render: renderSellerInfo, reveal: true });
+        }
+
+        // stage 2 — product details (HTML + description images, heaviest)
+        if (revealStage >= 2) {
+          sections.push({
+            key: 'details',
+            render: renderProductDetails,
+            lazy: true,
+            placeholderHeight: 320,
+            reveal: true,
+          });
+        }
+
+        // stage 3 — related products grid
+        if (revealStage >= 3) {
+          sections.push({
+            key: 'related',
+            render: renderRelatedProducts,
+            lazy: true,
+            placeholderHeight: 480,
+            reveal: true,
+          });
+        }
+
+        return (
+          <Animated.FlatList
+            style={styles.scrollView}
+            data={sections}
+            extraData={revealStage}
+            keyExtractor={(s) => s.key}
+            renderItem={({ item }) => {
+              // Inner content: deferred mount for heavy sections, immediate
+              // for the rest. Either way it ends up wrapped by RevealOnMount
+              // when `item.reveal` is set, so the section fades + lifts into
+              // place when it first appears.
+              const content = item.lazy ? (
+                <LazyMount
+                  minHeight={item.placeholderHeight}
+                  placeholder={<View style={{ minHeight: item.placeholderHeight }} />}
+                >
+                  {item.render()}
+                </LazyMount>
+              ) : (
+                <>{item.render()}</>
+              );
+
+              return item.reveal ? <RevealOnMount>{content}</RevealOnMount> : content;
+            }}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 200 + insets.bottom }}
+            scrollEventThrottle={16}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: false },
+            )}
+            // Virtualization tuning — first paint shows gallery+info+price+
+            // variations, the rest are mounted as the user scrolls.
+            initialNumToRender={4}
+            maxToRenderPerBatch={2}
+            windowSize={5}
+            removeClippedSubviews
+            updateCellsBatchingPeriod={50}
+          />
+        );
+      })()}
 
       {renderBottomBar()}
       {renderImageViewer()}

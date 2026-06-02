@@ -342,7 +342,18 @@ export type RootStackParamList = {
   Auth: undefined;
   Main: NavigatorScreenParams<MainTabParamList>;
   OtpVerification: undefined;
-  ProductDetail: { productId: string; source?: string; country?: string; productData?: any };
+  ProductDetail: {
+    productId: string;
+    source?: string;
+    country?: string;
+    productData?: any;
+    /**
+     * Pre-known thumbnail URL from the previous screen (search card,
+     * recommendation grid, cart row, …). Used to paint the gallery's first
+     * slot instantly before the product detail API responds.
+     */
+    thumbnailUrl?: string;
+  };
   SellerProfile: { sellerId: string; sellerName?: string; source?: string; country?: string };
   LiveSellerSearch: { query?: string } | undefined;
   LiveSellerDetail: { sellerId: string; sellerName?: string; source?: string };

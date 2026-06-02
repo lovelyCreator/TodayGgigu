@@ -25,6 +25,7 @@ import {
 } from 'react-native-image-picker';
 import { requestPhotoLibraryPermission } from '../../utils/permissions';
 import { useTranslation } from '../../hooks/useTranslation';
+import { openProductDetail } from '../../utils/openProductDetail';
 import { useAuth } from '../../context/AuthContext';
 import { useCreateOrderMutation } from '../../hooks/useCreateOrderMutation';
 import {
@@ -250,11 +251,14 @@ const CartScreen: React.FC = () => {
       if (!productId) {
         return;
       }
-      navigation.navigate('ProductDetail', {
+      // Forward the cart row's image so ProductDetailScreen's hero slot
+      // paints instantly with the same picture the user tapped.
+      openProductDetail(navigation, {
         productId,
         offerId: productId,
         source: card.source || '1688',
         country: locale,
+        thumbnailUrl: card.productImage || card.photoUri || undefined,
       });
     },
     [locale, navigation],
@@ -903,6 +907,28 @@ const CartScreen: React.FC = () => {
     [centerMeta],
   );
 
+  /**
+   * Localise a single chip value coming from `/center-manage/meta`.
+   *
+   * The backend stores these as Korean strings only (e.g. "구매대행",
+   * "위해", "해운배송"), so the chips would otherwise stay Korean even
+   * for users on the Chinese or English locale. We look up the value
+   * in `cartOrder.orderModal.optionLabels.<korean-value>` and fall back
+   * to the original string when no mapping exists.
+   *
+   * The DISPLAY label is translated, but the underlying `selected`
+   * comparison still uses the original Korean string from the API so
+   * the selection state and the request payload remain unchanged.
+   */
+  const localiseOptionLabel = (value: string): string => {
+    if (!value) return value;
+    const key = `cartOrder.orderModal.optionLabels.${value}`;
+    const translated = t(key);
+    // `t` returns the key path unchanged when a key is missing —
+    // detect that and fall back to the original Korean string.
+    return translated && translated !== key ? translated : value;
+  };
+
   const renderBasicInfoPills = (
     label: string,
     options: string[],
@@ -913,15 +939,16 @@ const CartScreen: React.FC = () => {
       <Text style={styles.orderFieldLabel}>{label}</Text>
       <View style={styles.pillGroup}>
         {options.map((option) => {
-          const label = typeof option === 'string' ? option : String(option ?? '');
+          const rawValue = typeof option === 'string' ? option : String(option ?? '');
+          const displayLabel = localiseOptionLabel(rawValue);
           return (
             <TouchableOpacity
-              key={label}
-              style={[styles.pill, selected === label && styles.pillActive]}
-              onPress={() => onSelect(label)}
+              key={rawValue}
+              style={[styles.pill, selected === rawValue && styles.pillActive]}
+              onPress={() => onSelect(rawValue)}
             >
-              <Text style={[styles.pillText, selected === label && styles.pillTextActive]}>
-                {label}
+              <Text style={[styles.pillText, selected === rawValue && styles.pillTextActive]}>
+                {displayLabel}
               </Text>
             </TouchableOpacity>
           );

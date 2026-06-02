@@ -2287,6 +2287,33 @@ Supports credit and check cards from various banks for recharging and payments.`
         negotiationRemarksPlaceholder: 'Remarks',
         negotiationAddAttachment: 'Add attachment from device',
         negotiationUploadFailed: 'Failed to upload negotiation attachments. Please try again.',
+        // Translations for the Korean string values returned by the
+        // `/center-manage/meta` endpoint. The backend serves these as
+        // Korean text only; we localise them on the client.
+        optionLabels: {
+          // Business type
+          '구매대행': 'Purchase Agent',
+          '배송대행': 'Shipping Agent',
+          // Logistics centres
+          '위해': 'Weihai',
+          '이우': 'Yiwu',
+          '광저우': 'Guangzhou',
+          '청도': 'Qingdao',
+          // Transport methods
+          '해운배송': 'Sea Shipping',
+          '항공배송': 'Air Shipping',
+          '로켓배송': 'Rocket Shipping',
+          // Application categories
+          '해운인천(CJ)': 'Sea — Incheon (CJ)',
+          '해운인천(한진)': 'Sea — Incheon (Hanjin)',
+          '해운평택(CJ)': 'Sea — Pyeongtaek (CJ)',
+          'LCL (Mon/Wed/Fri) cargo liner': 'LCL (Mon/Wed/Fri) cargo liner',
+          'EMS해운': 'EMS Sea',
+          'LCL (Mon/Wed/Fri) Gunsan port': 'LCL (Mon/Wed/Fri) Gunsan port',
+          // Customs clearance methods
+          '사업자': 'Business',
+          '개인': 'Personal',
+        },
       },
       empty: 'No items',
       alerts: {
@@ -4495,6 +4522,31 @@ Supports credit and check cards from various banks for recharging and payments.`
         negotiationRemarksPlaceholder: '备注',
         negotiationAddAttachment: '从设备添加附件',
         negotiationUploadFailed: '协商记录附件上传失败，请重试。',
+        // 后端 `/center-manage/meta` 返回的韩语字段值的本地化翻译
+        optionLabels: {
+          // 申请区分
+          '구매대행': '代购',
+          '배송대행': '代运',
+          // 物流中心
+          '위해': '威海',
+          '이우': '义乌',
+          '광저우': '广州',
+          '청도': '青岛',
+          // 运输方式
+          '해운배송': '海运',
+          '항공배송': '空运',
+          '로켓배송': '火箭配送',
+          // 申请类别
+          '해운인천(CJ)': '海运 — 仁川 (CJ)',
+          '해운인천(한진)': '海运 — 仁川 (韩进)',
+          '해운평택(CJ)': '海运 — 平泽 (CJ)',
+          'LCL (Mon/Wed/Fri) cargo liner': 'LCL (周一/三/五) 货柜班轮',
+          'EMS해운': 'EMS 海运',
+          'LCL (Mon/Wed/Fri) Gunsan port': 'LCL (周一/三/五) 群山港',
+          // 通关方式
+          '사업자': '企业',
+          '개인': '个人',
+        },
       },
       empty: '暂无商品',
       alerts: {
@@ -6809,6 +6861,27 @@ Supports credit and check cards from various banks for recharging and payments.`
         negotiationRemarksPlaceholder: '비고',
         negotiationAddAttachment: '기기에서 첨부파일 추가',
         negotiationUploadFailed: '협상내역 첨부파일 업로드에 실패했습니다. 다시 시도해 주세요.',
+        // 백엔드 `/center-manage/meta` 가 한국어로 반환하므로 ko 슬롯은
+        // 사실상 통과(identity)이지만, en/zh 와 같은 모양을 갖도록 명시.
+        optionLabels: {
+          '구매대행': '구매대행',
+          '배송대행': '배송대행',
+          '위해': '위해',
+          '이우': '이우',
+          '광저우': '광저우',
+          '청도': '청도',
+          '해운배송': '해운배송',
+          '항공배송': '항공배송',
+          '로켓배송': '로켓배송',
+          '해운인천(CJ)': '해운인천(CJ)',
+          '해운인천(한진)': '해운인천(한진)',
+          '해운평택(CJ)': '해운평택(CJ)',
+          'LCL (Mon/Wed/Fri) cargo liner': 'LCL (월/수/금) 컨테이너 운송',
+          'EMS해운': 'EMS 해운',
+          'LCL (Mon/Wed/Fri) Gunsan port': 'LCL (월/수/금) 군산항',
+          '사업자': '사업자',
+          '개인': '개인',
+        },
       },
       empty: '상품이 없습니다',
       alerts: {

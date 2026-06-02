@@ -7,12 +7,37 @@ export interface ApiResponse<T> {
   data?: T;
 }
 
+/**
+ * Shape that the cart backend accepts. Mirrors the exact JSON that the
+ * server is observed to consume (see `buildAddToCartRequest` for the
+ * corresponding builder).
+ *
+ * Notes:
+ *   - `categoryName` is sent INSTEAD of `categoryId`. Some product
+ *     responses don't carry a numeric categoryId at all; sending
+ *     `categoryId: 0` caused the backend to throw a 500. An empty
+ *     string is the accepted fallback.
+ *   - `companyName` and `subjectMultiLang` are multi-language objects,
+ *     not flat strings — the server reads them via locale keys.
+ *   - `originalSource` carries the platform of the upstream marketplace
+ *     ("1688" / "taobao" / "ownmall"), distinct from `source` which can
+ *     be remapped by the client.
+ *   - `fenxiaoPriceInfo` requires both `onePiecePrice` and `offerPrice`.
+ */
 export interface AddToCartRequest {
   offerId: number;
-  categoryId: number;
+  /**
+   * Category — backend stores this as a {en, ko, zh} object in the cart
+   * response, but the known-good request sample sometimes sends a plain
+   * empty string for products without a resolved category. Accept either
+   * shape so the builder can forward whatever the upstream API returned.
+   */
+  categoryName: string | MultiLang;
   source?: string;
+  originalSource?: string;
   subject: string;
   subjectTrans: string;
+  subjectMultiLang?: MultiLang;
   imageUrl: string;
   promotionUrl?: string;
   skuInfo: {
@@ -31,10 +56,11 @@ export interface AddToCartRequest {
       skuImageUrl?: string;
     }>;
     fenxiaoPriceInfo?: {
+      onePiecePrice: string;
       offerPrice: string;
     };
   };
-  companyName: string;
+  companyName: MultiLang;
   sellerOpenId: string;
   quantity: number;
   minOrderQuantity: number;
@@ -211,10 +237,17 @@ export const cartApi = {
     }
   },
 
-  // Add product to cart
-  addToCart: async (request: AddToCartRequest): Promise<ApiResponse<{ cart: Cart }>> => {
+  // Add product to cart.
+  // Accepts an optional `lang` argument that mirrors the `?lang=` query
+  // string the web client uses (see the known-good request URL
+  // `/v1/cart?lang=en`). Defaults to 'en' so a missing locale still
+  // matches the working web behaviour.
+  addToCart: async (
+    request: AddToCartRequest,
+    lang: string = 'en',
+  ): Promise<ApiResponse<{ cart: Cart }>> => {
     try {
-      const url = `${API_BASE_URL}/cart`;
+      const url = `${API_BASE_URL}/cart?lang=${encodeURIComponent(lang)}`;
       const response = await axiosWithAuth('POST', url, { data: request });
 
       console.log('Add to cart response:', response.data);
@@ -233,7 +266,20 @@ export const cartApi = {
         message: response.data.message || 'Product added to cart successfully',
       };
     } catch (error: any) {
-      console.error('Add to cart error:', error, error.response?.data?.message || error.message);
+      // Use console.warn (not error) so the App.tsx LogBox wrapper does NOT
+      // surface a red overlay — the call site (ProductDetailScreen) already
+      // shows a user-facing toast via the mutation's onError. Logging the
+      // request payload + server response body makes regressions like the
+      // recent staggered-reveal one (skuId=0 reaching the backend) easy to
+      // spot in Metro without spamming the UI.
+      if (__DEV__) {
+        console.warn(
+          '🛒 addToCart FAILED',
+          'status:', error?.response?.status,
+          'serverBody:', error?.response?.data,
+          'requestSent:', JSON.stringify(request, null, 2),
+        );
+      }
       const errorMessage = error.response?.data?.message || error.message || 'Failed to add product to cart';
       return {
         success: false,

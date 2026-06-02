@@ -7,7 +7,12 @@ interface UseAddToCartMutationOptions {
 }
 
 interface UseAddToCartMutationResult {
-  mutate: (request: AddToCartRequest) => Promise<void>;
+  /**
+   * `lang` is optional and forwarded to `cartApi.addToCart` as the
+   * `?lang=` query parameter, mirroring the web client's URL shape.
+   * Pass the active i18n locale ('en' | 'ko' | 'zh') when available.
+   */
+  mutate: (request: AddToCartRequest, lang?: string) => Promise<void>;
   data: any;
   error: string | null;
   isLoading: boolean;
@@ -24,14 +29,14 @@ export const useAddToCartMutation = (
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
   const [isError, setIsError] = useState<boolean>(false);
 
-  const mutate = useCallback(async (request: AddToCartRequest) => {
+  const mutate = useCallback(async (request: AddToCartRequest, lang?: string) => {
     setIsLoading(true);
     setIsSuccess(false);
     setIsError(false);
     setError(null);
 
     try {
-      const response = await cartApi.addToCart(request);
+      const response = await cartApi.addToCart(request, lang);
 
       // console.log('useAddToCartMutation: API response:', response);
 

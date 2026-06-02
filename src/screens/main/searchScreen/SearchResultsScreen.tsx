@@ -20,6 +20,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../../constants';
 import ProductImage from '../../../components/ProductImage';
 import { ScreenSkeleton } from '../../../components/Skeleton';
+import { openProductDetail } from '../../../utils/openProductDetail';
 import { RootStackParamList, Product, SearchFilters } from '../../../types';
 
 type SearchResultsScreenRouteProp = RouteProp<RootStackParamList, 'Search'>;
@@ -117,10 +118,14 @@ const SearchResultsScreen: React.FC = () => {
         // Fetch product detail first, then navigate
         // Note: This screen would need useProductDetailMutation hook added
         // For now, navigate with productId and let ProductDetailScreen handle it as fallback
-        navigation.navigate('ProductDetail', { 
+        // Use openProductDetail so the card's image is prefetched and
+        // forwarded as `thumbnailUrl` — ProductDetailScreen will paint it
+        // instantly while the API loads.
+        openProductDetail(navigation, {
           productId: productId?.toString() || item.id?.toString() || '',
           source: source,
           country: country,
+          thumbnailUrl: item.image,
         });
       }}
     >
