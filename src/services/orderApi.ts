@@ -198,11 +198,28 @@ export const mapPurchasePaymentToDispatchMethod = (payment: 'manual' | 'auto'): 
 export const mapShippingPaymentToDispatchMethodShip = (payment: 'manual' | 'auto'): string =>
   payment === 'auto' ? 'auto' : 'manual';
 
-export type BuildOrdersProxyItemsOptions = {
-  locale?: string;
+/**
+ * Per-cart-item overrides for `buildOrdersProxyLineItems`.
+ * When provided, the returned value REPLACES the top-level
+ * `addServices` / `negotiationContentImages` / `negotiationNote` for
+ * that specific cart item, allowing the order modal's multi-card
+ * UI to ship each product's own negotiation data and extra-services
+ * (see the API contract shown in the order-create response sample).
+ */
+export type BuildOrdersProxyItemsPerCart = (cartItemId: string) => {
   addServices?: OrdersProxyAddService[];
   negotiationContentImages?: string[];
   negotiationNote?: string;
+} | null | undefined;
+
+export type BuildOrdersProxyItemsOptions = {
+  locale?: string;
+  /** Order-wide fallback when no per-item override is returned. */
+  addServices?: OrdersProxyAddService[];
+  negotiationContentImages?: string[];
+  negotiationNote?: string;
+  /** Returns per-cart-item data. Falls back to the order-wide values. */
+  perCart?: BuildOrdersProxyItemsPerCart;
 };
 
 /** Prefer cart API rows (skuInfo) merged with checkout selectedItems. */
@@ -255,10 +272,25 @@ export const buildOrdersProxyLineItems = (
   fallbackCards: CreateOrderCardFallback[] = [],
   options: BuildOrdersProxyItemsOptions = {},
 ): OrdersProxyLineItem[] => {
-  const { locale = 'ko', addServices, negotiationContentImages, negotiationNote } = options;
-  const trimmedNote = negotiationNote?.trim();
+  const {
+    locale = 'ko',
+    addServices,
+    negotiationContentImages,
+    negotiationNote,
+    perCart,
+  } = options;
 
   return cartItemIds.map((cartItemId) => {
+    // Per-cart overrides win over the order-wide defaults so the
+    // multi-card order modal can ship each product's own services and
+    // negotiation. When `perCart` returns nothing for an id, fall back
+    // to the order-wide values for backward compatibility.
+    const override = perCart?.(cartItemId);
+    const itemServices = override?.addServices ?? addServices;
+    const itemNegImages =
+      override?.negotiationContentImages ?? negotiationContentImages;
+    const itemNoteRaw = override?.negotiationNote ?? negotiationNote;
+    const itemNote = itemNoteRaw?.trim();
     const raw = sourceItems.find((entry) => {
       if (!entry || typeof entry !== 'object') return false;
       const row = entry as Record<string, unknown>;
@@ -302,11 +334,13 @@ export const buildOrdersProxyLineItems = (
       skuAttributes: skuInfo?.skuAttributes as unknown[] | undefined,
       companyName: raw?.companyName as string | Record<string, string> | undefined,
       categoryId: raw?.categoryId as number | string | undefined,
-      ...(addServices && addServices.length > 0 ? { addServices } : {}),
-      ...(negotiationContentImages && negotiationContentImages.length > 0
-        ? { negotiationContentImages }
+      ...(itemServices && itemServices.length > 0
+        ? { addServices: itemServices }
         : {}),
-      ...(trimmedNote ? { note: trimmedNote } : {}),
+      ...(itemNegImages && itemNegImages.length > 0
+        ? { negotiationContentImages: itemNegImages }
+        : {}),
+      ...(itemNote ? { note: itemNote } : {}),
     };
   });
 };

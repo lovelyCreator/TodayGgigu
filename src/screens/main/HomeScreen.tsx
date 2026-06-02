@@ -34,6 +34,7 @@ import { usePlatformStore } from '../../store/platformStore';
 import { useAppSelector } from '../../store/hooks';
 import { translations } from '../../i18n/translations';
 import { openProductDetail } from '../../utils/openProductDetail';
+import { useResponsive } from '../../hooks/useResponsive';
 import HeadsetMicIcon from '../../assets/icons/HeadsetMicIcon';
 import MenuIcon from '../../assets/icons/MenuIcon';
 import TodayGgiguWordmarkIcon from '../../assets/icons/TodayGgiguWordmarkIcon';
@@ -50,7 +51,11 @@ const KAKAO_CS_CHANNEL_URL = 'http://pf.kakao.com/_xlXLEX';
 /** Figma TG_Main_S393: 393×3140, gutter 16 → content 361. Group 76728: H 472, left 16 */
 const HOME_GUTTER = 16;
 const HOME_CONTENT_WIDTH = Dimensions.get('window').width - HOME_GUTTER * 2;
+// Reserved minimum-height for the guest welcome panel when it hosted
+// the 10-orb category grid. Kept defined so the previous design can be
+// restored quickly if the panel grows back; not currently referenced.
 const GUEST_PROMO_MIN_HEIGHT = 472;
+void GUEST_PROMO_MIN_HEIGHT;
 const FIGMA_OVERLAY_05 = 'rgba(0,0,0,0.05)';
 const FIGMA_OVERLAY_20 = 'rgba(0,0,0,0.2)';
 /** Marketing / logistics accent from design reference */
@@ -83,6 +88,18 @@ const getHomeMemberDisplayName = (user: {
 
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
+
+  // Responsive layout — recalculates on rotation / split-screen / resize.
+  // Phone (<600 short side) keeps the original 2-column layout. Tablet
+  // portrait (600–899) shows 3 columns and tablet landscape (≥900 wide)
+  // shows 4 columns, with gutters and icons scaled proportionally.
+  const responsive = useResponsive();
+  // Outer gutter that the section containers use. On tablets we widen
+  // the gutter so content doesn't sprawl to the edges of a 10" screen.
+  const homeGutter = responsive.isTablet ? responsive.gutter * 1.5 : HOME_GUTTER;
+  // Live recalc of the guest-orb cell that the existing JSX consumes
+  // (the `cellW` block further down). Forces re-render on rotation.
+  const homeContentWidth = responsive.width - homeGutter * 2;
 
   const { user, isGuest, isAuthenticated } = useAuth();
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
@@ -626,9 +643,78 @@ const HomeScreen: React.FC = () => {
         </Text>
       </TouchableOpacity>
 
-      {renderGuestOrbGrid()}
+      {/* Orb category grid (시장의 카테고리 10개) removed per request.
+          The 2 service cards (시장조사 / OEM공장조사) used to live in
+          `renderGlobalLogisticsSection` below — they're now rendered
+          INSIDE this red welcome panel in their place. */}
+      {renderGuestWelcomeServiceCards()}
+      {/* Keep `renderGuestOrbGrid` reachable for the linter even
+          though it is no longer rendered, so the definition stays
+          available for a one-line restore. */}
+      {void renderGuestOrbGrid}
     </View>
   );
+
+  /**
+   * Two-card row (시장조사 / OEM공장조사) shown inside the red guest
+   * welcome panel, replacing the previous orb category grid. Card
+   * width is computed from the panel's inner box so the two cards
+   * line up flush with the panel's symmetric `padding: SPACING.md`.
+   */
+  const renderGuestWelcomeServiceCards = () => {
+    const cardGap = responsive.isTablet ? SPACING.md : SPACING.sm;
+    // Panel inner width = screen − parent guestAboveFold padding
+    // − guestWelcomePanel padding (both sides).
+    const innerWidth = responsive.width - homeGutter * 2 - SPACING.md * 2;
+    const cardWidth = Math.floor((innerWidth - cardGap) / 2);
+
+    // SVG icons (matching the originals from `renderGlobalLogisticsSection`).
+    // Defined inline here because the originals are scoped inside that
+    // function and not accessible from this helper. Using `Ionicons`-style
+    // string names produced a `?` placeholder because the names weren't
+    // registered with the icon set; full SVGs render reliably.
+    const SurveyIcon = (
+      <Svg width={48} height={48} viewBox="0 0 48 48" fill="none">
+        <Circle cx={24} cy={24} r={23.5} fill="white" stroke={LOGISTICS_ORANGE} />
+        <Path
+          d="M18.3958 22.8005V17.9339C18.3958 17.2116 18.6486 16.5977 19.1542 16.0922C19.6597 15.5866 20.2736 15.3339 20.9958 15.3339C21.7181 15.3339 22.3319 15.5866 22.8375 16.0922C23.3431 16.5977 23.5958 17.2116 23.5958 17.9339V22.8005C23.5958 23.5227 23.3431 24.1366 22.8375 24.6422C22.3319 25.1477 21.7181 25.4005 20.9958 25.4005C20.2736 25.4005 19.6597 25.1477 19.1542 24.6422C18.6486 24.1366 18.3958 23.5227 18.3958 22.8005ZM25.7292 21.2672V12.4672C25.7292 11.745 25.9819 11.1311 26.4875 10.6255C26.9931 10.12 27.6069 9.86719 28.3292 9.86719C29.0514 9.86719 29.6653 10.12 30.1708 10.6255C30.6764 11.1311 30.9292 11.745 30.9292 12.4672V21.2672C30.9292 22.1339 30.6569 22.7839 30.1125 23.2172C29.5681 23.6505 28.9736 23.8672 28.3292 23.8672C27.6847 23.8672 27.0903 23.6505 26.5458 23.2172C26.0014 22.7839 25.7292 22.1339 25.7292 21.2672ZM11.0625 27.0005V23.4005C11.0625 22.6783 11.3153 22.0644 11.8208 21.5589C12.3264 21.0533 12.9403 20.8005 13.6625 20.8005C14.3847 20.8005 14.9986 21.0533 15.5042 21.5589C16.0097 22.0644 16.2625 22.6783 16.2625 23.4005V27.0005C16.2625 27.8672 15.9903 28.5172 15.4458 28.9505C14.9014 29.3839 14.3069 29.6005 13.6625 29.6005C13.0181 29.6005 12.4236 29.3839 11.8792 28.9505C11.3347 28.5172 11.0625 27.8672 11.0625 27.0005ZM15.4018 36.8005C14.6201 36.8005 14.0792 36.445 13.7792 35.7339C13.4792 35.0227 13.6069 34.3894 14.1625 33.8339L19.7625 28.2339C20.0958 27.9005 20.4908 27.7227 20.9475 27.7005C21.4039 27.6783 21.8089 27.8227 22.1625 28.1339L25.7292 31.2005L34.5958 22.3339H34.4292C33.9403 22.3339 33.5236 22.1616 33.1792 21.8172C32.8347 21.4727 32.6625 21.0561 32.6625 20.5672C32.6625 20.0783 32.8347 19.6616 33.1792 19.3172C33.5236 18.9727 33.9403 18.8005 34.4292 18.8005H38.8292C39.3181 18.8005 39.7347 18.9727 40.0792 19.3172C40.4236 19.6616 40.5958 20.0783 40.5958 20.5672V24.9672C40.5958 25.4561 40.4236 25.8727 40.0792 26.2172C39.7347 26.5616 39.3181 26.7339 38.8292 26.7339C38.3403 26.7339 37.9236 26.5616 37.5792 26.2172C37.2347 25.8727 37.0625 25.4561 37.0625 24.9672V24.8005L27.0958 34.7672C26.7625 35.1005 26.3675 35.2783 25.9108 35.3005C25.4544 35.3227 25.0494 35.1783 24.6958 34.8672L21.1292 31.8005L16.6292 36.3005C16.4514 36.4783 16.2625 36.6061 16.0625 36.6839C15.8625 36.7616 15.6423 36.8005 15.4018 36.8005Z"
+          fill={LOGISTICS_ORANGE}
+        />
+      </Svg>
+    );
+    const FactoryIcon = (
+      <Svg width={48} height={48} viewBox="0 0 48 48" fill="none">
+        <Circle cx={24} cy={24} r={23.5} fill="white" stroke={LOGISTICS_ORANGE} />
+        <Path
+          d="M32.675 29.075H17.7C16.95 29.075 16.3208 28.8208 15.8125 28.3125C15.3042 27.8042 15.05 27.175 15.05 26.425V16.775H14.325C13.9583 16.775 13.6458 16.6458 13.3875 16.3875C13.1292 16.1292 13 15.8167 13 15.45C13 15.0833 13.1292 14.7708 13.3875 14.5125C13.6458 14.2542 13.9583 14.125 14.325 14.125H15.05C15.8 14.125 16.4292 14.3792 16.9375 14.8875C17.4458 15.3958 17.7 16.025 17.7 16.775V26.425H32.675C33.0417 26.425 33.3542 26.5542 33.6125 26.8125C33.8708 27.0708 34 27.3833 34 27.75C34 28.1167 33.8708 28.4292 33.6125 28.6875C33.3542 28.9458 33.0417 29.075 32.675 29.075ZM17.375 34.725C16.7417 34.725 16.1958 34.4958 15.7375 34.0375C15.2792 33.5792 15.05 33.0333 15.05 32.4C15.05 31.7667 15.2792 31.2208 15.7375 30.7625C16.1958 30.3042 16.7417 30.075 17.375 30.075C18.025 30.075 18.575 30.3042 19.025 30.7625C19.475 31.2208 19.7 31.7667 19.7 32.4C19.7 33.0333 19.475 33.5792 19.025 34.0375C18.575 34.4958 18.025 34.725 17.375 34.725ZM20.025 25.425C19.6583 25.425 19.3458 25.2958 19.0875 25.0375C18.8292 24.7792 18.7 24.4667 18.7 24.1V20.1C18.7 19.7333 18.8292 19.4208 19.0875 19.1625C19.3458 18.9042 19.6583 18.775 20.025 18.775H24.025C24.3917 18.775 24.7042 18.9042 24.9625 19.1625C25.2208 19.4208 25.35 19.7333 25.35 20.1V24.1C25.35 24.4667 25.2208 24.7792 24.9625 25.0375C24.7042 25.2958 24.3917 25.425 24.025 25.425H20.025ZM27.675 25.425C27.3083 25.425 26.9958 25.2958 26.7375 25.0375C26.4792 24.7792 26.35 24.4667 26.35 24.1V20.1C26.35 19.7333 26.4792 19.4208 26.7375 19.1625C26.9958 18.9042 27.3083 18.775 27.675 18.775H31.675C32.0417 18.775 32.3542 18.9042 32.6125 19.1625C32.8708 19.4208 33 19.7333 33 20.1V24.1C33 24.4667 32.8708 24.7792 32.6125 25.0375C32.3542 25.2958 32.0417 25.425 31.675 25.425H27.675ZM31.675 34.725C31.0417 34.725 30.4958 34.4958 30.0375 34.0375C29.5792 33.5792 29.35 33.0333 29.35 32.4C29.35 31.7667 29.5792 31.2208 30.0375 30.7625C30.4958 30.3042 31.0417 30.075 31.675 30.075C32.325 30.075 32.875 30.3042 33.325 30.7625C33.775 31.2208 34 31.7667 34 32.4C34 33.0333 33.7708 33.5792 33.3125 34.0375C32.8542 34.4958 32.3083 34.725 31.675 34.725Z"
+          fill={LOGISTICS_ORANGE}
+        />
+      </Svg>
+    );
+
+    const items = [
+      { title: 'home.logisticsCard1Title', d1: 'home.logisticsCard1D1', icon: SurveyIcon },
+      { title: 'home.logisticsCard2Title', d1: 'home.logisticsCard2D1', icon: FactoryIcon },
+    ];
+    return (
+      <View style={[styles.guestWelcomeServiceCardsRow, { gap: cardGap }]}>
+        {items.map((it) => (
+          <TouchableOpacity
+            key={it.title}
+            style={[styles.logisticsServiceCard, { width: cardWidth }]}
+            activeOpacity={0.88}
+            onPress={() => navigation.navigate('CustomerService' as never)}
+          >
+            {it.icon}
+            <View style={styles.logisticsServiceTextCol}>
+              <Text style={styles.logisticsServiceTitle}>{t(it.title)}</Text>
+              <Text style={styles.logisticsServiceDesc}>{t(it.d1)}</Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  };
 
   const renderGuestOrbGrid = () => {
     const keys = [
@@ -765,14 +851,106 @@ const HomeScreen: React.FC = () => {
       SoccerBallIcon,
       GameControllerIcon,
     ];
-    const cellW = (HOME_CONTENT_WIDTH - SPACING.md * 2) / 6;
+    // Guest category orb grid — strictly 5 orbs per row, arranged as
+    // 5×2 for 10 items.
+    //
+    // Hard-won lessons from previous attempts:
+    //   * Korean labels like "모르프 특가" don't wrap on a short cell
+    //     (no space to break at), so their intrinsic min-width forces
+    //     the cell wider than the computed `cellW`. The grid then
+    //     fits only 4 cells per row instead of 5.
+    //   * Fix: explicitly clamp `maxWidth` on the label to `cellW` so
+    //     the text component cannot exceed the cell, combined with
+    //     `numberOfLines={1}` + `adjustsFontSizeToFit` so the label
+    //     shrinks instead of overflowing.
+    //   * `width` is set on the cell explicitly (not flexBasis) so
+    //     the row math is fully deterministic.
+    //   * Container also gets an explicit `width: homeContentWidth`
+    //     so children flex against a known-good box width (some
+    //     parent flex contexts give the row "auto" width which
+    //     causes weird wrapping).
+    // Guest category orb grid — 5 cells per row × 2 rows.
+    //
+    // Layout strategy that finally gives equal left/right gutters:
+    //   * `width: homeContentWidth` on the row — fixes the parent box.
+    //   * `flexBasis: cellW` + `maxWidth: cellW` on each cell — caps the
+    //     cell so unbreakable Korean labels can't push it wider.
+    //   * `justifyContent: 'space-between'` — distributes the leftover
+    //     pixels (from floor() rounding) into the inter-cell gaps so
+    //     the FIRST cell hugs the left edge and the FIFTH cell hugs
+    //     the right edge of the container. Outer margins are then
+    //     guaranteed equal because they're produced by the parent's
+    //     own `paddingHorizontal: homeGutter`, not by the grid itself.
+    //   * `rowGap` is set explicitly so vertical spacing is independent
+    //     of the horizontal distribution.
+    //   * The text inside each cell uses `adjustsFontSizeToFit` so a
+    //     long Korean label shrinks instead of stretching the cell —
+    //     prevents the 5-up shape from collapsing back to 4-up.
+    // Tablet landscape ONLY: lay out all 10 orbs in a single row.
+    // Phone and tablet portrait keep the 5×2 layout (do not change).
+    const orbsPerRow = responsive.isTabletLandscape ? 10 : 5;
+    const minOrbGap = responsive.isTablet ? SPACING.md : SPACING.smmd;
+    // Available width for the orb grid INSIDE its parent chain:
+    //   responsive.width
+    //   – outer guestAboveFold paddingHorizontal (`homeGutter` × 2)
+    //   – guestWelcomePanel padding (`SPACING.md` × 2)
+    // i.e. the grid must fit within the welcome panel's inner box, not
+    // the full screen-content width. Previously we used
+    // `homeContentWidth` which is wider than the panel's interior — the
+    // grid then overflowed to the right, making the left margin look
+    // larger than the right.
+    const gridAvailableWidth =
+      responsive.width - homeGutter * 2 - SPACING.md * 2;
+    const cellW = Math.floor(
+      (gridAvailableWidth - minOrbGap * (orbsPerRow - 1)) / orbsPerRow,
+    );
+    // Tablet landscape ONLY: use space-between with the cells exactly
+    // sized so the gaps end up equal to the panel's side padding —
+    // making "side gutter == inter-cell gap" visually true.
+    //
+    // For the 10-up landscape row we recompute cellW such that:
+    //   panel.padding (= SPACING.md) on each side == gap between cells
+    // Concretely:
+    //   gridAvailableWidth = panel.inner = width − homeGutter*2 − SPACING.md*2
+    //   cellW_land = floor((gridAvailableWidth − SPACING.md * 9) / 10)
+    //   With `justifyContent: 'space-between'` the 10 cells fill the
+    //   grid's full inner width; any rounding remainder is split into
+    //   the 9 gaps. The left edge of the first cell still touches the
+    //   panel's inner-left edge (= SPACING.md from the panel's outer
+    //   left), so the visual outer gutters equal the inter-cell gaps.
+    const cellWLandscape = responsive.isTabletLandscape
+      ? Math.floor((gridAvailableWidth - SPACING.md * 9) / 10)
+      : cellW;
+    const finalCellW = responsive.isTabletLandscape ? cellWLandscape : cellW;
     return (
       <View style={styles.guestOrbSection}>
-        <View style={styles.guestOrbGrid}>
+        <View
+          style={[
+            styles.guestOrbGrid,
+            {
+              marginLeft: 0,
+              // Match the panel's interior width exactly so the grid's
+              // first cell touches the panel's inner-left edge and the
+              // last cell touches the inner-right edge. Equal left and
+              // right gutters come entirely from the panel's symmetric
+              // `padding: SPACING.md`.
+              width: gridAvailableWidth,
+              rowGap: SPACING.md,
+              columnGap: 0,
+              justifyContent: 'space-between',
+              // Landscape only: prevent wrapping so all 10 orbs stay on
+              // a single row even with sub-pixel rounding noise.
+              ...(responsive.isTabletLandscape ? { flexWrap: 'nowrap' as const } : null),
+            },
+          ]}
+        >
           {keys.map((k, i) => (
             <TouchableOpacity
               key={k}
-              style={[styles.guestOrbCell, { width: cellW }]}
+              style={[
+                styles.guestOrbCell,
+                { width: finalCellW, maxWidth: finalCellW, flexBasis: finalCellW },
+              ]}
               activeOpacity={0.85}
               onPress={() => navigation.navigate('Category' as never)}
             >
@@ -783,7 +961,12 @@ const HomeScreen: React.FC = () => {
               ) : (
                 <View style={styles.guestOrbCircle}>{icons[i]}</View>
               )}
-              <Text style={styles.guestOrbLabel} numberOfLines={2}>
+              <Text
+                style={[styles.guestOrbLabel, { maxWidth: finalCellW }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.7}
+              >
                 {t(`home.${k}`)}
               </Text>
             </TouchableOpacity>
@@ -1017,7 +1200,7 @@ const HomeScreen: React.FC = () => {
     };
 
     return (
-      <View style={styles.uosOuter}>
+      <View style={[styles.uosOuter, { marginHorizontal: homeGutter }]}>
         {/* User header */}
         <View style={styles.uosUserHeader}>
           <MemberAvatar uri={user.avatar} displayName={displayName} style={styles.uosAvatar} />
@@ -1065,8 +1248,11 @@ const HomeScreen: React.FC = () => {
           )}
         {secondOrder ? renderOrderBlock(secondOrder, false) : null}
 
-        {/* Category shortcut grid — identical to logged-out guest orb grid */}
-        {renderGuestOrbGrid()}
+        {/* Category shortcut grid replaced per request — the previous
+            10-orb category list was removed and the two service cards
+            (시장조사 / OEM공장조사) are shown here instead, matching
+            the logged-out guest welcome panel above. */}
+        {renderGuestWelcomeServiceCards()}
       </View>
     );
   };
@@ -1165,28 +1351,82 @@ const HomeScreen: React.FC = () => {
     const row1 = steps.slice(0, 4);
     const row2 = [steps[7], steps[6], steps[5], steps[4]];
 
+    // Tablet-only width tuning: stretch the 4-step workflow row so it
+    // spans the full content width (instead of clustering in the middle
+    // of a wide tablet screen). The row has 4 step columns + 3 arrow
+    // characters; we give each step column ~22% of the inner width and
+    // let `space-between` spread them out.
+    const stepColWidth = responsive.isTablet
+      ? Math.floor((homeContentWidth - SPACING.lg) / 4)
+      : undefined; // fall back to the existing 76px on phones
+    const stepCircleSize = responsive.isTablet
+      ? Math.round(48 * responsive.scale)
+      : 48;
+    const stepIconSize = responsive.isTablet
+      ? Math.round(22 * responsive.scale)
+      : 22;
+    const stepLabelFontSize = responsive.isTablet
+      ? Math.round(10 * responsive.scale)
+      : 10;
+
     const renderStep = (icon: string | React.ReactNode, label: string, key: string) => (
-      <View key={key} style={styles.logisticsStepCol}>
+      <View
+        key={key}
+        style={[
+          styles.logisticsStepCol,
+          stepColWidth ? { width: stepColWidth } : null,
+        ]}
+      >
         {typeof icon === 'string' ? (
-          <View style={[styles.logisticsStepCircle, { backgroundColor: LOGISTICS_ORANGE }]}>
-            <Icon name={icon} size={22} color={COLORS.white} />
+          <View
+            style={[
+              styles.logisticsStepCircle,
+              { backgroundColor: LOGISTICS_ORANGE },
+              responsive.isTablet
+                ? { width: stepCircleSize, height: stepCircleSize, borderRadius: stepCircleSize / 2 }
+                : null,
+            ]}
+          >
+            <Icon name={icon} size={stepIconSize} color={COLORS.white} />
           </View>
         ) : (
           icon
         )}
-        <Text style={styles.logisticsStepLabel} numberOfLines={2}>
+        <Text
+          style={[
+            styles.logisticsStepLabel,
+            responsive.isTablet ? { fontSize: stepLabelFontSize, lineHeight: stepLabelFontSize + 3 } : null,
+          ]}
+          numberOfLines={2}
+        >
           {label}
         </Text>
       </View>
     );
 
     const renderRow = (rowSteps: typeof row1, arrow: 'forward' | 'back') => (
-      <View style={styles.logisticsRow}>
+      <View
+        style={[
+          styles.logisticsRow,
+          // On tablets, push the steps to the row edges so the workflow
+          // fills the available width instead of huddling in the middle.
+          responsive.isTablet ? { justifyContent: 'space-between' } : null,
+        ]}
+      >
         {rowSteps.map((s, idx) => (
           <React.Fragment key={s.labelKey}>
             {renderStep(s.icon, t(s.labelKey), s.labelKey)}
             {idx < rowSteps.length - 1 && (
-              <Text style={styles.logisticsArrow}>{arrow === 'forward' ? '→' : '←'}</Text>
+              <Text
+                style={[
+                  styles.logisticsArrow,
+                  responsive.isTablet
+                    ? { fontSize: Math.round(FONTS.sizes.sm * responsive.scale) }
+                    : null,
+                ]}
+              >
+                {arrow === 'forward' ? '→' : '←'}
+              </Text>
             )}
           </React.Fragment>
         ))}
@@ -1233,15 +1473,22 @@ const HomeScreen: React.FC = () => {
       </Svg>
     );
 
+    // Removed per request: card3 (생산대행) and card4 (원스탑가이드).
+    // Their icons (`DocumentEditIcon`, `BookmarkIcon`) remain defined
+    // above but unused; keeping them in place so the cards can be
+    // re-enabled by uncommenting these lines if needed later.
     const cards: Array<{ title: string; d1: string; icon: string | React.ReactNode }> = [
       { title: 'home.logisticsCard1Title', d1: 'home.logisticsCard1D1', icon: ChartUpIcon },
       { title: 'home.logisticsCard2Title', d1: 'home.logisticsCard2D1', icon: CartGridIcon },
-      { title: 'home.logisticsCard3Title', d1: 'home.logisticsCard3D1', icon: DocumentEditIcon },
-      { title: 'home.logisticsCard4Title', d1: 'home.logisticsCard4D1', icon: BookmarkIcon },
+      // { title: 'home.logisticsCard3Title', d1: 'home.logisticsCard3D1', icon: DocumentEditIcon },
+      // { title: 'home.logisticsCard4Title', d1: 'home.logisticsCard4D1', icon: BookmarkIcon },
     ];
+    // Silence unused-binding hints for icons we intentionally kept.
+    void DocumentEditIcon;
+    void BookmarkIcon;
 
     return (
-      <View style={styles.logisticsSection}>
+      <View style={[styles.logisticsSection, { paddingHorizontal: homeGutter }]}>
         <Text style={[styles.logisticsSectionTitleOrange, { color: LOGISTICS_ORANGE }]}>
           {t('home.logisticsTitleOrange')}
         </Text>
@@ -1249,28 +1496,12 @@ const HomeScreen: React.FC = () => {
         {renderRow(row1, 'forward')}
         <View style={{ height: SPACING.md }} />
         {renderRow(row2, 'back')}
-        <View style={styles.logisticsCardsGrid}>
-          {cards.map((c) => (
-            <TouchableOpacity
-              key={c.title}
-              style={styles.logisticsServiceCard}
-              activeOpacity={0.88}
-              onPress={() => navigation.navigate('CustomerService' as never)}
-            >
-              {typeof c.icon === 'string' ? (
-                <View style={[styles.logisticsServiceIconRing, { borderColor: LOGISTICS_ORANGE }]}>
-                  <Icon name={c.icon} size={22} color={LOGISTICS_ORANGE} />
-                </View>
-              ) : (
-                c.icon
-              )}
-              <View style={styles.logisticsServiceTextCol}>
-                <Text style={styles.logisticsServiceTitle}>{t(c.title)}</Text>
-                <Text style={styles.logisticsServiceDesc}>{t(c.d1)}</Text>                
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* 2-card row (시장조사 / OEM공장조사) moved to the red guest
+            welcome panel above. The `cards` array, icons and the
+            `logisticsServiceCard`/`logisticsServiceIconRing` styles
+            are kept defined so the cards can be re-enabled here by
+            uncommenting the previous JSX block. */}
+        {void cards}
       </View>
     );
   };
@@ -1363,7 +1594,7 @@ const HomeScreen: React.FC = () => {
     );
 
     return (
-      <View style={styles.integratedSection}>
+      <View style={[styles.integratedSection, { paddingHorizontal: homeGutter }]}>
         <Text style={[styles.logisticsSectionTitleOrange, { color: LOGISTICS_ORANGE }]}>
           {t('home.integratedTitleOrange')}
         </Text>
@@ -1466,31 +1697,10 @@ const HomeScreen: React.FC = () => {
         ))}
       </View>
 
-      <View style={styles.csShipCard}>
-        <View style={styles.csShipHeader}>
-          <Image
-            source={require('../../assets/icons/boat-plane.png')}
-            style={styles.csShipHeaderIcon}
-            resizeMode="contain"
-          />
-          <Text style={styles.csShipHeaderTitle}>{t('home.csShipTitle')}</Text>
-        </View>
-        <View style={styles.csShipBody}>
-          <View style={styles.csShipLeft}>
-            <Text style={styles.csShipWeek}>{t('home.csShipWeek')}</Text>
-            <Text style={styles.csShipWeekSub}>{t('home.csShipWeekSub')}</Text>
-          </View>
-          <View style={styles.csShipRight}>
-            <Text style={styles.csShipLine}>{t('home.csShipAir')}</Text>
-            <Text style={styles.csShipLine}>{t('home.csShipPyeong')}</Text>
-            <Text style={styles.csShipLine}>{t('home.csShipIncheon')}</Text>
-          </View>
-        </View>
-        <TouchableOpacity style={styles.csShipFooter} activeOpacity={0.85}>
-          <Text style={styles.csShipFooterText}>{t('home.csShipMonth')}</Text>
-          <Icon name="chevron-forward" size={18} color={COLORS.text.secondary} />
-        </TouchableOpacity>
-      </View>
+      {/* Departure schedule card (출항 스케줄) removed per request.
+          Styles `csShipCard` / `csShipHeader` etc. and the i18n keys
+          `home.csShip*` are intentionally left in place so the card
+          can be re-enabled by uncommenting this block. */}
     </>
   );
 
@@ -1498,8 +1708,19 @@ const HomeScreen: React.FC = () => {
     const phoneRow = (phone: string, tag: string) => (
       <TouchableOpacity style={styles.csPhoneRow} onPress={() => openDial(phone)} activeOpacity={0.85}>
         <View style={styles.csPhoneTextCol}>
-          <Text style={styles.csPhoneNumber}>{phone}</Text>
-          <Text style={styles.csPhoneTag}>{tag}</Text>
+          {/* `adjustsFontSizeToFit` + `numberOfLines={1}` prevents the
+              long phone-number string from forcing the card wider than
+              its computed `cityCardWidth`, which would otherwise push
+              the third card to a new row on narrow phones. */}
+          <Text
+            style={styles.csPhoneNumber}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+          >
+            {phone}
+          </Text>
+          <Text style={styles.csPhoneTag} numberOfLines={1}>{tag}</Text>
         </View>
       </TouchableOpacity>
     );
@@ -1514,7 +1735,7 @@ const HomeScreen: React.FC = () => {
     );
 
     return (
-      <View style={styles.csSection}>
+      <View style={[styles.csSection, { paddingHorizontal: homeGutter }]}>
         <Text style={styles.csTitle1}>  
         <Text style={[styles.csTitleOrange, { color: LOGISTICS_ORANGE }]}>{t('home.csTitleOrange')}</Text>
         <Text> </Text>
@@ -1526,25 +1747,87 @@ const HomeScreen: React.FC = () => {
         </Text>
         <Text style={styles.csSubtitle2}>{t('home.csSubtitleAfter')}</Text>
 
-        <View style={styles.csCardsRow}>
-          <View style={[styles.csCityCard, styles.csCityCardTall]}>
-            <Text style={styles.csCityName}>{t('home.csWeihai')}</Text>
-            {phoneRow(t('home.csPhoneWeihai1'), t('home.csTagWeihai1'))}
-            <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
-            {phoneRow(t('home.csPhoneWeihai2'), t('home.csTagWeihai2'))}
-            <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
-          </View>
-          <View style={styles.csCityCard}>
-            <Text style={styles.csCityName}>{t('home.csYiwu')}</Text>
-            {phoneRow(t('home.csPhoneYiwu'), t('home.csTagYiwu'))}
-            <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
-          </View>
-          <View style={styles.csCityCard}>
-            <Text style={styles.csCityName}>{t('home.csGwangju')}</Text>
-            {phoneRow(t('home.csPhoneGwangju'), t('home.csTagGwangju'))}
-            <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
-          </View>
-        </View>
+        {(() => {
+          // 3-up row of CS-Center city cards that always stays on ONE
+          // line, regardless of device width:
+          //   1. Container forces `flexWrap: 'nowrap'` and uses
+          //      `space-between` so the gaps become equal residual
+          //      space between cards.
+          //   2. Each card gets an explicit width derived from the live
+          //      `homeContentWidth` minus the two inter-card gaps,
+          //      divided by 3. `flexShrink: 1` lets the card shrink if
+          //      needed (some inner content uses minWidth implicitly).
+          //   3. The gap, card padding and a card-only min-width all
+          //      scale with the responsive bucket so phones and tablets
+          //      both look comfortable.
+          const cityCardGap = responsive.isTablet ? SPACING.lg : SPACING.sm;
+          // Subtract a 1px safety margin per gap so float-rounding of
+          // the divided width can never push the third card to a new
+          // row on devices where the computed total equals the parent.
+          const cityCardWidth = Math.floor(
+            (homeContentWidth - cityCardGap * 2 - 2) / 3,
+          );
+          const cityCardPadding = responsive.isTablet ? SPACING.md : SPACING.sm;
+          return (
+            <View
+              style={[
+                styles.csCardsRow,
+                {
+                  gap: cityCardGap,
+                  flexWrap: 'nowrap',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.csCityCard,
+                  styles.csCityCardTall,
+                  {
+                    width: cityCardWidth,
+                    padding: cityCardPadding,
+                    flexShrink: 1,
+                  },
+                ]}
+              >
+                <Text style={styles.csCityName}>{t('home.csWeihai')}</Text>
+                {phoneRow(t('home.csPhoneWeihai1'), t('home.csTagWeihai1'))}
+                <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
+                {phoneRow(t('home.csPhoneWeihai2'), t('home.csTagWeihai2'))}
+                <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
+              </View>
+              <View
+                style={[
+                  styles.csCityCard,
+                  {
+                    width: cityCardWidth,
+                    padding: cityCardPadding,
+                    flexShrink: 1,
+                  },
+                ]}
+              >
+                <Text style={styles.csCityName}>{t('home.csYiwu')}</Text>
+                {phoneRow(t('home.csPhoneYiwu'), t('home.csTagYiwu'))}
+                <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
+              </View>
+              <View
+                style={[
+                  styles.csCityCard,
+                  {
+                    width: cityCardWidth,
+                    padding: cityCardPadding,
+                    flexShrink: 1,
+                  },
+                ]}
+              >
+                <Text style={styles.csCityName}>{t('home.csGwangju')}</Text>
+                {phoneRow(t('home.csPhoneGwangju'), t('home.csTagGwangju'))}
+                <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
+              </View>
+            </View>
+          );
+        })()}
 
         {renderCsCenterFooter()}
       </View>
@@ -1588,7 +1871,7 @@ const HomeScreen: React.FC = () => {
       );
 
     return (
-      <View style={[styles.header, styles.headerGuestLight]}>
+      <View style={[styles.header, styles.headerGuestLight, { paddingHorizontal: homeGutter }]}>
         <View style={styles.headerContent}>
           <StatusBar
             barStyle="dark-content"
@@ -1732,18 +2015,22 @@ const HomeScreen: React.FC = () => {
         scrollEventThrottle={32}
       >
         <View style={styles.contentWrapper}>
-          <View style={styles.guestAboveFold}>
+          <View style={[styles.guestAboveFold, { paddingHorizontal: homeGutter }]}>
             {renderGuestInsightGrid()}
           </View>
           {!(user && !isGuest) && (
-            <View style={styles.guestAboveFold}>
+            <View style={[styles.guestAboveFold, { paddingHorizontal: homeGutter }]}>
               {renderGuestWelcomePanel()}
             </View>
           )}
           {/* {renderQuickCategories()} */}
           {isAuthenticated && !isGuest && user && renderUserOrderSummaryCard()}
           {renderGlobalLogisticsSection()}
-          {renderIntegratedServicesSection()}
+          {/* Integrated Services section removed per request — keep the
+              renderer/styles in place as dead code so we can re-enable
+              quickly if needed. `void` reference silences the "unused"
+              hint without re-rendering anything. */}
+          {void renderIntegratedServicesSection}
           {renderCsCenterSection()}
           {/* {renderTrendingProducts()} */}
           {/* {renderPopularCategories()} */}
@@ -2051,7 +2338,11 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     borderWidth: 1,
     borderColor: FIGMA_OVERLAY_20,
-    minHeight: GUEST_PROMO_MIN_HEIGHT,
+    // `minHeight: GUEST_PROMO_MIN_HEIGHT` removed — the previous 472px
+    // minimum was sized for the old 10-orb category grid; with the new
+    // 2-card layout the panel now has noticeable empty space below the
+    // cards. Letting the panel size to content keeps the bottom gap
+    // equal to the panel's own `padding: SPACING.md`.
   },
   guestWelcomeHeadRow: {
     flexDirection: 'row',
@@ -2113,6 +2404,16 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     marginTop: SPACING.sm,
     marginBottom: SPACING.sm,
+  },
+  // Row that holds the two service cards (시장조사 / OEM공장조사)
+  // inside the red guest welcome panel. `space-between` makes the
+  // two cards line up flush with the panel's inner-left and
+  // inner-right edges; the explicit `gap` is applied inline.
+  guestWelcomeServiceCardsRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    justifyContent: 'space-between',
+    marginTop: SPACING.md,
   },
   guestBulletCell: {
     width: '50%',

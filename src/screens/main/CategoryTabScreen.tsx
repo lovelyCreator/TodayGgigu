@@ -48,6 +48,8 @@ import {
   mapLocaleToCategoryLang,
   pickCategoryLabel,
 } from '../../utils/categoryList';
+import { useResponsive } from '../../hooks/useResponsive';
+import { SkeletonBlock } from '../../components/Skeleton';
 
 type CategoryTabScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Category'>;
 
@@ -82,6 +84,10 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
   const { width: winWidth, height: winHeight } = useWindowDimensions();
   const isTabletLandscape = Math.min(winWidth, winHeight) >= 600 && winWidth > winHeight;
   const isEmbeddedLandscapeHeader = hideHeader && isTabletLandscape;
+  // Responsive layout helper. We only enable the L3 panel for the
+  // tablet-landscape bucket — phones and tablet-portrait keep the
+  // original 2-column layout exactly as before.
+  const responsive = useResponsive();
   // Zustand store
   const {
     selectedCategory,
@@ -184,6 +190,14 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
   }, []);
 
   const [isLoadingTopCategories, setIsLoadingTopCategories] = useState(false);
+
+  // L3 panel state (tablet-landscape only). `selectedL2` holds the
+  // currently highlighted L2 row whose L3 children should appear in the
+  // right-most panel that spans ~60% of the screen width on landscape
+  // tablets. `isLoadingL3` drives the skeleton-screen effect while the
+  // L3 data is being prepared.
+  const [selectedL2, setSelectedL2] = useState<any | null>(null);
+  const [isLoadingL3, setIsLoadingL3] = useState(false);
 
   // L1 mutation — fetches top-level categories from the API.
   const { mutate: refetchTopCategories, isLoading: isMutationLoading } = useTopCategoriesMutation({
@@ -870,6 +884,28 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
     );
   }, [selectedCategory, handleCategoryPress]);
 
+  // Tap behaviour for an L2 row:
+  //   * Tablet landscape → fill the right-most L3 panel in place
+  //     (no navigation). A short loading window drives the L3 skeleton.
+  //   * Everywhere else → keep the original behaviour of navigating to
+  //     the product discovery screen.
+  const handleL2RowTap = useCallback(
+    (item: any) => {
+      if (responsive.isTabletLandscape) {
+        setIsLoadingL3(true);
+        setSelectedL2(item);
+        // L3 children are already embedded in the L2 object (see
+        // `sections` memo); a brief loading flash matches the rest of
+        // the app's skeleton patterns and gives the user feedback that
+        // the panel is being repopulated when they switch L2 rows.
+        const timer = setTimeout(() => setIsLoadingL3(false), 150);
+        return () => clearTimeout(timer);
+      }
+      openProductDiscoveryForL2(item);
+    },
+    [responsive.isTabletLandscape, openProductDiscoveryForL2],
+  );
+
   const renderL2Row = useCallback(({ item }: { item: any }) => {
     if (item?.isPlaceholder) {
       return (
@@ -887,14 +923,15 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
         </View>
       );
     }
+    const isActive = responsive.isTabletLandscape && selectedL2?.id === item.id;
     return (
       <TouchableOpacity
-        style={styles.browseSubcatRow}
+        style={[styles.browseSubcatRow, isActive && styles.browseSubcatRowActive]}
         activeOpacity={0.75}
-        onPress={() => openProductDiscoveryForL2(item)}
+        onPress={() => handleL2RowTap(item)}
       >
         <Text
-          style={styles.browseSubcatName}
+          style={[styles.browseSubcatName, isActive && styles.browseSubcatNameActive]}
           numberOfLines={1}
           ellipsizeMode="tail"
         >
@@ -903,7 +940,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
         <Icon name="chevron-forward" size={20} color={COLORS.text.secondary} />
       </TouchableOpacity>
     );
-  }, [openProductDiscoveryForL2, locale]);
+  }, [handleL2RowTap, locale, responsive.isTabletLandscape, selectedL2?.id]);
 
   /** Per-L1 block header on the right (title row), then L2 rows in that section. */
   const renderL1SectionHeader = useCallback(({ section }: { section: any }) => (
@@ -917,6 +954,99 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
       </Text>
     </View>
   ), []);
+
+  // L3 panel — tablet-landscape only. Width is 60% of screen as
+  // requested. Shows skeleton blocks while `isLoadingL3` is true so
+  // the user gets feedback when switching L2 rows.
+  const renderL3Panel = () => {
+    const panelWidth = Math.floor(winWidth * 0.6);
+    const items: any[] = selectedL2?.subsubcategories || [];
+
+    if (isLoadingL3) {
+      return (
+        <View style={[styles.l3Panel, { width: panelWidth }]}>
+          <View style={styles.l3PanelHeader}>
+            <SkeletonBlock width={160} height={18} />
+          </View>
+          <View style={styles.l3PanelContent}>
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <View key={`l3-skel-${i}`} style={styles.l3SkeletonRow}>
+                <SkeletonBlock width={48} height={48} borderRadius={8} />
+                <SkeletonBlock
+                  width="60%"
+                  height={14}
+                  style={{ marginLeft: SPACING.sm }}
+                />
+              </View>
+            ))}
+          </View>
+        </View>
+      );
+    }
+
+    if (!selectedL2) {
+      return (
+        <View style={[styles.l3Panel, { width: panelWidth }]}>
+          <View style={styles.l3PanelEmpty}>
+            <Text style={styles.l3PanelEmptyText}>
+              {t('category.selectSubcategoryHint') || 'Select a subcategory'}
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={[styles.l3Panel, { width: panelWidth }]}>
+        <View style={styles.l3PanelHeader}>
+          <Text style={styles.l3PanelHeaderText} numberOfLines={1}>
+            {selectedL2.name}
+          </Text>
+        </View>
+        {items.length === 0 ? (
+          <View style={styles.l3PanelEmpty}>
+            <Text style={styles.l3PanelEmptyText}>
+              {t('category.noItemsAvailableForCategory')}
+            </Text>
+          </View>
+        ) : (
+          <ScrollView
+            style={styles.l3PanelScroll}
+            contentContainerStyle={styles.l3PanelContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {items.map((l3: any) => (
+              <TouchableOpacity
+                key={`l3-${l3.id}`}
+                style={styles.l3Row}
+                activeOpacity={0.75}
+                onPress={() => openProductDiscoveryForL2(selectedL2, l3.id)}
+              >
+                {l3.image ? (
+                  <View style={styles.l3Thumb}>
+                    {/* eslint-disable-next-line react-native/no-inline-styles */}
+                    <View
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 8,
+                        backgroundColor: COLORS.gray[100],
+                      }}
+                    />
+                  </View>
+                ) : (
+                  <View style={styles.l3ThumbPlaceholder} />
+                )}
+                <Text style={styles.l3Name} numberOfLines={2}>
+                  {l3.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+    );
+  };
 
   const renderCategoryBody = () => (
     <View style={styles.mainContent}>
@@ -998,6 +1128,8 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
           </View>
         )}
       </View>
+      {/* L3 panel — only on tablet landscape. Width 60% of screen. */}
+      {responsive.isTabletLandscape && renderL3Panel()}
     </View>
   );
 
@@ -1150,6 +1282,86 @@ const styles = StyleSheet.create({
   browseSubcatName: {
     flex: 1,
     fontSize: FONTS.sizes.md ,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  browseSubcatRowActive: {
+    backgroundColor: COLORS.gray[100],
+  },
+  browseSubcatNameActive: {
+    color: COLORS.red,
+    fontWeight: '700',
+  },
+  // L3 panel — only rendered on tablet landscape. Width is set inline
+  // (60% of `winWidth`) so it tracks rotation changes.
+  l3Panel: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: COLORS.gray[200],
+    backgroundColor: COLORS.white,
+  },
+  l3PanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.gray[200],
+    backgroundColor: COLORS.gray[50],
+  },
+  l3PanelHeaderText: {
+    flex: 1,
+    fontSize: FONTS.sizes.md,
+    fontWeight: '700',
+    color: COLORS.text.red,
+  },
+  l3PanelScroll: {
+    flex: 1,
+  },
+  l3PanelContent: {
+    paddingVertical: SPACING.sm,
+  },
+  l3PanelEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.xl,
+  },
+  l3PanelEmptyText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
+  },
+  l3Row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    gap: SPACING.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.gray[200],
+  },
+  l3SkeletonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    gap: SPACING.sm,
+  },
+  l3Thumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: COLORS.gray[100],
+  },
+  l3ThumbPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: COLORS.gray[100],
+  },
+  l3Name: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
     fontWeight: '500',
   },

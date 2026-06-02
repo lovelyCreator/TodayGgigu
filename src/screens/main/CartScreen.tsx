@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect, RouteProp } from '@react-navigation/native';
 import Icon from '../../components/Icon';
 import AddNewAddressModal from '../../components/AddNewAddressModal';
-import { COLORS, FONTS, SPACING } from '../../constants';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants';
 import {
   launchImageLibrary,
   MediaType,
@@ -295,6 +295,23 @@ const CartScreen: React.FC = () => {
     NegotiationImageEntry[]
   >([]);
   const [negotiationNote, setNegotiationNote] = useState('');
+  // Per-card data captured INSIDE the order-info modal for the
+  // multi-item case. Keyed by cart card id so each product can carry
+  // its own extra-services / negotiation note / negotiation images.
+  // Empty when the modal is opened with a single selected card (the
+  // existing top-level state handles that case for backwards compat).
+  const [cardExtraServices, setCardExtraServices] = useState<Record<string, ExtraService[]>>({});
+  const [cardNegotiationNote, setCardNegotiationNote] = useState<Record<string, string>>({});
+  const [cardNegotiationImages, setCardNegotiationImages] = useState<
+    Record<string, NegotiationImageEntry[]>
+  >({});
+  // Which card the (shared) "select extra services" modal is currently
+  // editing. `null` means it edits the order-wide `extraServices`
+  // (single-card legacy path).
+  const [activeServiceCardId, setActiveServiceCardId] = useState<string | null>(null);
+  // Card id whose negotiation-image gallery modal is currently open
+  // (tap on the "협상내역" label opens the viewer). `null` = closed.
+  const [negotiationGalleryCardId, setNegotiationGalleryCardId] = useState<string | null>(null);
   const [showAddNewAddressModal, setShowAddNewAddressModal] = useState(false);
   const [purchasePayment, setPurchasePayment] = useState<'manual' | 'auto'>('manual');
   const [shippingPayment, setShippingPayment] = useState<'manual' | 'auto'>('manual');
@@ -388,6 +405,12 @@ const CartScreen: React.FC = () => {
     if (showOrderModal) {
       setNegotiationContentImages([]);
       setNegotiationNote('');
+      // Per-card data is also wiped each time the modal opens so the
+      // shopper starts with a clean state on each new order attempt.
+      setCardExtraServices({});
+      setCardNegotiationNote({});
+      setCardNegotiationImages({});
+      setActiveServiceCardId(null);
     }
   }, [showOrderModal]);
 
@@ -585,19 +608,40 @@ const CartScreen: React.FC = () => {
     setCards((prev) => prev.map((c) => (c.expanded ? { ...c, expanded: false } : c)));
   };
 
-  const openServiceModal = useCallback(() => {
-    setPendingServices(extraServices);
-    setShowServiceModal(true);
-    void loadAdditionalServices();
-  }, [extraServices, loadAdditionalServices]);
+  // `openServiceModal(cardId)` opens the extra-service picker scoped
+  // to a specific cart card. When `cardId` is null the picker edits
+  // the order-wide `extraServices` array (single-card legacy path).
+  const openServiceModal = useCallback(
+    (cardId: string | null = null) => {
+      setActiveServiceCardId(cardId);
+      const seed = cardId
+        ? cardExtraServices[cardId] || []
+        : extraServices;
+      setPendingServices(seed);
+      setShowServiceModal(true);
+      void loadAdditionalServices();
+    },
+    [cardExtraServices, extraServices, loadAdditionalServices],
+  );
 
   const closeServiceModal = () => {
     setShowServiceModal(false);
+    setActiveServiceCardId(null);
   };
 
   const confirmServiceModal = () => {
-    setExtraServices(pendingServices);
+    if (activeServiceCardId) {
+      // Save into the per-card map; the multi-card UI reads from this.
+      setCardExtraServices((prev) => ({
+        ...prev,
+        [activeServiceCardId]: pendingServices,
+      }));
+    } else {
+      // Legacy: order-wide single list.
+      setExtraServices(pendingServices);
+    }
     setShowServiceModal(false);
+    setActiveServiceCardId(null);
   };
 
   const togglePendingService = (svc: ExtraService) => {
@@ -711,6 +755,156 @@ const CartScreen: React.FC = () => {
     });
   };
 
+  /**
+   * Per-card row inside the order-info modal when MORE THAN ONE cart
+   * card has been selected. Layout (per the user's spec):
+   *   ┌────────────────────────────────────────────────────────────┐
+   *   │ [img]  product name / options              │ negotiation   │
+   *   │                                            │  (top-right)  │
+   *   │                                            ├───────────────┤
+   *   │                                            │ remarks input │
+   *   ├─────── center: extra-service selector ─────────────────────┤
+   *   └────────────────────────────────────────────────────────────┘
+   * The extra-service section shows the "select" button until any
+   * service is picked — after that it shows only the chips (no label),
+   * matching the user's request.
+   */
+  const renderOrderModalCard = (card: CartCard) => {
+    const cardSvcs = cardExtraServices[card.id] || [];
+    const cardNote = cardNegotiationNote[card.id] || '';
+    const cardImages = cardNegotiationImages[card.id] || [];
+    const hasSvc = cardSvcs.length > 0;
+    const optionParts = [
+      card.color ? card.color : '',
+      card.size ? card.size : '',
+    ].filter(Boolean);
+    return (
+      <View key={`order-card-${card.id}`} style={styles.orderModalCard}>
+        {/* Top row: left = image + name + options, right = negotiation */}
+        <View style={styles.orderModalCardTop}>
+          <View style={styles.orderModalCardLeft}>
+            {card.productImage ? (
+              <Image
+                source={{ uri: card.productImage }}
+                style={styles.orderModalCardImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={[styles.orderModalCardImage, styles.orderModalCardImagePlaceholder]} />
+            )}
+            <View style={styles.orderModalCardInfo}>
+              <Text style={styles.orderModalCardName} numberOfLines={2}>
+                {card.productName}
+              </Text>
+              {optionParts.length > 0 ? (
+                <Text style={styles.orderModalCardOption} numberOfLines={1}>
+                  {optionParts.join(' / ')}
+                </Text>
+              ) : null}
+              <Text style={styles.orderModalCardQty}>
+                × {card.quantity}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.orderModalCardRight}>
+            {/* Negotiation header row: label right-aligned with a "+"
+                button next to it. Tapping the LABEL opens the gallery
+                modal showing all images added so far for THIS card.
+                Tapping the "+" picks a new image via the gallery. */}
+            <View style={styles.orderModalCardNegHeader}>
+              <TouchableOpacity
+                onPress={() => {
+                  if (cardImages.length > 0) {
+                    setNegotiationGalleryCardId(card.id);
+                  }
+                }}
+                activeOpacity={cardImages.length > 0 ? 0.7 : 1}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text
+                  style={[
+                    styles.orderModalCardSectionLabel,
+                    styles.orderModalCardNegLabel,
+                    cardImages.length > 0 && styles.orderModalCardNegLabelClickable,
+                  ]}
+                >
+                  {t('cartOrder.orderModal.negotiationHistory')}
+                  {cardImages.length > 0 ? ` (${cardImages.length})` : ''}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.orderModalCardNegAddBtn}
+                onPress={() => pickCardNegotiationAttachment(card.id)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={t('cartOrder.orderModal.negotiationAddAttachment')}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Icon name="add" size={16} color={PRIMARY} />
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={styles.orderModalCardRemarks}
+              value={cardNote}
+              onChangeText={(text) =>
+                setCardNegotiationNote((prev) => ({ ...prev, [card.id]: text }))
+              }
+              placeholder={t('cartOrder.orderModal.negotiationRemarksPlaceholder')}
+              placeholderTextColor={COLORS.gray[400]}
+              multiline
+              textAlignVertical="top"
+            />
+          </View>
+        </View>
+
+        {/* Center: extra-service selector. Label hidden once chips exist. */}
+        <View style={styles.orderModalCardServiceBar}>
+          {hasSvc ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.extraChipsContent}
+              style={styles.extraChipsScroll}
+            >
+              {cardSvcs.map((s) => (
+                <View key={s.id} style={styles.extraChip}>
+                  <Text style={styles.extraChipText}>{s.name}</Text>
+                  <TouchableOpacity
+                    onPress={() =>
+                      setCardExtraServices((prev) => ({
+                        ...prev,
+                        [card.id]: (prev[card.id] || []).filter((x) => x.id !== s.id),
+                      }))
+                    }
+                  >
+                    <Icon name="close" size={10} color={COLORS.primary} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity
+                style={styles.extraSelectBtn}
+                onPress={() => openServiceModal(card.id)}
+              >
+                <Icon name="add" size={12} color={COLORS.white} />
+              </TouchableOpacity>
+            </ScrollView>
+          ) : (
+            <TouchableOpacity
+              style={styles.orderModalCardServicePicker}
+              onPress={() => openServiceModal(card.id)}
+              activeOpacity={0.85}
+            >
+              <Icon name="add" size={14} color={PRIMARY} />
+              <Text style={styles.orderModalCardServicePickerText}>
+                {t('cartOrder.extraServiceBar.title')}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
+
   const renderExtraServiceBar = () => (
     <View style={[styles.extraBar, styles.extraBarInOrderModal]}>
       <Text style={styles.extraLabel}>{t('cartOrder.extraServiceBar.title')}</Text>
@@ -733,7 +927,7 @@ const CartScreen: React.FC = () => {
           ))
         )}
       </ScrollView>
-      <TouchableOpacity style={styles.extraSelectBtn} onPress={openServiceModal}>
+      <TouchableOpacity style={styles.extraSelectBtn} onPress={() => openServiceModal(null)}>
         <Icon name="add" size={12} color={COLORS.white} />
         <Text style={styles.extraSelectBtnText}>{t('cartOrder.extraServiceBar.selectBtn')}</Text>
       </TouchableOpacity>
@@ -1040,6 +1234,43 @@ const CartScreen: React.FC = () => {
     setNegotiationContentImages((prev) => prev.filter((entry) => entry.id !== id));
   }, []);
 
+  /**
+   * Same gallery-pick flow as `pickNegotiationAttachment`, but the
+   * picked image is stored on the per-card map keyed by `cardId`.
+   * Triggered by the per-card "+" button next to the 협상내역 label
+   * in the multi-card order modal.
+   */
+  const pickCardNegotiationAttachment = useCallback(
+    async (cardId: string) => {
+      try {
+        const granted = await requestPhotoLibraryPermission();
+        if (!granted) {
+          Alert.alert(t('cartOrder.alerts.permission'), t('cartOrder.alerts.photoPermission'));
+          return;
+        }
+        const options: ImageLibraryOptions = { mediaType: 'photo' as MediaType, quality: 0.7 };
+        launchImageLibrary(options, (res: ImagePickerResponse) => {
+          if (res.didCancel || res.errorCode) return;
+          const asset = res.assets?.[0];
+          const uri = asset?.uri;
+          if (!uri) return;
+          const entry = createNegotiationImageEntry({
+            uri,
+            fileName: asset.fileName,
+            type: asset.type,
+          });
+          setCardNegotiationImages((prev) => ({
+            ...prev,
+            [cardId]: [...(prev[cardId] || []), entry],
+          }));
+        });
+      } catch {
+        Alert.alert(t('cartOrder.alerts.error'), t('cartOrder.alerts.galleryFailed'));
+      }
+    },
+    [t],
+  );
+
   const openOrderInfoModal = useCallback(async () => {
     if (isGuest || !isAuthenticated) {
       navigation.navigate('Auth' as never, { screen: 'Login' } as never);
@@ -1209,49 +1440,125 @@ const CartScreen: React.FC = () => {
         skuId: c.skuId,
       }));
 
+      // Decide which payload shape to build:
+      //   * Single-card order  → top-level addServices/negotiation
+      //     (legacy single-card path; preserves existing behaviour).
+      //   * Multi-card order   → PER-CARD attachments shipped through
+      //     the new `perCart` callback so each line item carries its
+      //     own addServices / negotiationContentImages / note (matches
+      //     the order-create response sample from the backend, which
+      //     shows `items[].addServices` and `items[].negotiationContentImages`
+      //     stored independently per item).
+      const isMultiCardOrder = checkedCards.length > 1;
+
+      // Container that maps cartItemId → uploaded data for the
+      // multi-card path. Populated below by per-card uploads.
+      const perCardData: Record<
+        string,
+        {
+          addServices?: OrdersProxyAddService[];
+          negotiationContentImages?: string[];
+          negotiationNote?: string;
+        }
+      > = {};
+
+      // Legacy single-card values (only used when not multi-card).
       let negotiationImageUrls: string[] = [];
-      if (negotiationContentImages.length > 0) {
-        const uploadRes = await orderApi.uploadOrderImages(
-          'negotiationContentImages',
-          negotiationContentImages.map((img) => ({
-            uri: img.fileUri,
-            fileName: img.fileName,
-            type: img.mimeType,
-          })),
-          ordersLang,
-        );
-        if (!uploadRes.success) {
-          Alert.alert(
-            t('cartOrder.alerts.error'),
-            uploadRes.error || t('cartOrder.orderModal.negotiationUploadFailed'),
-          );
-          return;
-        }
-        negotiationImageUrls = uploadRes.data?.urls ?? [];
-      }
-
       let addServiceImageUrls: string[] = [];
-      if (modalPhotoUri && extraServices.length > 0) {
-        const uploadRes = await orderApi.uploadOrderImages(
-          'addServices',
-          [{ uri: modalPhotoUri, fileName: `addservice_${Date.now()}.jpg` }],
-          ordersLang,
-        );
-        if (!uploadRes.success) {
-          Alert.alert(
-            t('cartOrder.alerts.error'),
-            uploadRes.error || t('cartOrder.orderModal.negotiationUploadFailed'),
-          );
-          return;
+
+      if (isMultiCardOrder) {
+        // Upload each card's negotiation images separately so the
+        // returned URL groups can be attached to the correct line item.
+        for (const card of checkedCards) {
+          const images = cardNegotiationImages[card.id] || [];
+          let cardNegotiationUrls: string[] = [];
+          if (images.length > 0) {
+            const uploadRes = await orderApi.uploadOrderImages(
+              'negotiationContentImages',
+              images.map((img) => ({
+                uri: img.fileUri,
+                fileName: img.fileName,
+                type: img.mimeType,
+              })),
+              ordersLang,
+            );
+            if (!uploadRes.success) {
+              Alert.alert(
+                t('cartOrder.alerts.error'),
+                uploadRes.error || t('cartOrder.orderModal.negotiationUploadFailed'),
+              );
+              return;
+            }
+            cardNegotiationUrls = uploadRes.data?.urls ?? [];
+          }
+
+          const cardSvcs = cardExtraServices[card.id] || [];
+          // No per-card extra-service image uploads in the current UI;
+          // pass empty array so the payload shape still matches the
+          // server contract (`addServices[i].imageUrl: string[]`).
+          const addServicesForCard: OrdersProxyAddService[] = cardSvcs.map((svc) => ({
+            id: svc.id,
+            note: '',
+            imageUrl: [],
+          }));
+
+          const cardNote = (cardNegotiationNote[card.id] || '').trim();
+
+          perCardData[card.id] = {
+            ...(addServicesForCard.length > 0 ? { addServices: addServicesForCard } : {}),
+            ...(cardNegotiationUrls.length > 0
+              ? { negotiationContentImages: cardNegotiationUrls }
+              : {}),
+            ...(cardNote ? { negotiationNote: cardNote } : {}),
+          };
         }
-        addServiceImageUrls = uploadRes.data?.urls ?? [];
+      } else {
+        // Single-card legacy path — keep the old upload flow exactly.
+        if (negotiationContentImages.length > 0) {
+          const uploadRes = await orderApi.uploadOrderImages(
+            'negotiationContentImages',
+            negotiationContentImages.map((img) => ({
+              uri: img.fileUri,
+              fileName: img.fileName,
+              type: img.mimeType,
+            })),
+            ordersLang,
+          );
+          if (!uploadRes.success) {
+            Alert.alert(
+              t('cartOrder.alerts.error'),
+              uploadRes.error || t('cartOrder.orderModal.negotiationUploadFailed'),
+            );
+            return;
+          }
+          negotiationImageUrls = uploadRes.data?.urls ?? [];
+        }
+
+        if (modalPhotoUri && extraServices.length > 0) {
+          const uploadRes = await orderApi.uploadOrderImages(
+            'addServices',
+            [{ uri: modalPhotoUri, fileName: `addservice_${Date.now()}.jpg` }],
+            ordersLang,
+          );
+          if (!uploadRes.success) {
+            Alert.alert(
+              t('cartOrder.alerts.error'),
+              uploadRes.error || t('cartOrder.orderModal.negotiationUploadFailed'),
+            );
+            return;
+          }
+          addServiceImageUrls = uploadRes.data?.urls ?? [];
+        }
       }
 
-      const addServicesPayload: OrdersProxyAddService[] = extraServices.map((svc) => ({
-        id: svc.id,
-        note: otherRequests.trim(),
-        imageUrl: addServiceImageUrls,
-      }));
+      // Single-card addServices payload (unused in multi-card mode).
+      const addServicesPayload: OrdersProxyAddService[] = isMultiCardOrder
+        ? []
+        : extraServices.map((svc) => ({
+            id: svc.id,
+            note: otherRequests.trim(),
+            imageUrl: addServiceImageUrls,
+          }));
 
       const proxyItems = buildOrdersProxyLineItems(
         cartItemIds,
@@ -1260,10 +1567,19 @@ const CartScreen: React.FC = () => {
         fallbackCards,
         {
           locale,
-          addServices: addServicesPayload.length > 0 ? addServicesPayload : undefined,
-          negotiationContentImages:
-            negotiationImageUrls.length > 0 ? negotiationImageUrls : undefined,
-          negotiationNote: negotiationNote.trim() || undefined,
+          ...(isMultiCardOrder
+            ? {
+                // Per-cart overrides ride entirely through `perCart`;
+                // the top-level fields are left empty so they don't
+                // accidentally apply to every line item.
+                perCart: (cartItemId: string) => perCardData[cartItemId] ?? null,
+              }
+            : {
+                addServices: addServicesPayload.length > 0 ? addServicesPayload : undefined,
+                negotiationContentImages:
+                  negotiationImageUrls.length > 0 ? negotiationImageUrls : undefined,
+                negotiationNote: negotiationNote.trim() || undefined,
+              }),
         },
       );
 
@@ -1761,6 +2077,34 @@ const CartScreen: React.FC = () => {
           <Text style={styles.summaryTotal}>
             {t('cartOrder.summary.total')} ¥{(checkedQty > 0 ? checkedTotal : grandTotal).toFixed(2)}
           </Text>
+          {/* Select-all / deselect-all controls. Both buttons live in the
+              summary bar to the LEFT of the "Order Now" CTA so the
+              shopper can quickly toggle every card's `checked` state
+              without scrolling through individual seller groups. */}
+          <TouchableOpacity
+            style={styles.bulkSelectBtn}
+            onPress={() =>
+              setCards((prev) => prev.map((c) => ({ ...c, checked: true })))
+            }
+            disabled={cards.length === 0}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.bulkSelectBtnText}>
+              {t('cartOrder.summary.selectAll')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.bulkSelectBtn}
+            onPress={() =>
+              setCards((prev) => prev.map((c) => ({ ...c, checked: false })))
+            }
+            disabled={!hasSelectedCards}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.bulkSelectBtnText}>
+              {t('cartOrder.summary.deselectAll')}
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[
               styles.orderBtn,
@@ -1981,59 +2325,73 @@ const CartScreen: React.FC = () => {
                 </View>
               </View>
 
-              {/* 부가서비스 — same selection as cart page */}
-              <View style={styles.orderExtraServiceSection}>
-                {renderExtraServiceBar()}
-              </View>
+              {/* Order modal — extra services / negotiation / remarks.
+                  When only one cart card is selected, keep the legacy
+                  single-block layout. When 2+ cards are selected,
+                  render one collapsed card per selected item so each
+                  product has its OWN extra-service picker, negotiation
+                  history and remarks (per user's spec). */}
+              {checkedCards.length > 1 ? (
+                <View style={styles.orderModalCardsList}>
+                  {checkedCards.map((c) => renderOrderModalCard(c))}
+                </View>
+              ) : (
+                <>
+                  {/* 부가서비스 — single-card legacy path */}
+                  <View style={styles.orderExtraServiceSection}>
+                    {renderExtraServiceBar()}
+                  </View>
 
-              {/* 협상내역 — negotiation remarks at bottom of order modal */}
-              <View style={styles.negotiationSection}>
-                <View style={styles.negotiationHeader}>
-                  <Text style={styles.negotiationHeaderTitle}>
-                    {t('cartOrder.orderModal.negotiationHistory')}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.negotiationAddBtn}
-                    onPress={pickNegotiationAttachment}
-                    activeOpacity={0.7}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('cartOrder.orderModal.negotiationAddAttachment')}
-                  >
-                    <Icon name="add" size={18} color={COLORS.text.primary} />
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.negotiationBody}>
-                  {negotiationContentImages.length > 0 ? (
-                    <View style={styles.negotiationImagesRow}>
-                      {negotiationContentImages.map((entry) => (
-                        <View key={entry.id} style={styles.negotiationThumbWrap}>
-                          <Image
-                            source={{ uri: entry.fileUri }}
-                            style={styles.negotiationThumb}
-                            resizeMode="cover"
-                          />
-                          <TouchableOpacity
-                            style={styles.negotiationThumbRemove}
-                            onPress={() => removeNegotiationImage(entry.id)}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <Icon name="close" size={12} color={COLORS.white} />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
+                  {/* 협상내역 — negotiation remarks at bottom of order modal */}
+                  <View style={styles.negotiationSection}>
+                    <View style={styles.negotiationHeader}>
+                      <Text style={styles.negotiationHeaderTitle}>
+                        {t('cartOrder.orderModal.negotiationHistory')}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.negotiationAddBtn}
+                        onPress={pickNegotiationAttachment}
+                        activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('cartOrder.orderModal.negotiationAddAttachment')}
+                      >
+                        <Icon name="add" size={18} color={COLORS.text.primary} />
+                      </TouchableOpacity>
                     </View>
-                  ) : null}
-                  <TextInput
-                    style={styles.negotiationInput}
-                    value={negotiationNote}
-                    onChangeText={setNegotiationNote}
-                    placeholder={t('cartOrder.orderModal.negotiationRemarksPlaceholder')}
-                    placeholderTextColor={COLORS.gray[400]}
-                    multiline
-                    textAlignVertical="top"
-                  />
-                </View>
-              </View>
+                    <View style={styles.negotiationBody}>
+                      {negotiationContentImages.length > 0 ? (
+                        <View style={styles.negotiationImagesRow}>
+                          {negotiationContentImages.map((entry) => (
+                            <View key={entry.id} style={styles.negotiationThumbWrap}>
+                              <Image
+                                source={{ uri: entry.fileUri }}
+                                style={styles.negotiationThumb}
+                                resizeMode="cover"
+                              />
+                              <TouchableOpacity
+                                style={styles.negotiationThumbRemove}
+                                onPress={() => removeNegotiationImage(entry.id)}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              >
+                                <Icon name="close" size={12} color={COLORS.white} />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
+                      <TextInput
+                        style={styles.negotiationInput}
+                        value={negotiationNote}
+                        onChangeText={setNegotiationNote}
+                        placeholder={t('cartOrder.orderModal.negotiationRemarksPlaceholder')}
+                        placeholderTextColor={COLORS.gray[400]}
+                        multiline
+                        textAlignVertical="top"
+                      />
+                    </View>
+                  </View>
+                </>
+              )}
             </ScrollView>
 
             <View style={styles.modalFooter}>
@@ -2059,6 +2417,82 @@ const CartScreen: React.FC = () => {
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Per-card negotiation-image gallery viewer. Opens when the
+          shopper taps the "협상내역" label on a card row in the order
+          modal (only when that card has at least one attachment).
+          Each thumb has a small ✕ overlay to let the shopper delete
+          the attachment in place. */}
+      <Modal
+        visible={negotiationGalleryCardId !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setNegotiationGalleryCardId(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {t('cartOrder.orderModal.negotiationHistory')}
+              </Text>
+              <TouchableOpacity onPress={() => setNegotiationGalleryCardId(null)}>
+                <Icon name="close" size={22} color={COLORS.text.primary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              style={styles.modalBody}
+              contentContainerStyle={styles.modalBodyContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {(() => {
+                const cardId = negotiationGalleryCardId;
+                const images = cardId ? cardNegotiationImages[cardId] || [] : [];
+                if (images.length === 0) {
+                  return (
+                    <Text style={styles.negotiationGalleryEmpty}>
+                      {t('cartOrder.orderModal.negotiationRemarksPlaceholder')}
+                    </Text>
+                  );
+                }
+                return (
+                  <View style={styles.negotiationGalleryGrid}>
+                    {images.map((entry) => (
+                      <View key={entry.id} style={styles.negotiationGalleryItem}>
+                        <Image
+                          source={{ uri: entry.fileUri }}
+                          style={styles.negotiationGalleryImage}
+                          resizeMode="cover"
+                        />
+                        <TouchableOpacity
+                          style={styles.negotiationGalleryRemove}
+                          onPress={() =>
+                            setCardNegotiationImages((prev) => {
+                              if (!cardId) return prev;
+                              const next = {
+                                ...prev,
+                                [cardId]: (prev[cardId] || []).filter((x) => x.id !== entry.id),
+                              };
+                              // Auto-close the modal if the last image
+                              // was just removed.
+                              if (next[cardId].length === 0) {
+                                setNegotiationGalleryCardId(null);
+                              }
+                              return next;
+                            })
+                          }
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Icon name="close" size={14} color={COLORS.white} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                );
+              })()}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -2619,7 +3053,9 @@ const styles = StyleSheet.create({
   },
   extraLabel: {
     fontSize: FONTS.sizes.xs,
-    color: COLORS.gray[600],
+    // 부가서비스 label in the (single-card) order modal — match the
+    // project's primary red, same tone as the negotiation header.
+    color: PRIMARY,
     fontWeight: '700',
     marginRight: 8,
   },
@@ -2695,7 +3131,9 @@ const styles = StyleSheet.create({
   negotiationHeaderTitle: {
     fontSize: FONTS.sizes.sm,
     fontWeight: '700',
-    color: COLORS.text.primary,
+    // Project's primary red — keeps the single-card 협상내역 header
+    // consistent with the multi-card per-row label.
+    color: PRIMARY,
   },
   negotiationAddBtn: {
     width: 32,
@@ -3627,6 +4065,229 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
     elevation: 3,
+  },
+  // Outline buttons that toggle every card's `checked` state in one
+  // tap. Sit in the summary bar to the left of the primary "Order Now"
+  // CTA, with light borders so they don't compete with the bold orange
+  // CTA visually.
+  bulkSelectBtn: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    marginRight: SPACING.xs,
+    backgroundColor: COLORS.white,
+  },
+  bulkSelectBtnText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '600',
+  },
+  // Wrapper around the per-card list rendered inside the order
+  // modal when 2+ cart cards are selected. Adds a small vertical
+  // breathing room above and below the card stack.
+  orderModalCardsList: {
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  // Multi-card order modal — per-card row layout. The image+name
+  // (left) and negotiation block (right) sit on the top row; the
+  // extra-service selector sits underneath as a centred bar.
+  orderModalCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    padding: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  orderModalCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+  },
+  orderModalCardLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+  },
+  orderModalCardImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+  },
+  orderModalCardImagePlaceholder: {
+    backgroundColor: COLORS.gray[100],
+  },
+  orderModalCardInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  orderModalCardName: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  orderModalCardOption: {
+    marginTop: 2,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  orderModalCardQty: {
+    marginTop: 2,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    fontWeight: '600',
+  },
+  orderModalCardRight: {
+    flex: 1,
+    minWidth: 0,
+  },
+  orderModalCardSectionLabel: {
+    fontSize: FONTS.sizes.xs,
+    // Project's primary red — used for the "협상내역" label so
+    // negotiation / extra-service controls share one consistent
+    // brand colour inside the order modal.
+    color: PRIMARY,
+    marginBottom: 4,
+    fontWeight: '700',
+  },
+  // Header row for the per-card negotiation block:
+  //   "협상내역 (n)"  ⊕
+  // The label is right-aligned (`flex: 1` + `textAlign: right`) and
+  // the "+" sits flush to the rightmost edge of the card's right
+  // column, exactly matching the user's spec.
+  orderModalCardNegHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 6,
+    marginBottom: 4,
+  },
+  orderModalCardNegLabel: {
+    textAlign: 'right',
+    marginBottom: 0,
+  },
+  orderModalCardNegLabelClickable: {
+    // Same red as the default label (already PRIMARY above), with
+    // an underline to indicate "tap to open the image gallery".
+    color: PRIMARY,
+    textDecorationLine: 'underline',
+  },
+  orderModalCardNegAddBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    // Red border + red "+" glyph to match the negotiation label.
+    borderColor: PRIMARY,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.white,
+  },
+  // Styles for the negotiation-image gallery modal (opens when the
+  // shopper taps the 협상내역 label on a card row).
+  negotiationGalleryEmpty: {
+    textAlign: 'center',
+    paddingVertical: SPACING.lg,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
+  },
+  negotiationGalleryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    padding: SPACING.sm,
+  },
+  negotiationGalleryItem: {
+    width: 96,
+    height: 96,
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: COLORS.gray[100],
+  },
+  negotiationGalleryImage: {
+    width: '100%',
+    height: '100%',
+  },
+  negotiationGalleryRemove: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderModalCardRemarks: {
+    marginTop: 4,
+    minHeight: 48,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  orderModalCardNegImagesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginBottom: 4,
+  },
+  orderModalCardNegThumbWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  orderModalCardNegThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  orderModalCardNegThumbRemove: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderModalCardServiceBar: {
+    marginTop: SPACING.sm,
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[200],
+  },
+  orderModalCardServicePicker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 8,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: 8,
+    borderWidth: 1,
+    // Red dashed outline so the "select extra service" affordance
+    // visually matches the red 협상내역 label above it.
+    borderColor: PRIMARY,
+    borderStyle: 'dashed',
+    backgroundColor: COLORS.white,
+  },
+  orderModalCardServicePickerText: {
+    fontSize: FONTS.sizes.xs,
+    color: PRIMARY,
+    fontWeight: '700',
   },
   orderBtnEnabled: {
     backgroundColor: PRIMARY,

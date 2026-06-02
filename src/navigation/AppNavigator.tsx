@@ -10,6 +10,7 @@ import { useSocket } from '../context/SocketContext';
 import { RootStackParamList, AuthStackParamList, MainTabParamList } from '../types';
 import { BORDER_RADIUS, COLORS, DEMO_MODE, SPACING } from '../constants';
 import { useAppSelector } from '../store/hooks';
+import { useResponsive } from '../hooks/useResponsive';
 import { translations } from '../i18n/translations';
 import HomeIcon from '../assets/icons/HomeIcon';
 import CategoryIcon from '../assets/icons/CategoryIcon';
@@ -169,6 +170,10 @@ const MainTabNavigator = () => {
   const navigation = useNavigation();
   const locale = useAppSelector((s) => s.i18n.locale);
   const insets = useSafeAreaInsets();
+  // Reactive layout metrics — used ONLY to apply tablet-specific tab bar
+  // fixes (icon/label overlap, label position). Mobile keeps its
+  // original sizing exactly as before.
+  const responsive = useResponsive();
   const { unreadCount, generalInquiryUnreadCount } = useSocket();
   const totalMessageUnread = unreadCount + generalInquiryUnreadCount;
 
@@ -195,12 +200,27 @@ const MainTabNavigator = () => {
     }
   }, [shouldNavigateToProfile, navigation, clearNavigateToProfile]); // Depend on all required values
   
-  // Calculate tab bar height and padding based on safe area insets
+  // Calculate tab bar height and padding based on safe area insets.
+  //
+  // Mobile keeps the ORIGINAL sizing (45/15) that was already working —
+  // do not touch it. Tablets are the only environment where the bottom
+  // bar was rendering with the icon and label overlapping in a single
+  // row, so we apply a larger height + label-below-icon override only
+  // when `responsive.isTablet` is true.
+  //
+  // On tablets we DO NOT add the full `insets.bottom` to the height
+  // and padding (tablets rarely have a home-indicator cutout, and even
+  // when they do, the system inset on Android landscape is usually 0).
+  // Adding the inset would have created the wide empty gap visible
+  // under the labels in the previous screenshot. Instead we add the
+  // inset only to the height (so the bar still clears any real cutout)
+  // and keep `paddingBottom` at the base value so the labels sit close
+  // to the bottom of the bar — matching the mobile look.
   const TAB_BAR_DOWN_OFFSET = 0;
-  const baseTabBarHeight = 45;
-  const basePaddingBottom = 15;
+  const baseTabBarHeight = responsive.isTablet ? 56 : 45;
+  const basePaddingBottom = responsive.isTablet ? 6 : 15;
   const tabBarHeight = baseTabBarHeight + insets.bottom - TAB_BAR_DOWN_OFFSET;
-  const paddingBottom = basePaddingBottom ;
+  const paddingBottom = basePaddingBottom;
   
   const LIVE_BUTTON_SIZE = 76;
   const LIVE_BUTTON_OVERHANG = 18;
@@ -331,6 +351,25 @@ const MainTabNavigator = () => {
           shadowRadius: 8,
           elevation: 8,
         },
+        // On tablets only: force label to render BELOW the icon.
+        // React Navigation's bottom-tabs uses an "adaptive" default
+        // that becomes `beside-icon` (a horizontal row) on screens
+        // with a short side ≥ 600px — that's what made the icon and
+        // label overlap in the tablet screenshot. Mobile keeps the
+        // default behaviour (which already shows label below icon
+        // for narrow screens), so this override is gated by
+        // `responsive.isTablet`.
+        ...(responsive.isTablet
+          ? {
+              tabBarLabelPosition: 'below-icon' as const,
+              tabBarItemStyle: {
+                flexDirection: 'column' as const,
+                alignItems: 'center' as const,
+                justifyContent: 'center' as const,
+                paddingVertical: 0,
+              },
+            }
+          : null),
         tabBarLabelStyle: {
           fontSize: 12,
           marginTop: 4,

@@ -1493,6 +1493,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md * 2,
     paddingTop: SPACING['2xl'] * 2,
+    // White background — explicit on every device (mobile + tablet) so
+    // the header doesn't inherit any darker gray from a parent in
+    // certain RN versions.
+    backgroundColor: COLORS.white,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray[200],
   },
@@ -1517,7 +1521,10 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    // Body background also white so the area below the header reads as
+    // one continuous white surface, matching the user's requested look
+    // (was the app-wide `COLORS.background` light-gray before).
+    backgroundColor: COLORS.white,
   },
   sellerGroup: {
     backgroundColor: COLORS.white,

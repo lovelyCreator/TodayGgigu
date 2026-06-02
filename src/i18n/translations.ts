@@ -570,6 +570,7 @@ export const translations = {
       categoryIdNotProvided: 'Category ID not provided',
       noItemsAvailable: 'No items available',
       noItemsAvailableForCategory: 'No items available for this category',
+      selectSubcategoryHint: 'Select a subcategory to view its items',
     },
     search: {
       placeholder: 'Search',
@@ -2160,7 +2161,7 @@ Supports credit and check cards from various banks for recharging and payments.`
         label: 'Label',
         delete: 'Delete',
       },
-      summary: { totalQty: 'Total Qty', total: 'Total', order: 'Order Now' },
+      summary: { totalQty: 'Total Qty', total: 'Total', order: 'Order Now', selectAll: 'Select all', deselectAll: 'Deselect' },
       extraServiceBar: {
         title: 'Extra Services',
         placeholder: 'No services selected',
@@ -4176,6 +4177,7 @@ Supports credit and check cards from various banks for recharging and payments.`
       categoryIdNotProvided: '未提供分类ID',
       noItemsAvailable: '没有可用项目',
       noItemsAvailableForCategory: '此分类没有可用项目',
+      selectSubcategoryHint: '请选择一个子分类以查看项目',
     },
     search: {
       placeholder: '搜索',
@@ -4396,7 +4398,7 @@ Supports credit and check cards from various banks for recharging and payments.`
         label: '标签',
         delete: '删除',
       },
-      summary: { totalQty: '总数量', total: '合计', order: '立即下单' },
+      summary: { totalQty: '总数量', total: '合计', order: '立即下单', selectAll: '全选', deselectAll: '取消选择' },
       extraServiceBar: {
         title: '附加服务',
         placeholder: '未选择服务',
@@ -6515,6 +6517,7 @@ Supports credit and check cards from various banks for recharging and payments.`
       categoryIdNotProvided: '카테고리 ID가 제공되지 않았습니다',
       noItemsAvailable: '사용 가능한 항목이 없습니다',
       noItemsAvailableForCategory: '이 카테고리에 사용 가능한 항목이 없습니다',
+      selectSubcategoryHint: '항목을 보려면 하위 카테고리를 선택하세요',
     },
     search: {
       placeholder: '검색',
@@ -6735,7 +6738,7 @@ Supports credit and check cards from various banks for recharging and payments.`
         label: '라벨',
         delete: '삭제',
       },
-      summary: { totalQty: '총수량', total: '합계', order: '바로주문' },
+      summary: { totalQty: '총수량', total: '합계', order: '바로주문', selectAll: '전체선택', deselectAll: '선택취소' },
       extraServiceBar: {
         title: '부가서비스',
         placeholder: '선택된 서비스가 없습니다',
