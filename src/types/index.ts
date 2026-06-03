@@ -431,13 +431,35 @@ export type RootStackParamList = {
   Charge: undefined;
   PointDetail: undefined;
   Coupon: { initialSection?: 'coupon' | 'point' } | undefined;
-  BuyList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'error' | 'shipping_delay' | 'refunds' | 'purchase_agency' | 'warehouse' | 'international_shipping' | 'all' } | undefined;
+  BuyList: {
+    initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'error' | 'shipping_delay' | 'refunds' | 'purchase_agency' | 'warehouse' | 'international_shipping' | 'all';
+    // 사업 도메인 — 발주관리 드롭다운에서 선택되는 키. 외부(ProfileScreen 내주문 카드 등)에서
+    // 도메인을 강제로 활성화시키며 BuyListScreen 으로 진입할 때 사용.
+    domain?: 'purchase_agency' | 'rocket_3pl' | 'vvic_hipass' | 'shipping_agency' | 'error_management' | 'refund_management';
+  } | undefined;
   // 로켓/3PL, VVIC하이패스, 배송대행 페지는 구매대행과 동일한 9개 단계 라벨(견적대기/고객확인/.../완료/전체주문)을 공유한다.
   // 4개 도메인은 시각상 ">"로 묶여 있어도 서로 독립이며, 카운트만 도메인별로 다르다.
   Rocket3PLList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'shipping_delay' | 'all' } | undefined;
   VvicHipassList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'shipping_delay' | 'all' } | undefined;
   ShippingAgencyList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'shipping_delay' | 'all' } | undefined;
   ProductManagement: undefined;
+  // 상품관리 카드의 편집(✏️) 아이콘에서 진입. 카드의 현재 필드들을 그대로
+  // 전달해 폼이 즉시 초기화된다. productId 만 있고 나머지는 옵션이어서
+  // 호출자가 일부만 보낼 수도 있다.
+  // offerId + source 는 GET /products/detail 호출용 — 진입 즉시 그 API 를
+  // 불러 응답으로 폼을 한 번 더 보강한다 (카드에 없는 productSkuInfos /
+  // productImage / productAttribute 등 풀 데이터).
+  OnlineProductEdit: {
+    productId: string;
+    offerId?: string;
+    source?: string;
+    productName?: string;
+    unitPrice?: number;
+    option1?: string;
+    option2?: string;
+    categoryName?: string;
+    thumbnailUrl?: string;
+  } | undefined;
   UnitSurvey: undefined;
   OEMSurvey: undefined;
   PaymentHistory: undefined;

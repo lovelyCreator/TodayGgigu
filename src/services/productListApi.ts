@@ -18,10 +18,36 @@ export interface ProductThumbnail {
   isThumbnail?: boolean;
 }
 
+/** 다국어 텍스트 — 백엔드가 {en, ko, zh} 객체로 보내준다. */
+export interface ProductNameMultiLang {
+  en?: string;
+  ko?: string;
+  zh?: string;
+}
+
+/**
+ * 상품관리 페지에서 받는 한 건의 상품. 새 GET /customer/product-list/products
+ * 응답을 그대로 반영한 모양 — 이전 `users/product-list/products` 응답에 비해
+ * 다음 필드들이 추가/유지된다:
+ *   • productNameMultiLang  — 다국어 상품명
+ *   • orderId / offerId / skuId / specId — 주문·상품 키
+ *   • detailImgUrl          — 상품 상세 페이지 URL (1688 등 원본)
+ *   • option1 / option2     — 옵션 텍스트 (색상·사이즈 등 — 백엔드가 사람이 읽는 형태로 정리해서 내려옴)
+ *   • unitPrice / userPrice / previousUserPrice — 단가 관련 (모두 number)
+ *   • level                 — 'G' / 'R' / 'P' / 'S' 같은 단일 문자 등급
+ *   • categoryName / categoryKey — 카테고리 식별자
+ *   • Tnumber               — 일부 항목에만 있는 거래 번호
+ */
 export interface SellerProduct {
   _id: string;
   ownerUserId: string;
   productName: string;
+  productNameMultiLang?: ProductNameMultiLang;
+  orderId?: string;
+  offerId?: string;
+  skuId?: string;
+  specId?: string;
+  detailImgUrl?: string;
   categoryId: string;
   productStatus: string;
   thumbnails: ProductThumbnail[];
@@ -29,17 +55,36 @@ export interface SellerProduct {
   sku?: string;
   labelName?: string;
   productUrl?: string;
+  option1?: string;
+  option2?: string;
+  unitPrice?: number;
+  userPrice?: number;
+  previousUserPrice?: number;
+  level?: string;
+  categoryName?: string;
+  categoryKey?: string;
+  Tnumber?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface GetSellerProductsParams {
+  /** Locale to request product names in. 'ko' / 'en' / 'zh'. Defaults to 'ko'. */
+  lang?: string;
+  /** 향후 백엔드가 확장할 때를 대비 — 현재는 사용하지 않지만 호출자가 같이 보내도 무시된다. */
   categoryKey?: string;
   status?: string;
+  /** ISO 8601 (예: '2026-06-17T00:00:00.000Z') — createdAt 기준 시작 시각. */
+  periodFrom?: string;
+  /** ISO 8601 — createdAt 기준 종료 시각. */
+  periodTo?: string;
 }
 
 export const productListApi = {
-  // Get the seller's own product list.
+  /**
+   * GET /customer/product-list/products
+   * 응답 예시는 응답 JSON 참조. data.products[] 는 SellerProduct[] 형태.
+   */
   getProducts: async (
     params: GetSellerProductsParams = {},
   ): Promise<ApiResponse<{ products: SellerProduct[] }>> => {
@@ -47,11 +92,18 @@ export const productListApi = {
       const token = await getStoredToken();
 
       const query = new URLSearchParams();
+      // lang 은 백엔드가 다국어 텍스트(productName 등)를 어느 언어로 정렬해
+      // 보낼지 결정하는 핵심 파라미터. 기본값은 'ko'.
+      query.append('lang', params.lang || 'ko');
       if (params.categoryKey) query.append('categoryKey', params.categoryKey);
       if (params.status) query.append('status', params.status);
+      // 날짜 구간 — 백엔드가 도입하면 자동으로 서버 사이드 필터링에 쓰인다.
+      // 도입 전이라도 같이 보내 두면 backwards-compatible.
+      if (params.periodFrom) query.append('periodFrom', params.periodFrom);
+      if (params.periodTo) query.append('periodTo', params.periodTo);
       const qs = query.toString();
 
-      const url = `${API_BASE_URL}/users/product-list/products${qs ? `?${qs}` : ''}`;
+      const url = `${API_BASE_URL}/customer/product-list/products${qs ? `?${qs}` : ''}`;
       const signatureHeaders = await buildSignatureHeaders('GET', url);
 
       const response = await axios.get(url, {

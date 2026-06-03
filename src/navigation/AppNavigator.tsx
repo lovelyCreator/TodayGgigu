@@ -87,6 +87,7 @@ import ShippingAgencyListScreen from '../screens/main/profileScreen/settingScree
 import RefundRequestScreen from '../screens/main/profileScreen/settingScreen/RefundRequestScreen';
 import ProblemProductScreen from '../screens/main/profileScreen/settingScreen/ProblemProductScreen';
 import ProductManagementScreen from '../screens/main/profileScreen/settingScreen/productManagementScreen/ProductManagementScreen';
+import OnlineProductEditScreen from '../screens/main/profileScreen/settingScreen/productManagementScreen/OnlineProductEditScreen';
 import UnitSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/UnitSurveyScreen';
 import OEMSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/OEMSurveyScreen';
 import MyDeliveriesScreen from '../screens/main/profileScreen/settingScreen/MyDeliveriesScreen';
@@ -908,6 +909,11 @@ const RootNavigator = () => {
           <RootStack.Screen
             name="ProductManagement"
             component={ProductManagementScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="OnlineProductEdit"
+            component={OnlineProductEditScreen}
             options={{ headerShown: false }}
           />
           <RootStack.Screen

@@ -264,6 +264,52 @@ const orderBelongsToStatusGroup = (order: Order, groupKey: string): boolean => {
   return (group.statuses as readonly string[]).includes(canonical);
 };
 
+/**
+ * 주문을 4개 사업 도메인(구매대행 / 로켓-3PL / VVIC하이패스 / 배송대행) 중
+ * 하나로 분류한다. 우선권은:
+ *   1) VVIC하이패스  ← orderMainInfo.transferMethod 또는 shippingMethod 에 'VVIC' 포함
+ *   2) 로켓/3PL      ← orderType==='Rocket' 또는 shippingMethod==='로켓배송'
+ *   3) 배송대행      ← orderType==='Shipping' (위 1·2 조건이 모두 거짓일 때)
+ *   4) 구매대행      ← 그 외 (General 등)
+ *
+ * 백엔드가 한 항목에 여러 신호를 동시에 줄 수 있어 (예: requestType='Shipping' +
+ * transferMethod='VVIC(육로)항공'), VVIC 가 우선이라는 규칙은 응답자료의
+ * P00000014 케이스에서 직접 드러난다.
+ */
+type BuyListBusinessDomain =
+  | 'purchase_agency'
+  | 'rocket_3pl'
+  | 'vvic_hipass'
+  | 'shipping_agency';
+
+const resolveOrderBusinessDomain = (order: Order): BuyListBusinessDomain => {
+  const info: any = (order as any).orderMainInfo || {};
+  const orderType = String((order as any).orderType || '').toLowerCase();
+  const transferMethod = String(info.transferMethod || '').toLowerCase();
+  const shippingMethod = String(info.shippingMethod || '').toLowerCase();
+  const requestType = String(info.requestType || '').toLowerCase();
+
+  // 1) VVIC 하이패스 — 신호가 들어 있으면 무조건 우선.
+  if (transferMethod.includes('vvic') || shippingMethod.includes('vvic')) {
+    return 'vvic_hipass';
+  }
+  // 2) 로켓/3PL — orderType / requestType / shippingMethod 중 어디에든 'Rocket' / '로켓배송' 신호.
+  if (
+    orderType === 'rocket' ||
+    requestType === 'rocket' ||
+    shippingMethod.includes('로켓') ||
+    shippingMethod.includes('rocket')
+  ) {
+    return 'rocket_3pl';
+  }
+  // 3) 배송대행 — requestType / orderType 이 Shipping.
+  if (orderType === 'shipping' || requestType === 'shipping') {
+    return 'shipping_agency';
+  }
+  // 4) 구매대행 — General / 기본값.
+  return 'purchase_agency';
+};
+
 const mapOrderStatusMeta = (order: ApiOrder): Pick<Order, 'status' | 'statusGroup' | 'statusTranslationKey' | 'progressStatus'> => {
   const progressStatus = resolveOrderProgressStatus({
     progressStatus: order.progressStatus,
@@ -384,7 +430,57 @@ const BuyListScreen = () => {
   const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [selectedStatusGroup, setSelectedStatusGroup] = useState<Order['statusGroup'] | null>(null);
   const [expandedStatusGroup, setExpandedStatusGroup] = useState<Order['statusGroup'] | null>(null);
+  // 현재 활성 사업 도메인 — 발주관리 드롭다운에서 선택되거나, 외부(예: ProfileScreen
+  // 의 내주문 카드)에서 route.params.domain 으로 진입할 때 결정된다.
+  // 'purchase_agency' 가 기본값이며 이때만 기존 BuyListScreen 본문(주문 카드 리스트)
+  // 이 그대로 표시된다. 나머지 4개 도메인은 BuyListScreen 안에서 별도의
+  // placeholder 대시보드를 렌더한다 (페지 이동 없이 본문만 교체).
+  type BusinessDomain =
+    | 'purchase_agency'
+    | 'rocket_3pl'
+    | 'vvic_hipass'
+    | 'shipping_agency'
+    | 'error_management'
+    | 'refund_management';
+  const initialDomain = (route.params?.domain as BusinessDomain | undefined) ?? 'purchase_agency';
+  const [activeBusinessDomain, setActiveBusinessDomain] = useState<BusinessDomain>(initialDomain);
+  // 발주관리 칩의 화면상 좌표 — 드롭다운을 칩 바로 밑에 띄우기 위해 측정.
+  // 화면 회전/스크롤로 위치가 바뀔 수 있으므로 클릭할 때마다 다시 측정한다.
+  const [purchaseChipLayout, setPurchaseChipLayout] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const purchaseChipRef = useRef<View | null>(null);
+  // 현지입/출고 칩의 화면상 좌표 — 드롭다운을 칩 바로 밑에 띄우고 너비도 칩에 맞춤.
+  const [warehouseChipLayout, setWarehouseChipLayout] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const warehouseChipRef = useRef<View | null>(null);
+  // 통관방식 칩의 화면상 좌표 — 발주관리·현지입/출고와 같은 앵커링 방식.
+  const [customsChipLayout, setCustomsChipLayout] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const customsChipRef = useRef<View | null>(null);
+  // 운송방식 칩의 화면상 좌표 — 같은 앵커링 방식.
+  const [transportChipLayout, setTransportChipLayout] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const transportChipRef = useRef<View | null>(null);
   const [selectedProgressStatus, setSelectedProgressStatus] = useState<string | null>(null);
+  // 현지입/출고 드롭다운 필터 — '전체' / '입고' / '출고' 3가지.
+  // 'all' 일 때는 현지 그룹 전체, 'in' 은 입고 관련 진행상태, 'out' 은 출고 관련.
+  const [warehouseFilter, setWarehouseFilter] = useState<'all' | 'in' | 'out'>('all');
   
   // Update active tab when route params change
   useEffect(() => {
@@ -392,6 +488,39 @@ const BuyListScreen = () => {
       setActiveTab(route.params.initialTab as string);
     }
   }, [route.params?.initialTab]);
+
+  // 외부(ProfileScreen 내주문 카드 등)에서 BuyList 라우트에 domain 으로 진입할 때
+  // 발주관리 드롭다운에서 그 항목을 직접 '클릭'한 것과 같은 상태가 되도록 부수효과를
+  // 모두 적용한다. 단순히 activeBusinessDomain 만 바꾸면 selected 표시는 되지만
+  // selectedProgressStatus 같은 부수 필터가 이전 세션 값으로 남아 충돌이 생긴다.
+  useEffect(() => {
+    const domain = route.params?.domain as BusinessDomain | undefined;
+    if (!domain) return;
+    setActiveBusinessDomain(domain);
+    setExpandedStatusGroup(null);
+    switch (domain) {
+      case 'purchase_agency':
+        // 카드 셀에서 들어올 때 initialTab 이 함께 오므로 activeTab 은 위쪽
+        // useEffect 가 처리한다. 진행상태 필터만 비우면 충분.
+        setSelectedProgressStatus(null);
+        break;
+      case 'rocket_3pl':
+      case 'vvic_hipass':
+      case 'shipping_agency':
+        // 도메인 그룹만 전환 — 세부 진행상태 필터 해제. activeTab 은 initialTab
+        // (대개 'all') 이 위쪽 useEffect 에서 반영됨.
+        setSelectedProgressStatus(null);
+        break;
+      case 'error_management':
+        setActiveTab('error');
+        setSelectedProgressStatus(null);
+        break;
+      case 'refund_management':
+        setActiveTab('error');
+        setSelectedProgressStatus('USER_REFUND_REQ');
+        break;
+    }
+  }, [route.params?.domain]);
   const [unreadCounts, setUnreadCounts] = useState<{ [inquiryId: string]: number }>({});
   const [selectedCustomsMethod, setSelectedCustomsMethod] = useState<string | null>(null);
   const [selectedTransportMethod, setSelectedTransportMethod] = useState<string | null>(null);
@@ -607,6 +736,26 @@ const BuyListScreen = () => {
     },
   });
 
+  // OrderItem 의 companyName 은 string 한 개지만 cartApi.AddToCartRequest 는
+  // MultiLang({en?, ko?, zh?}) 객체를 요구한다. 문자열의 글자 셋(중국어 한자/
+  // 한글/그 외)을 보고 해당 언어 슬롯에만 채워 백엔드가 zh 슬롯에서 한글을
+  // 만나 500 을 내는 케이스를 막는다. (ProductDetailScreen 의 동일 패턴 재사용)
+  const buildCompanyMultiLang = (raw: unknown): { en?: string; ko?: string; zh?: string } => {
+    // 이미 객체 형태로 들어오면 그대로 (필요 시 백엔드 정규화에 맡김).
+    if (raw && typeof raw === 'object') {
+      return raw as { en?: string; ko?: string; zh?: string };
+    }
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return {};
+    }
+    const s = raw.trim();
+    const containsChinese = /[一-鿿]/.test(s);
+    const containsHangul = /[가-힯ᄀ-ᇿ㄰-㆏]/.test(s);
+    if (containsChinese) return { zh: s };
+    if (containsHangul) return { ko: s };
+    return { en: s };
+  };
+
   const handleRepurchase = (order: Order) => {
     order.items.forEach((item) => {
       const skuAttrs = (item.skuAttributes || []).map((attr: any) => ({
@@ -617,22 +766,26 @@ const BuyListScreen = () => {
         valueTrans: attr.valueTrans ?? attr.value ?? '',
         skuImageUrl: attr.skuImageUrl,
       }));
+      const repurchasePrice = String(item.price);
       addToCart({
         offerId: parseInt(item.offerId, 10) || 0,
-        categoryId: 0,
+        // 카테고리 정보는 재구매 시 OrderItem 에 없음 — 빈 문자열로 보내면
+        // 백엔드가 offerId 로부터 알아서 채운다 (cartApi 의 문자열 | MultiLang 허용).
+        categoryName: '',
         subject: item.productName,
         subjectTrans: item.productName,
         imageUrl: item.image,
         skuInfo: {
           skuId: parseInt(item.skuId || '0', 10) || 0,
           specId: item.specId || String(item.offerId),
-          price: String(item.price),
+          price: repurchasePrice,
           amountOnSale: 999999,
-          consignPrice: String(item.price),
+          consignPrice: repurchasePrice,
           skuAttributes: skuAttrs,
-          fenxiaoPriceInfo: { offerPrice: String(item.price) },
+          // 백엔드는 onePiecePrice 와 offerPrice 둘 다 요구한다.
+          fenxiaoPriceInfo: { onePiecePrice: repurchasePrice, offerPrice: repurchasePrice },
         },
-        companyName: item.companyName,
+        companyName: buildCompanyMultiLang(item.companyName),
         sellerOpenId: item.sellerOpenId,
         source: item.source || '1688',
         quantity: item.quantity,
@@ -684,22 +837,24 @@ const BuyListScreen = () => {
       valueTrans: attr.valueTrans ?? attr.value ?? '',
       skuImageUrl: attr.skuImageUrl,
     }));
+    const skuPriceStr = String(selectedSku?.price || addToCartItem.price);
     addToCart({
       offerId: parseInt(addToCartItem.offerId, 10) || 0,
-      categoryId: 0,
+      categoryName: '',
       subject: addToCartItem.productName,
       subjectTrans: addToCartItem.productName,
       imageUrl: addToCartItem.image,
       skuInfo: {
         skuId: selectedSku?.skuId ? parseInt(String(selectedSku.skuId), 10) : (parseInt(addToCartItem.skuId || '0', 10) || 0),
         specId: selectedSku?.specId || addToCartItem.specId || String(addToCartItem.offerId),
-        price: String(selectedSku?.price || addToCartItem.price),
+        price: skuPriceStr,
         amountOnSale: selectedSku?.amountOnSale || 999999,
         consignPrice: String(selectedSku?.consignPrice || addToCartItem.price),
         skuAttributes: skuAttrs,
-        fenxiaoPriceInfo: { offerPrice: String(selectedSku?.price || addToCartItem.price) },
+        // 백엔드는 onePiecePrice 와 offerPrice 둘 다 요구.
+        fenxiaoPriceInfo: { onePiecePrice: skuPriceStr, offerPrice: skuPriceStr },
       },
-      companyName: addToCartItem.companyName,
+      companyName: buildCompanyMultiLang(addToCartItem.companyName),
       sellerOpenId: addToCartItem.sellerOpenId,
       source: addToCartItem.source || '1688',
       quantity: addToCartQuantity,
@@ -1130,6 +1285,24 @@ const BuyListScreen = () => {
     () => computeStatusGroupCounts(countOrders, STATUS_GROUPS),
     [countOrders],
   );
+
+  // 사업 도메인별 주문 수 — 발주관리 칩의 카운트 배지 등에서 사용.
+  // resolveOrderBusinessDomain 은 orderType / orderMainInfo 를 읽으므로
+  // countOrders(가벼운 카운트 전용 튜플)가 아닌 전체 orders 배열을 쓴다.
+  // 우선권 규칙(VVIC > Rocket > Shipping > Purchase)은 분류기 안에서 처리.
+  const businessDomainCounts = useMemo(() => {
+    const counts: Record<BuyListBusinessDomain, number> = {
+      purchase_agency: 0,
+      rocket_3pl: 0,
+      vvic_hipass: 0,
+      shipping_agency: 0,
+    };
+    for (const order of orders) {
+      const domain = resolveOrderBusinessDomain(order);
+      counts[domain] += 1;
+    }
+    return counts;
+  }, [orders]);
 
   // Fetch orders from API when tab, filters, or platform change (not on every render)
   useEffect(() => {
@@ -1663,9 +1836,39 @@ const BuyListScreen = () => {
       } else if (selectedTransportMethod === '선박') {
         result = result.filter(order => order.transferMethod === 'ship');
       }
-      // Filter by active tab (status group key)
+      // 1) 사업 도메인 필터 — 발주관리 드롭다운의 활성 항목으로 1차 필터링.
+      //    구매대행/로켓-3PL/VVIC하이패스/배송대행 각 도메인은
+      //    resolveOrderBusinessDomain 으로 분류되며 우선권 규칙(VVIC > Rocket > Shipping > Purchase)
+      //    을 따른다. 오류/반품관리는 도메인 필터 대신 status 그룹 필터를 따른다.
+      if (
+        activeBusinessDomain === 'purchase_agency' ||
+        activeBusinessDomain === 'rocket_3pl' ||
+        activeBusinessDomain === 'vvic_hipass' ||
+        activeBusinessDomain === 'shipping_agency'
+      ) {
+        result = result.filter(
+          (order) => resolveOrderBusinessDomain(order) === activeBusinessDomain,
+        );
+      }
+
+      // 2) activeTab 별 추가 필터. 두 종류가 섞여 들어온다:
+      //    - 상태 그룹 키 ('purchase_agency' / 'warehouse' / 'international_shipping' / 'error')
+      //    - Order.status 값 ('category' / 'unpaid' / 'progressing' / 'end' / ...)
+      //   'purchase_agency' 같은 그룹 키가 들어와도 이미 도메인 필터를 적용했으므로
+      //   추가 좁힘 없이 그대로 통과시킨다(이중 필터 방지).
       if (activeTab !== 'all') {
-        result = result.filter(order => orderBelongsToStatusGroup(order, activeTab));
+        const isKnownGroup = STATUS_GROUPS.some((g) => g.key === activeTab);
+        const isKnownStatus = ['category','unpaid','progressing','end','pending_review','error','refunds']
+          .includes(activeTab);
+        if (isKnownGroup) {
+          // 도메인 필터가 이미 처리했으므로 그룹 키는 통과.
+          // (단, warehouse·international_shipping·error 같은 현지·오류 그룹은 그대로 필터.)
+          if (activeTab !== 'purchase_agency') {
+            result = result.filter(order => orderBelongsToStatusGroup(order, activeTab));
+          }
+        } else if (isKnownStatus) {
+          result = result.filter(order => order.status === activeTab);
+        }
       }
       // Further filter by selected progress status (canonical codes)
       if (selectedProgressStatus) {
@@ -1682,6 +1885,7 @@ const BuyListScreen = () => {
       filters.orderNumber,
       filterPlatform,
       selectedTransportMethod,
+      activeBusinessDomain,
     ],
   );
 
@@ -1726,12 +1930,140 @@ const BuyListScreen = () => {
     progressStatusCounts[progressStatus] ?? 0;
 
   const renderCategoryStatusFilters = () => {
-    const groups = STATUS_GROUPS;
-    const currentGroup = groups.find(g => g.key === activeTab);
+    // 발주관리 / 현지입/출고 두 항목만 노출한다.
+    // 사용자 요청으로 국제운송과 오류 칩은 제거 — '오류관리'는 발주관리
+    // 드롭다운 안으로 옮겨졌고 국제운송은 별도 페지로 분리되었다.
+    const groups = STATUS_GROUPS.filter(
+      (g) => g.key === 'purchase_agency' || g.key === 'warehouse',
+    );
+    const currentGroup = groups.find((g) => g.key === activeTab);
+
+    // 발주관리 드롭다운 — 스크린샷의 7개 항목. 각 항목의 onPress 는
+    // 해당 도메인 화면으로 분기하거나 현재 BuyList 의 필터 상태를 바꾼다.
+    type PurchaseDropdownItem = {
+      key: string;
+      labelKey: string;
+      fallbackLabel: string;
+      onSelect: () => void;
+      isSelected: () => boolean;
+    };
+    // 항목 선택 시 페지를 이동하지 않고 같은 BuyListScreen 안에서
+    // activeBusinessDomain 만 갱신한다. 본문 영역은 도메인별로 다른
+    // 대시보드(주문 카드 리스트 또는 placeholder)를 렌더한다.
+    // purchase_agency 도메인의 세부 필터 키들 — 구매대행 셀에서 진입할 때
+    // initialTab 으로 전달될 수 있는 모든 값(견적대기='category', 결제대기='unpaid', ...).
+    // '전체' 항목이 아니면 모두 구매대행 항목이 selected 로 표시되어야 한다.
+    const purchaseAgencyTabs = [
+      'purchase_agency',
+      'category',
+      'unpaid',
+      'to_be_shipped',
+      'shipped',
+      'processed',
+      'shipping_delay',
+      'end',
+    ];
+
+    const purchaseDropdownItems: PurchaseDropdownItem[] = [
+      {
+        key: 'all',
+        labelKey: 'profile.viewAll',
+        fallbackLabel: '전체',
+        onSelect: () => {
+          setActiveBusinessDomain('purchase_agency');
+          setActiveTab('all');
+          setSelectedProgressStatus(null);
+          setExpandedStatusGroup(null);
+        },
+        isSelected: () =>
+          activeBusinessDomain === 'purchase_agency' && activeTab === 'all',
+      },
+      {
+        key: 'purchase_agency',
+        labelKey: 'profile.tabPurchaseAgency',
+        fallbackLabel: '구매대행',
+        onSelect: () => {
+          setActiveBusinessDomain('purchase_agency');
+          setActiveTab('purchase_agency');
+          setSelectedProgressStatus(null);
+          setExpandedStatusGroup(null);
+        },
+        // ProfileScreen 카드의 구매대행 셀(견적대기/결제대기/.../완료)에서 들어오면
+        // activeTab 이 'category'·'unpaid' 같은 세부 필터로 설정되는데, 그때도
+        // 사용자 인식상 도메인은 '구매대행' 이므로 이 항목을 selected 로 표시한다.
+        isSelected: () =>
+          activeBusinessDomain === 'purchase_agency' &&
+          purchaseAgencyTabs.includes(activeTab),
+      },
+      {
+        key: 'rocket_3pl',
+        labelKey: 'profile.tabRocket3pl',
+        fallbackLabel: '로켓/3PL',
+        onSelect: () => {
+          setActiveBusinessDomain('rocket_3pl');
+          setActiveTab('all');
+          setSelectedProgressStatus(null);
+          setExpandedStatusGroup(null);
+        },
+        isSelected: () => activeBusinessDomain === 'rocket_3pl',
+      },
+      {
+        key: 'vvic_hipass',
+        labelKey: 'profile.tabVvicHipass',
+        fallbackLabel: 'WIC하이패스',
+        onSelect: () => {
+          setActiveBusinessDomain('vvic_hipass');
+          setActiveTab('all');
+          setSelectedProgressStatus(null);
+          setExpandedStatusGroup(null);
+        },
+        isSelected: () => activeBusinessDomain === 'vvic_hipass',
+      },
+      {
+        key: 'shipping_agency',
+        labelKey: 'profile.tabShippingAgency',
+        fallbackLabel: '배송대행',
+        onSelect: () => {
+          setActiveBusinessDomain('shipping_agency');
+          setActiveTab('all');
+          setSelectedProgressStatus(null);
+          setExpandedStatusGroup(null);
+        },
+        isSelected: () => activeBusinessDomain === 'shipping_agency',
+      },
+      {
+        key: 'error_management',
+        labelKey: 'profile.errorManagement',
+        fallbackLabel: '오류관리',
+        // 오류 상태 그룹 필터를 적용 (상단 칩이 보이지 않는 대신 본문은 필터됨).
+        onSelect: () => {
+          setActiveBusinessDomain('error_management');
+          setActiveTab('error');
+          setSelectedProgressStatus(null);
+          setExpandedStatusGroup(null);
+        },
+        isSelected: () => activeBusinessDomain === 'error_management',
+      },
+      {
+        key: 'refund_management',
+        labelKey: 'profile.refundManagement',
+        fallbackLabel: '반품관리',
+        // 환불 요청 진행상태를 선택. PROGRESS_STATUS_META 의 USER_REFUND_REQ 사용.
+        onSelect: () => {
+          setActiveBusinessDomain('refund_management');
+          setActiveTab('error');
+          setSelectedProgressStatus('USER_REFUND_REQ');
+          setExpandedStatusGroup(null);
+        },
+        isSelected: () => activeBusinessDomain === 'refund_management',
+      },
+    ];
+
+    const isPurchaseDropdownOpen = expandedStatusGroup === 'purchase_agency';
 
     return (
       <>
-        {/* Row 1: Status group tabs */}
+        {/* Row 1: Status group tabs (발주관리, 현지입/출고 만 노출) */}
         <View style={styles.filterRow1}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow1Content}>
             <TouchableOpacity
@@ -1742,64 +2074,235 @@ const BuyListScreen = () => {
                 {t('profile.viewAll') || 'All'}
               </Text>
             </TouchableOpacity>
-            {groups.map((group) => (
-              <TouchableOpacity
-                key={group.key}
-                style={[styles.filterChip, activeTab === group.key && styles.filterChipActive]}
-                onPress={() => {
-                  if (activeTab === group.key) {
-                    // Already on this tab — toggle dropdown
-                    setExpandedStatusGroup(prev => prev === group.key ? null : group.key);
-                  } else {
-                    // Switch to this tab and open dropdown
-                    setActiveTab(group.key);
-                    setExpandedStatusGroup(group.key);
+            {groups.map((group) => {
+              const isOpen = expandedStatusGroup === group.key;
+              const isPurchase = group.key === 'purchase_agency';
+              const isWarehouse = group.key === 'warehouse';
+              // 발주관리 칩은 활성 도메인 이름을 라벨로 보여준다 (예: 로켓/3PL).
+              // 다른 칩은 기존 그룹 제목을 그대로 사용.
+              let chipLabel = t(group.titleKey) || group.title;
+              if (isPurchase) {
+                const labelKey =
+                  activeBusinessDomain === 'rocket_3pl'
+                    ? 'profile.tabRocket3pl'
+                    : activeBusinessDomain === 'vvic_hipass'
+                      ? 'profile.tabVvicHipass'
+                      : activeBusinessDomain === 'shipping_agency'
+                        ? 'profile.tabShippingAgency'
+                        : activeBusinessDomain === 'error_management'
+                          ? 'profile.errorManagement'
+                          : activeBusinessDomain === 'refund_management'
+                            ? 'profile.refundManagement'
+                            : null;
+                if (labelKey) {
+                  chipLabel = t(labelKey) || chipLabel;
+                }
+              }
+              // 발주관리 칩은 다음 중 하나라도 만족하면 붉은색 활성:
+              //  1) 도메인이 purchase_agency 이고 activeTab 이 그 도메인의 어떤 세부
+              //     필터(견적대기 = 'category', 결제대기 = 'unpaid', ...) 라도 켜져 있을 때 —
+              //     ProfileScreen 카드에서 구매대행 셀로 진입한 경우가 여기에 해당.
+              //  2) 도메인이 로켓/3PL · VVIC하이패스 · 배송대행 · 오류관리 · 반품관리 처럼
+              //     비-구매대행 도메인으로 갈아탔을 때(드롭다운 라벨이 그 이름으로 바뀜).
+              // 현지입/출고 칩은 기존대로 activeTab 매칭만.
+              const isChipActive = isPurchase
+                ? (activeBusinessDomain === 'purchase_agency' && purchaseAgencyTabs.includes(activeTab)) ||
+                  activeBusinessDomain !== 'purchase_agency'
+                : activeTab === group.key;
+              return (
+                <TouchableOpacity
+                  key={group.key}
+                  // 발주관리·현지입/출고 칩에 측정 ref 를 단다. measureInWindow
+                  // 로 화면 절대 좌표를 얻어 드롭다운 위치를 칩 바로 아래로 고정.
+                  ref={
+                    isPurchase
+                      ? (purchaseChipRef as any)
+                      : isWarehouse
+                        ? (warehouseChipRef as any)
+                        : undefined
                   }
-                }}
-              >
-                <Text style={[styles.filterChipText, activeTab === group.key && styles.filterChipTextActive]}>
-                  {t(group.titleKey) || group.title}
-                  {' '}
-                  <Text style={[styles.filterChipCountBadge, activeTab === group.key && styles.filterChipCountBadgeActive]}>
-                    ({getGroupOrderCount(group.key)})
+                  style={[styles.filterChip, isChipActive && styles.filterChipActive]}
+                  onPress={() => {
+                    if (isPurchase) {
+                      // 칩 위치 측정 — 매 클릭마다 다시 잰다(회전·스크롤 대비).
+                      purchaseChipRef.current?.measureInWindow((x, y, width, height) => {
+                        setPurchaseChipLayout({ x, y, width, height });
+                      });
+                      // 발주관리는 항상 드롭다운 토글만 — activeTab 변경 X.
+                      setExpandedStatusGroup(prev => prev === group.key ? null : group.key);
+                      return;
+                    }
+                    if (isWarehouse) {
+                      warehouseChipRef.current?.measureInWindow((x, y, width, height) => {
+                        setWarehouseChipLayout({ x, y, width, height });
+                      });
+                    }
+                    if (activeTab === group.key) {
+                      // Already on this tab — toggle dropdown
+                      setExpandedStatusGroup(prev => prev === group.key ? null : group.key);
+                    } else {
+                      // Switch to this tab and open dropdown
+                      setActiveTab(group.key);
+                      setExpandedStatusGroup(group.key);
+                    }
+                  }}
+                >
+                  <Text style={[styles.filterChipText, isChipActive && styles.filterChipTextActive]}>
+                    {chipLabel}
+                    {' '}
+                    <Text style={[styles.filterChipCountBadge, isChipActive && styles.filterChipCountBadgeActive]}>
+                      ({isPurchase
+                        ? (activeBusinessDomain === 'rocket_3pl'
+                            ? businessDomainCounts.rocket_3pl
+                            : activeBusinessDomain === 'vvic_hipass'
+                              ? businessDomainCounts.vvic_hipass
+                              : activeBusinessDomain === 'shipping_agency'
+                                ? businessDomainCounts.shipping_agency
+                                : businessDomainCounts.purchase_agency)
+                        : getGroupOrderCount(group.key)})
+                    </Text>
                   </Text>
-                </Text>
-                <Icon name="chevron-down" size={14} color={activeTab === group.key ? COLORS.red : COLORS.text.primary} />
-              </TouchableOpacity>
-            ))}
+                  <Icon
+                    name={isOpen ? 'chevron-up' : 'chevron-down'}
+                    size={14}
+                    color={isChipActive ? COLORS.red : COLORS.text.primary}
+                  />
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         </View>
 
-        {/* Group dropdown — only statuses, no "All" item */}
+        {/* 발주관리 드롭다운 — 도메인 선택 목록.
+            앵커 좌표는 발주관리 칩의 measureInWindow 결과로부터 계산.
+            top  = chip.y + chip.height + 4 (칩 아래 약간 띄움)
+            left = chip.x (칩의 좌측에 맞춰 정렬).
+            팝오버 느낌을 위해 backdrop 은 투명 — 바깥쪽 탭으로만 닫힘. */}
         <Modal
-          visible={!!(currentGroup && expandedStatusGroup === activeTab)}
+          visible={isPurchaseDropdownOpen}
           transparent
           animationType="fade"
           onRequestClose={() => setExpandedStatusGroup(null)}
         >
-          <TouchableOpacity style={styles.dropdownModalOverlay} activeOpacity={1} onPress={() => setExpandedStatusGroup(null)}>
-            <View style={styles.dropdownModalContent} onStartShouldSetResponder={() => true}>
-              <Text style={styles.dropdownModalTitle}>{currentGroup ? (t(currentGroup.titleKey) || currentGroup.title) : ''}</Text>
-              {(currentGroup?.statuses || []).map((ps) => {
-                const meta = PROGRESS_STATUS_META[ps];
-                return (
-                  <TouchableOpacity
-                    key={ps}
-                    style={[styles.groupDropdownItem, selectedProgressStatus === ps && styles.groupDropdownItemActive]}
-                    onPress={() => {
-                      setActiveTab(currentGroup!.key);
-                      setSelectedProgressStatus(ps);
-                      setExpandedStatusGroup(null);
-                    }}
-                  >
-                    <Text style={[styles.groupDropdownText, selectedProgressStatus === ps && styles.groupDropdownTextActive]}>
-                      {t(meta?.translationKey || ps)}
-                      {' '}
-                      <Text style={styles.groupDropdownCount}>({getProgressStatusCount(ps)})</Text>
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+          <TouchableOpacity
+            style={styles.purchaseDropdownBackdrop}
+            activeOpacity={1}
+            onPress={() => setExpandedStatusGroup(null)}
+          >
+            <View
+              style={[
+                styles.purchaseDropdownAnchor,
+                purchaseChipLayout && {
+                  top: purchaseChipLayout.y + purchaseChipLayout.height + 4,
+                  left: purchaseChipLayout.x,
+                },
+              ]}
+              onStartShouldSetResponder={() => true}
+            >
+              <View style={styles.purchaseDropdownCard}>
+                <Text style={styles.purchaseDropdownTitle}>
+                  {t('pages.orders.groups.purchaseAgency') || '발주관리'}
+                </Text>
+                {purchaseDropdownItems.map((item) => {
+                  const selected = item.isSelected();
+                  return (
+                    <TouchableOpacity
+                      key={item.key}
+                      style={styles.purchaseDropdownItem}
+                      activeOpacity={0.7}
+                      onPress={item.onSelect}
+                    >
+                      {/* 좌측 붉은색 활성 표식 */}
+                      <View
+                        style={[
+                          styles.purchaseDropdownBullet,
+                          selected && styles.purchaseDropdownBulletActive,
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.purchaseDropdownText,
+                          selected && styles.purchaseDropdownTextActive,
+                        ]}
+                      >
+                        {t(item.labelKey) || item.fallbackLabel}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* 현지입/출고 드롭다운 — 기존 상태 목록.
+            발주관리와 같은 앵커링 패턴: 칩 바로 아래에 떠 있고 너비는 칩 너비와 일치.
+            top·left·width 모두 칩의 measureInWindow 결과로 인라인 오버라이드. */}
+        <Modal
+          visible={!!(currentGroup && expandedStatusGroup === activeTab && activeTab === 'warehouse')}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setExpandedStatusGroup(null)}
+        >
+          <TouchableOpacity
+            style={styles.purchaseDropdownBackdrop}
+            activeOpacity={1}
+            onPress={() => setExpandedStatusGroup(null)}
+          >
+            <View
+              style={[
+                styles.warehouseDropdownAnchor,
+                warehouseChipLayout && {
+                  top: warehouseChipLayout.y + warehouseChipLayout.height + 4,
+                  left: warehouseChipLayout.x,
+                  width: warehouseChipLayout.width,
+                },
+              ]}
+              onStartShouldSetResponder={() => true}
+            >
+              <View style={styles.purchaseDropdownCard}>
+                <Text style={styles.purchaseDropdownTitle}>
+                  {currentGroup ? (t(currentGroup.titleKey) || currentGroup.title) : ''}
+                </Text>
+                {/* 현지입/출고 드롭다운 — 전체 / 입고 / 출고 3개 항목.
+                    기존 8개 진행상태(접수신청·도착예정·...) 는 사용자 요청으로 모두 제거. */}
+                {([
+                  { key: 'all', labelKey: 'profile.viewAll', fallbackLabel: '전체' },
+                  { key: 'in', labelKey: 'profile.warehouseIn', fallbackLabel: '입고' },
+                  { key: 'out', labelKey: 'profile.warehouseOut', fallbackLabel: '출고' },
+                ] as const).map((item) => {
+                  const selected = warehouseFilter === item.key;
+                  return (
+                    <TouchableOpacity
+                      key={item.key}
+                      style={styles.purchaseDropdownItem}
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        setActiveTab('warehouse');
+                        setWarehouseFilter(item.key);
+                        setSelectedProgressStatus(null);
+                        setExpandedStatusGroup(null);
+                      }}
+                    >
+                      <View
+                        style={[
+                          styles.purchaseDropdownBullet,
+                          selected && styles.purchaseDropdownBulletActive,
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.purchaseDropdownText,
+                          selected && styles.purchaseDropdownTextActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {t(item.labelKey) || item.fallbackLabel}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           </TouchableOpacity>
         </Modal>
@@ -1829,23 +2332,45 @@ const BuyListScreen = () => {
           </TouchableOpacity>
 
           <TouchableOpacity
+            ref={customsChipRef as any}
             style={[styles.filterChip, !!selectedCustomsMethod && styles.filterChipActive]}
-            onPress={() => setShowCustomsDropdown(prev => !prev)}
+            onPress={() => {
+              // 칩 위치 측정 — 클릭마다 다시 잰다(회전·스크롤 대비).
+              customsChipRef.current?.measureInWindow((x, y, width, height) => {
+                setCustomsChipLayout({ x, y, width, height });
+              });
+              setShowCustomsDropdown(prev => !prev);
+            }}
           >
             <Text style={[styles.filterChipText, !!selectedCustomsMethod && styles.filterChipTextActive]}>
               {selectedCustomsMethod || (t('pages.orders.filters.customsMethod') || '통관방식')}
             </Text>
-            <Icon name="chevron-down" size={14} color={selectedCustomsMethod ? COLORS.red : COLORS.text.primary} />
+            <Icon
+              name={showCustomsDropdown ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={selectedCustomsMethod ? COLORS.red : COLORS.text.primary}
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
+            ref={transportChipRef as any}
             style={[styles.filterChip, !!selectedTransportMethod && styles.filterChipActive]}
-            onPress={() => setShowTransportDropdown(prev => !prev)}
+            onPress={() => {
+              // 칩 위치 측정 — 클릭마다 다시 잰다(회전·스크롤 대비).
+              transportChipRef.current?.measureInWindow((x, y, width, height) => {
+                setTransportChipLayout({ x, y, width, height });
+              });
+              setShowTransportDropdown(prev => !prev);
+            }}
           >
             <Text style={[styles.filterChipText, !!selectedTransportMethod && styles.filterChipTextActive]}>
               {selectedTransportMethod || (t('pages.orders.filters.transportMethod') || '운송방식')}
             </Text>
-            <Icon name="chevron-down" size={14} color={selectedTransportMethod ? COLORS.red : COLORS.text.primary} />
+            <Icon
+              name={showTransportDropdown ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={selectedTransportMethod ? COLORS.red : COLORS.text.primary}
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -2019,10 +2544,28 @@ const BuyListScreen = () => {
       >
         <View style={styles.content}>
 
-          {/* Loading State — show a list-shaped skeleton in the body while
-              orders are being fetched, so the page never flips back to a
-              spinner after the lazy-route skeleton fades out. */}
-          {isLoading && orders.length === 0 ? (
+          {/* 본문 분기:
+              - 4개 사업 도메인(구매대행 · 로켓/3PL · VVIC하이패스 · 배송대행):
+                resolveOrderBusinessDomain 으로 분류한 결과를 filteredOrders 가
+                이미 필터링했으므로 그대로 주문 카드 리스트를 렌더한다.
+              - 오류관리 · 반품관리: 백엔드에 별도 데이터가 없으므로 placeholder. */}
+          {activeBusinessDomain === 'error_management' ||
+          activeBusinessDomain === 'refund_management' ? (
+            <View style={styles.emptyState}>
+              <Icon name="basket-outline" size={80} color="#CCC" />
+              <Text style={styles.emptyTitle}>
+                {activeBusinessDomain === 'error_management'
+                  ? (t('profile.errorManagement') || '오류관리')
+                  : (t('profile.refundManagement') || '반품관리')}
+              </Text>
+              <Text style={styles.emptySubtitle}>
+                {t('profile.placeholderEmpty') || '아직 표시할 주문이 없습니다.'}
+              </Text>
+            </View>
+          ) : isLoading && orders.length === 0 ? (
+            /* Loading State — show a list-shaped skeleton in the body while
+               orders are being fetched, so the page never flips back to a
+               spinner after the lazy-route skeleton fades out. */
             <ScreenSkeleton variant="list" showHeader={false} />
           ) : (
             <>
@@ -2053,40 +2596,136 @@ const BuyListScreen = () => {
         onApply={handleApplyFilters}
       />
 
-      {/* Customs dropdown */}
-      <Modal visible={showCustomsDropdown} transparent animationType="fade" onRequestClose={() => setShowCustomsDropdown(false)}>
-        <TouchableOpacity style={styles.dropdownModalOverlay} activeOpacity={1} onPress={() => setShowCustomsDropdown(false)}>
-          <View style={styles.dropdownModalContent} onStartShouldSetResponder={() => true}>
-            <Text style={styles.dropdownModalTitle}>{t('pages.orders.filters.customsMethod') || '통관방식'}</Text>
-            {[
-              { label: t('profile.viewAll') || 'All', value: '' },
-              { label: t('pages.orders.filters.generalClearance') || '일반통관', value: '일반통관' },
-              { label: t('pages.orders.filters.simplifiedClearance') || '간이통관', value: '간이통관' },
-            ].map(opt => (
-              <TouchableOpacity key={opt.value || 'all'} style={[styles.groupDropdownItem, selectedCustomsMethod === opt.value && styles.groupDropdownItemActive]}
-                onPress={() => { setSelectedCustomsMethod(opt.value || null); setShowCustomsDropdown(false); }}>
-                <Text style={[styles.groupDropdownText, selectedCustomsMethod === opt.value && styles.groupDropdownTextActive]}>{opt.label}</Text>
-              </TouchableOpacity>
-            ))}
+      {/* 통관방식 드롭다운 — 발주관리·현지입/출고와 같은 앵커 패턴.
+          칩 바로 아래에 떠 있고 너비는 칩과 일치한다. */}
+      <Modal
+        visible={showCustomsDropdown}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCustomsDropdown(false)}
+      >
+        <TouchableOpacity
+          style={styles.purchaseDropdownBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowCustomsDropdown(false)}
+        >
+          <View
+            style={[
+              styles.warehouseDropdownAnchor,
+              customsChipLayout && {
+                top: customsChipLayout.y + customsChipLayout.height + 4,
+                left: customsChipLayout.x,
+                width: customsChipLayout.width,
+              },
+            ]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.purchaseDropdownCard}>
+              <Text style={styles.purchaseDropdownTitle}>
+                {t('pages.orders.filters.customsMethod') || '통관방식'}
+              </Text>
+              {[
+                { label: t('profile.viewAll') || 'All', value: '' },
+                { label: t('pages.orders.filters.generalClearance') || '일반통관', value: '일반통관' },
+                { label: t('pages.orders.filters.simplifiedClearance') || '간이통관', value: '간이통관' },
+              ].map((opt) => {
+                const selected = selectedCustomsMethod === (opt.value || null);
+                return (
+                  <TouchableOpacity
+                    key={opt.value || 'all'}
+                    style={styles.purchaseDropdownItem}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      setSelectedCustomsMethod(opt.value || null);
+                      setShowCustomsDropdown(false);
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.purchaseDropdownBullet,
+                        selected && styles.purchaseDropdownBulletActive,
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.purchaseDropdownText,
+                        selected && styles.purchaseDropdownTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
         </TouchableOpacity>
       </Modal>
 
-      {/* Transport dropdown */}
-      <Modal visible={showTransportDropdown} transparent animationType="fade" onRequestClose={() => setShowTransportDropdown(false)}>
-        <TouchableOpacity style={styles.dropdownModalOverlay} activeOpacity={1} onPress={() => setShowTransportDropdown(false)}>
-          <View style={styles.dropdownModalContent} onStartShouldSetResponder={() => true}>
-            <Text style={styles.dropdownModalTitle}>{t('pages.orders.filters.transportMethod') || '운송방식'}</Text>
-            {[
-              { label: t('profile.viewAll') || 'All', value: '' },
-              { label: t('pages.orders.filters.air') || '항공', value: '항공' },
-              { label: t('pages.orders.filters.ship') || '선박', value: '선박' },
-            ].map(opt => (
-              <TouchableOpacity key={opt.value || 'all'} style={[styles.groupDropdownItem, selectedTransportMethod === opt.value && styles.groupDropdownItemActive]}
-                onPress={() => { setSelectedTransportMethod(opt.value || null); setShowTransportDropdown(false); }}>
-                <Text style={[styles.groupDropdownText, selectedTransportMethod === opt.value && styles.groupDropdownTextActive]}>{opt.label}</Text>
-              </TouchableOpacity>
-            ))}
+      {/* 운송방식 드롭다운 — 발주관리·현지입출고·통관방식과 같은 앵커 패턴.
+          칩 바로 아래에 떠 있고 너비는 칩과 일치한다. */}
+      <Modal
+        visible={showTransportDropdown}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTransportDropdown(false)}
+      >
+        <TouchableOpacity
+          style={styles.purchaseDropdownBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowTransportDropdown(false)}
+        >
+          <View
+            style={[
+              styles.warehouseDropdownAnchor,
+              transportChipLayout && {
+                top: transportChipLayout.y + transportChipLayout.height + 4,
+                left: transportChipLayout.x,
+                width: transportChipLayout.width,
+              },
+            ]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.purchaseDropdownCard}>
+              <Text style={styles.purchaseDropdownTitle}>
+                {t('pages.orders.filters.transportMethod') || '운송방식'}
+              </Text>
+              {[
+                { label: t('profile.viewAll') || 'All', value: '' },
+                { label: t('pages.orders.filters.air') || '항공', value: '항공' },
+                { label: t('pages.orders.filters.ship') || '선박', value: '선박' },
+              ].map((opt) => {
+                const selected = selectedTransportMethod === (opt.value || null);
+                return (
+                  <TouchableOpacity
+                    key={opt.value || 'all'}
+                    style={styles.purchaseDropdownItem}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      setSelectedTransportMethod(opt.value || null);
+                      setShowTransportDropdown(false);
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.purchaseDropdownBullet,
+                        selected && styles.purchaseDropdownBulletActive,
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.purchaseDropdownText,
+                        selected && styles.purchaseDropdownTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -3327,6 +3966,74 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: SPACING.xl,
+  },
+  // 발주관리 드롭다운 backdrop — dim 없이 투명. 바깥 탭으로만 닫힘.
+  purchaseDropdownBackdrop: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  // 발주관리 드롭다운 — 칩 아래에 떠 있는 카드.
+  // top/left 는 발주관리 칩의 measureInWindow 결과로 인라인 오버라이드된다.
+  // 측정 전 잠깐 깜박임을 막기 위해 기본값을 화면 밖으로 둔다.
+  // 너비는 이전 220px 의 절반인 110px.
+  purchaseDropdownAnchor: {
+    position: 'absolute',
+    top: -1000,
+    left: -1000,
+    width: 110,
+  },
+  // 현지입/출고 드롭다운 — 칩 아래에 떠 있고 너비는 칩과 일치.
+  // top·left·width 모두 measureInWindow 결과로 인라인 오버라이드된다.
+  warehouseDropdownAnchor: {
+    position: 'absolute',
+    top: -1000,
+    left: -1000,
+    width: 110,
+  },
+  purchaseDropdownCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    paddingVertical: SPACING.xs,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  purchaseDropdownTitle: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[100],
+  },
+  purchaseDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+    paddingRight: SPACING.md,
+  },
+  purchaseDropdownBullet: {
+    width: 3,
+    height: 16,
+    borderRadius: 1.5,
+    backgroundColor: 'transparent',
+    marginRight: SPACING.sm,
+  },
+  purchaseDropdownBulletActive: {
+    backgroundColor: COLORS.red,
+  },
+  purchaseDropdownText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+  },
+  purchaseDropdownTextActive: {
+    color: COLORS.red,
+    fontWeight: '700',
   },
   dropdownModalContent: {
     backgroundColor: COLORS.white,

@@ -10,6 +10,7 @@ import {
   FlatList,
   ActivityIndicator,
   useWindowDimensions,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -40,7 +41,11 @@ import { useToast } from '../../../context/ToastContext';
 import { formatPriceKRW, formatDepositBalance } from '../../../utils/i18nHelpers';
 import { useGetOrdersMutation } from '../../../hooks/useGetOrdersMutation';
 import { mapLocaleToOrdersLang } from '../../../services/orderApi';
-import { mergeProfileOrderCounts } from '../../../utils/orderCounts';
+import {
+  mergeProfileOrderCounts,
+  computeProfileOrderCountsByDomain,
+  type ProfileOrderCountsByDomain,
+} from '../../../utils/orderCounts';
 import { getProfileMoreToLoveGridLayout } from '../../../utils/profileMoreToLoveLayout';
 import HeadsetMicIcon from '../../../assets/icons/HeadsetMicIcon';
 import SettingsIcon from '../../../assets/icons/SettingsIcon';
@@ -101,11 +106,34 @@ const ProfileScreen: React.FC = () => {
     to_be_shipped: 0,
     shipped: 0,
     processed: 0,
-    shipping_delay: 0,  
+    shipping_delay: 0,
     error: 0,
     refunds: 0,
     problemProducts: 0,
   }); // Order counts from API
+
+  // 사업 도메인별 ProfileOrderCounts — 활성 탭에 맞춰 카드 셀에 표시된다.
+  // 백엔드는 viewFilterCounts 를 도메인 무관 전체로만 내려주므로,
+  // orders 배열을 도메인별로 쪼개 클라이언트에서 직접 계산한다.
+  const [orderCountsByDomain, setOrderCountsByDomain] =
+    useState<ProfileOrderCountsByDomain>({
+      purchase_agency: {
+        quotePending: 0, unpaid: 0, to_be_shipped: 0, shipped: 0, processed: 0,
+        shipping_delay: 0, error: 0, refunds: 0, problemProducts: 0,
+      },
+      rocket_3pl: {
+        quotePending: 0, unpaid: 0, to_be_shipped: 0, shipped: 0, processed: 0,
+        shipping_delay: 0, error: 0, refunds: 0, problemProducts: 0,
+      },
+      vvic_hipass: {
+        quotePending: 0, unpaid: 0, to_be_shipped: 0, shipped: 0, processed: 0,
+        shipping_delay: 0, error: 0, refunds: 0, problemProducts: 0,
+      },
+      shipping_agency: {
+        quotePending: 0, unpaid: 0, to_be_shipped: 0, shipped: 0, processed: 0,
+        shipping_delay: 0, error: 0, refunds: 0, problemProducts: 0,
+      },
+    });
 
   // 내주문 카드 상단 탭(구매대행 / 로켓·3PL / VVIC하이패스 / 배송대행) 활성 키.
   // 활성 탭이 바뀌면 밑의 5×2 그리드 내용도 myOrderTabContent 룩업으로 교체된다.
@@ -118,10 +146,13 @@ const ProfileScreen: React.FC = () => {
   const [viewedCount, setViewedCount] = useState(0);
   const [viewedFirstImage, setViewedFirstImage] = useState<string>('');
 
-  // Order counts for My Orders — API viewFilterCounts with client-side fallback
+  // Order counts for My Orders — API viewFilterCounts with client-side fallback.
+  // 또한 orders 배열을 사업 도메인별로 쪼개 도메인 × 상태 카운트도 함께 계산한다.
   const { mutate: getOrders } = useGetOrdersMutation({
     onSuccess: (data) => {
-      setOrderCounts(mergeProfileOrderCounts(data.orders ?? [], data.viewFilterCounts));
+      const ordersList = data.orders ?? [];
+      setOrderCounts(mergeProfileOrderCounts(ordersList, data.viewFilterCounts));
+      setOrderCountsByDomain(computeProfileOrderCountsByDomain(ordersList));
     },
   });
   
@@ -161,76 +192,100 @@ const ProfileScreen: React.FC = () => {
     }, [isAuthenticated, isGuest, navigation])
   );
 
-  // Combined focus effect for logging and data fetching
+  // pull-to-refresh 전용 상태. 초기 로딩과 별도로 ScrollView 상단의
+  // RefreshControl 인디케이터에만 연결된다.
+  const [profileRefreshing, setProfileRefreshing] = useState(false);
+
+  // 계정 화면의 모든 자료(주문 카운트 / 예치금 / 알림 / 위시리스트 / 최근본)를
+  // 한 번에 다시 받아오는 통합 로더. useFocusEffect 와 pull-to-refresh 양쪽에서
+  // 호출한다. 네트워크는 병렬로 던지고, 호출자가 await 로 끝나기를 기다릴 수
+  // 있도록 Promise<void> 를 반환한다.
+  const loadProfileData = useCallback(async () => {
+    // 1) 알림 unread 카운트
+    const fetchUnreadCounts = async () => {
+      try {
+        const response = await inquiryApi.getUnreadCounts();
+        if (response.success && response.data) {
+          setNotificationCount(response.data.totalUnread);
+        }
+      } catch {
+        // silent
+      }
+    };
+
+    // 2) 예치금 — DepositScreen 과 같은 endpoint 를 써서 항상 동기화 유지.
+    const fetchDepositBalance = async () => {
+      if (!isAuthenticated || isGuest) return;
+      try {
+        const response = await depositApi.getBalance();
+        if (response.success && response.data) {
+          const d = response.data as any;
+          const value = d.depositBalance ?? d.balance ?? d.totalDeposit ?? 0;
+          setDepositBalance(typeof value === 'number' ? value : Number(value) || 0);
+        }
+      } catch {
+        // silent
+      }
+    };
+
+    // 3) 주문 카운트 — getOrders 의 onSuccess 가 orderCounts / orderCountsByDomain 갱신.
+    getOrders({ page: 1, pageSize: 100, lang: mapLocaleToOrdersLang(normalizedLocale) });
+
+    // 4) 위시리스트 + 최근본 카운트
+    const fetchCounts = async () => {
+      if (!isAuthenticated || isGuest || !user) return;
+      try {
+        const [wishlistRes, viewedRes] = await Promise.allSettled([
+          wishlistApi.getWishlist({ discounted: false }),
+          productsApi.getRecentlyViewedProducts(100, normalizedLocale),
+        ]);
+        if (wishlistRes.status === 'fulfilled' && wishlistRes.value?.success && wishlistRes.value?.data) {
+          const data = wishlistRes.value.data as any;
+          setWishlistCount(data.total ?? data.wishlist?.length ?? 0);
+          const firstItem = data.wishlist?.[0];
+          setWishlistFirstImage(firstItem?.imageUrl || firstItem?.image || '');
+        }
+        if (viewedRes.status === 'fulfilled' && viewedRes.value?.success && viewedRes.value?.data) {
+          const data = viewedRes.value.data as any;
+          const count = data.total ?? data.totalCount ?? data.count ?? data.items?.length ?? 0;
+          setViewedCount(count);
+          const firstItem = data.items?.[0];
+          setViewedFirstImage(firstItem?.photoUrl || firstItem?.imageUrl || firstItem?.image || '');
+        }
+      } catch {
+        // silently fail
+      }
+    };
+
+    // await 가능한 묶음 — pull-to-refresh 핸들러가 끝까지 대기할 수 있도록 모음.
+    await Promise.allSettled([
+      fetchUnreadCounts(),
+      fetchDepositBalance(),
+      fetchCounts(),
+    ]);
+  }, [isAuthenticated, isGuest, user, normalizedLocale, getOrders]);
+
+  // 화면 포커스 시 통합 로더 실행 — 진입 / 다른 탭에서 돌아옴 / 백그라운드 복귀 모두 커버.
   useFocusEffect(
-    React.useCallback(() => {
-      // Fetch unread counts
-      const fetchUnreadCounts = async () => {
-        try {
-          const response = await inquiryApi.getUnreadCounts();
-          if (response.success && response.data) {
-            setNotificationCount(response.data.totalUnread);
-          }
-        } catch (error) {
-          // console.error('Failed to fetch unread counts:', error);
-        }
-      };
-      fetchUnreadCounts();
-
-      // Pull deposit balance from the same endpoint DepositScreen uses so the
-      // stats card never falls out of sync with the deposit detail page.
-      // Re-runs on every focus, so charging/withdrawing on the deposit page
-      // and coming back here reflects immediately.
-      const fetchDepositBalance = async () => {
-        if (!isAuthenticated || isGuest) return;
-        try {
-          const response = await depositApi.getBalance();
-          if (response.success && response.data) {
-            const d = response.data as any;
-            const value =
-              d.depositBalance ?? d.balance ?? d.totalDeposit ?? 0;
-            setDepositBalance(typeof value === 'number' ? value : Number(value) || 0);
-          }
-        } catch (error) {
-          // console.error('Failed to fetch deposit balance:', error);
-        }
-      };
-      fetchDepositBalance();
-
-      // Get order counts from API (fetch larger page size to calculate accurate counts)
-      getOrders({ page: 1, pageSize: 100, lang: mapLocaleToOrdersLang(normalizedLocale) });
-
-      // Set wishlist and viewed counts from API
-      const fetchCounts = async () => {
-        if (!isAuthenticated || isGuest || !user) return;
-        try {
-          const [wishlistRes, viewedRes] = await Promise.allSettled([
-            wishlistApi.getWishlist({ discounted: false }),
-            productsApi.getRecentlyViewedProducts(100, normalizedLocale),
-          ]);
-          console.log("viewed products: ", viewedRes)
-          if (wishlistRes.status === 'fulfilled' && wishlistRes.value?.success && wishlistRes.value?.data) {
-            const data = wishlistRes.value.data as any;
-            setWishlistCount(data.total ?? data.wishlist?.length ?? 0);
-            const firstItem = data.wishlist?.[0];
-            setWishlistFirstImage(firstItem?.imageUrl || firstItem?.image || '');
-          }
-          if (viewedRes.status === 'fulfilled' && viewedRes.value?.success && viewedRes.value?.data) {
-            const data = viewedRes.value.data as any;
-            // API returns { items: [...] } — use items.length as count
-            // Also check for total field at various levels
-            const count = data.total ?? data.totalCount ?? data.count ?? data.items?.length ?? 0;
-            setViewedCount(count);
-            const firstItem = data.items?.[0];
-            setViewedFirstImage(firstItem?.photoUrl || firstItem?.imageUrl || firstItem?.image || '');
-          }
-        } catch {
-          // silently fail
-        }
-      };
-      fetchCounts();
-    }, [])
+    useCallback(() => {
+      loadProfileData();
+      // 의존성은 빈 배열 유지 — loadProfileData 자체가 useCallback 으로 안정적이라
+      // focus 시점에만 실행되면 충분하다(루프 방지).
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
   );
+
+  // pull-to-refresh — 본문 ScrollView 가 더 이상 위로 못 갈 때 한 번 더 당기면
+  // 계정 자료(주문 카운트 / 예치금 / 알림 / 위시리스트 / 최근본) 를 모두 다시
+  // 받아온다. 상단 인디케이터만 잠깐 보이고 본문 카드 레이아웃은 흔들리지 않는다.
+  const onProfileRefresh = useCallback(async () => {
+    setProfileRefreshing(true);
+    try {
+      await loadProfileData();
+    } finally {
+      setProfileRefreshing(false);
+    }
+  }, [loadProfileData]);
   
   // Translation function
   const t = (key: string) => {
@@ -778,80 +833,59 @@ const ProfileScreen: React.FC = () => {
             disabled?: boolean;
             accent?: boolean;
           };
-          const totalOrdersFallback =
-            (orderCounts.unpaid || 0)
-            + (orderCounts.to_be_shipped || 0)
-            + (orderCounts.shipped || 0)
-            + (orderCounts.processed || 0)
-            + (orderCounts.shipping_delay || 0)
-            + (orderCounts.error || 0)
-            + (orderCounts.refunds || 0)
-            + (orderCounts.problemProducts || 0)
-            || 11;
+          // 4개 탭 모두 하나의 BuyList 페지로 내비게이션된다 (별도 페지 없음).
+          // 활성 도메인은 BuyList 의 발주관리 드롭다운에 의해 결정되므로
+          // 셀을 누를 때 domain 파라미터로 어떤 도메인을 활성화할지 전달한다.
+          // BuyListScreen 의 useEffect 가 route.params.domain 변화를 감지해
+          // activeBusinessDomain 을 동기화한다.
+          const tabDomain: Record<typeof activeOrderTab, string> = {
+            purchase_agency: 'purchase_agency',
+            rocket_3pl: 'rocket_3pl',
+            vvic_hipass: 'vvic_hipass',
+            shipping_agency: 'shipping_agency',
+          };
 
-          // 각 탭은 자기 전용 페지로 내비게이션된다. 셀의 initialTab은
-          // 해당 페지의 활성 탭 키와 일대일 대응한다.
-          const tabRoute: Record<typeof activeOrderTab, string> = {
-            purchase_agency: 'BuyList',
-            rocket_3pl: 'Rocket3PLList',
-            vvic_hipass: 'VvicHipassList',
-            shipping_agency: 'ShippingAgencyList',
+          /**
+           * 도메인 하나의 ProfileOrderCounts 를 카드의 10개 셀 배열로 변환한다.
+           * 라벨 구성은 4개 탭이 모두 동일하고, 다른 점은 카운트뿐 — 그래서
+           * 한 함수로 4개 탭의 셀을 일관되게 만든다. 백엔드가 viewFilterCounts
+           * 를 도메인 무관 전체로 내리므로 orderCountsByDomain[domain] 는
+           * 클라이언트에서 도메인 분류 후 다시 계산한 결과를 갖는다.
+           */
+          const buildCells = (
+            counts: ProfileOrderCountsByDomain[keyof ProfileOrderCountsByDomain],
+          ): Cell[] => {
+            const total =
+              (counts.quotePending || 0) +
+              (counts.unpaid || 0) +
+              (counts.to_be_shipped || 0) +
+              (counts.shipped || 0) +
+              (counts.processed || 0) +
+              (counts.shipping_delay || 0) +
+              (counts.error || 0) +
+              (counts.refunds || 0) +
+              (counts.problemProducts || 0);
+            return [
+              // 견적대기 ↔ counts.quotePending (P_QUOTE 가 그대로 남은 주문)
+              { labelKey: 'profile.quoteWaiting', count: counts.quotePending, initialTab: 'category' },
+              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
+              // 고객결제 ↔ counts.unpaid (BUY_PAY_WAIT + 자동 전환된 P_QUOTE)
+              { labelKey: 'profile.customerPayment', count: counts.unpaid, initialTab: 'unpaid' },
+              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
+              { labelKey: 'profile.orderPurchasing', count: counts.to_be_shipped, initialTab: 'to_be_shipped' },
+              { labelKey: 'profile.orderWarehoused', count: counts.processed, initialTab: 'processed' },
+              { labelKey: 'profile.shipmentWaiting', count: counts.shipping_delay, initialTab: 'shipping_delay' },
+              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
+              { labelKey: 'profile.orderCompleted', count: counts.shipped, initialTab: 'shipped' },
+              { labelKey: 'profile.allOrders', count: total, initialTab: 'all', accent: true },
+            ];
           };
 
           const myOrderTabContent: Record<typeof activeOrderTab, Cell[]> = {
-            // 구매대행 → BuyListScreen의 기존 initialTab 키 사용.
-            purchase_agency: [
-              { labelKey: 'profile.quoteWaiting', count: orderCounts.unpaid || 8, initialTab: 'category' },
-              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
-              { labelKey: 'profile.customerPayment', count: orderCounts.unpaid || 0, initialTab: 'unpaid' },
-              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
-              { labelKey: 'profile.orderPurchasing', count: orderCounts.to_be_shipped, initialTab: 'to_be_shipped' },
-              { labelKey: 'profile.orderWarehoused', count: orderCounts.processed, initialTab: 'processed' },
-              { labelKey: 'profile.shipmentWaiting', count: orderCounts.shipping_delay, initialTab: 'shipping_delay' },
-              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
-              { labelKey: 'profile.orderCompleted', count: orderCounts.shipped, initialTab: 'shipped' },
-              { labelKey: 'profile.allOrders', count: totalOrdersFallback, initialTab: 'all', accent: true },
-            ],
-            // 로켓/3PL → 라벨 구성은 구매대행과 동일. 카운트만 도메인 자료로 갈아끼우면 된다.
-            // (4개 탭은 시각상 ">" 로 묶여 있지만 의미상 서로 독립이다.)
-            rocket_3pl: [
-              { labelKey: 'profile.quoteWaiting', count: 0, initialTab: 'category' },
-              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
-              { labelKey: 'profile.customerPayment', count: 0, initialTab: 'unpaid' },
-              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
-              { labelKey: 'profile.orderPurchasing', count: 0, initialTab: 'to_be_shipped' },
-              { labelKey: 'profile.orderWarehoused', count: 0, initialTab: 'processed' },
-              { labelKey: 'profile.shipmentWaiting', count: 0, initialTab: 'shipping_delay' },
-              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
-              { labelKey: 'profile.orderCompleted', count: 0, initialTab: 'shipped' },
-              { labelKey: 'profile.allOrders', count: 0, initialTab: 'all', accent: true },
-            ],
-            // VVIC하이패스 → 라벨 동일, 카운트만 도메인 자료.
-            vvic_hipass: [
-              { labelKey: 'profile.quoteWaiting', count: 0, initialTab: 'category' },
-              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
-              { labelKey: 'profile.customerPayment', count: 0, initialTab: 'unpaid' },
-              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
-              { labelKey: 'profile.orderPurchasing', count: 0, initialTab: 'to_be_shipped' },
-              { labelKey: 'profile.orderWarehoused', count: 0, initialTab: 'processed' },
-              { labelKey: 'profile.shipmentWaiting', count: 0, initialTab: 'shipping_delay' },
-              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
-              { labelKey: 'profile.orderCompleted', count: 0, initialTab: 'shipped' },
-              { labelKey: 'profile.allOrders', count: 0, initialTab: 'all', accent: true },
-            ],
-            // 배송대행 → 라벨 동일, 카운트만 도메인 자료.
-            shipping_agency: [
-              { labelKey: 'profile.quoteWaiting', count: 0, initialTab: 'category' },
-              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
-              { labelKey: 'profile.customerPayment', count: 0, initialTab: 'unpaid' },
-              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
-              { labelKey: 'profile.orderPurchasing', count: 0, initialTab: 'to_be_shipped' },
-              { labelKey: 'profile.orderWarehoused', count: 0, initialTab: 'processed' },
-              { labelKey: 'profile.shipmentWaiting', count: 0, initialTab: 'shipping_delay' },
-              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
-              { labelKey: 'profile.orderCompleted', count: 0, initialTab: 'shipped' },
-              { labelKey: 'profile.allOrders', count: 0, initialTab: 'all', accent: true },
-            ],
+            purchase_agency: buildCells(orderCountsByDomain.purchase_agency),
+            rocket_3pl: buildCells(orderCountsByDomain.rocket_3pl),
+            vvic_hipass: buildCells(orderCountsByDomain.vvic_hipass),
+            shipping_agency: buildCells(orderCountsByDomain.shipping_agency),
           };
 
           const tabs: { key: typeof activeOrderTab; labelKey: string }[] = [
@@ -928,11 +962,28 @@ const ProfileScreen: React.FC = () => {
                         <TouchableOpacity
                           key={cellIdx}
                           style={styles.myOrderCell}
-                          onPress={() =>
-                            (navigation as any).navigate(tabRoute[activeOrderTab], {
-                              initialTab: cell.initialTab ?? 'all',
-                            })
-                          }
+                          onPress={() => {
+                            // 셀별 initialTab 키('category', 'unpaid' 등)는 실제
+                            // Order.status 값과 정확히 매칭되지 않아 본문이 빈 상태로
+                            // 보이는 문제가 있었다. 발주관리 드롭다운에서 도메인을 직접
+                            // 누른 것과 동일한 결과를 보장하기 위해 다음과 같이 보낸다:
+                            //  • 전체주문(accent) 셀 → initialTab: 'all' (모든 그룹)
+                            //  • 그 외 셀 → initialTab: <도메인 그룹 키> ('purchase_agency'
+                            //    / 'warehouse' / 'international_shipping' / 'error')
+                            // BuyListScreen 의 STATUS_GROUPS 키와 정렬되어 본문이
+                            // 그 도메인의 주문 카드 리스트를 즉시 표시한다.
+                            const domain = tabDomain[activeOrderTab];
+                            // 구매대행 도메인: 발주관리 드롭다운의 '구매대행' 클릭과
+                            //   동일 — activeTab='purchase_agency' (그룹 전체 표시).
+                            // 비-구매대행 도메인: 본문이 placeholder 로 렌더되므로
+                            //   필터링이 의미 없음 — activeTab='all' 로 보냄.
+                            const groupTab =
+                              domain === 'purchase_agency' ? 'purchase_agency' : 'all';
+                            (navigation as any).navigate('BuyList', {
+                              domain,
+                              initialTab: cell.accent ? 'all' : groupTab,
+                            });
+                          }}
                         >
                           <Text style={labelStyle}>{t(cell.labelKey)}</Text>
                           <Text style={countStyle}>{cell.count}</Text>
@@ -1283,8 +1334,8 @@ const ProfileScreen: React.FC = () => {
       />
       
       {renderHeader()}
-      <ScrollView 
-        style={styles.scrollView} 
+      <ScrollView
+        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         onScroll={(event) => {
           const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
@@ -1295,6 +1346,14 @@ const ProfileScreen: React.FC = () => {
           }
         }}
         scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl
+            refreshing={profileRefreshing}
+            onRefresh={onProfileRefresh}
+            colors={[COLORS.red]}
+            tintColor={COLORS.red}
+          />
+        }
       >
         {/* {renderUserSection()} */}
         {isAuthenticated && renderStatsSection()}

@@ -11,6 +11,7 @@ import {
   Modal,
   ActivityIndicator,
   InteractionManager,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect, RouteProp } from '@react-navigation/native';
@@ -394,6 +395,9 @@ const CartScreen: React.FC = () => {
   const [cards, setCards] = useState<CartCard[]>([]);
   const [setBundles, setSetBundles] = useState<CartSetBundleMeta[]>([]);
   const [cartLoading, setCartLoading] = useState(true);
+  // pull-to-refresh 전용 상태. cartLoading 과 분리해 본문이 초기 로딩 스피너로
+  // 가려지지 않고, 상단에 표준 RefreshControl 인디케이터만 잠깐 보이게 한다.
+  const [cartRefreshing, setCartRefreshing] = useState(false);
   const [cartError, setCartError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -463,6 +467,18 @@ const CartScreen: React.FC = () => {
     // including it here would re-create loadCart every render and loop the fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locale, isGuest, isAuthenticated]);
+
+  // pull-to-refresh — 본문 ScrollView 가 더 이상 위로 못 갈 때 한 번 더 당기면
+  // loadCart 를 다시 호출해 장바구니 자료를 새로 받아온다. 초기 로딩 스피너
+  // (cartLoading) 와는 별도로 RefreshControl 의 상단 인디케이터만 잠깐 보인다.
+  const onCartRefresh = useCallback(async () => {
+    setCartRefreshing(true);
+    try {
+      await loadCart();
+    } finally {
+      setCartRefreshing(false);
+    }
+  }, [loadCart]);
 
   const applyCartFromBuyNowResponse = useCallback(
     (
@@ -716,6 +732,28 @@ const CartScreen: React.FC = () => {
     }
   };
 
+  // 수량을 임의 값으로 직접 타입했을 때 사용. 화면 입력 중 자유롭게 편집할 수
+  // 있도록 텍스트 값을 그대로 받아 정수만 골라낸 뒤 1 미만은 1 로 보정한다.
+  // 빈 문자열은 일시적으로 0 으로 두지 않고 1 로 처리해 백엔드 동기화 시
+  // updateCartItem 이 잘못된 0 수량을 받는 사태를 방지.
+  const updateQty = async (id: string, text: string) => {
+    const target = cards.find((c) => c.id === id);
+    if (!target) return;
+    const clean = text.replace(/[^0-9]/g, '');
+    const parsed = clean ? parseInt(clean, 10) : 1;
+    const nextQty = Math.max(1, isNaN(parsed) ? 1 : parsed);
+    if (nextQty === target.quantity) return;
+    const prev = cards;
+    setCards((c) =>
+      c.map((x) => (x.id === id ? { ...x, quantity: nextQty } : x)),
+    );
+    const res = await cartApi.updateCartItem(id, nextQty);
+    if (!res.success) {
+      setCards(prev);
+      Alert.alert(t('cartOrder.alerts.notice'), res.message || 'Failed to update quantity');
+    }
+  };
+
   const updateUnitPrice = (id: string, text: string) => {
     const clean = text.replace(/[^0-9.]/g, '');
     const value = clean ? parseFloat(clean) : 0;
@@ -771,7 +809,6 @@ const CartScreen: React.FC = () => {
    */
   const renderOrderModalCard = (card: CartCard) => {
     const cardSvcs = cardExtraServices[card.id] || [];
-    const cardNote = cardNegotiationNote[card.id] || '';
     const cardImages = cardNegotiationImages[card.id] || [];
     const hasSvc = cardSvcs.length > 0;
     const optionParts = [
@@ -843,17 +880,49 @@ const CartScreen: React.FC = () => {
                 <Icon name="add" size={16} color={PRIMARY} />
               </TouchableOpacity>
             </View>
-            <TextInput
-              style={styles.orderModalCardRemarks}
-              value={cardNote}
-              onChangeText={(text) =>
-                setCardNegotiationNote((prev) => ({ ...prev, [card.id]: text }))
-              }
-              placeholder={t('cartOrder.orderModal.negotiationRemarksPlaceholder')}
-              placeholderTextColor={COLORS.gray[400]}
-              multiline
-              textAlignVertical="top"
-            />
+            {/* 비고 TextInput 자리에 수량 stepper + 단가 입력 + 총가격 행을 배치.
+                수량은 [−]/[+] 단추 또는 카드의 `quantity` state 직접 변경,
+                단가는 ¥ 마크 + 숫자 입력으로 타입 변경.
+                오른쪽 끝에는 quantity × unitPrice 의 총가격을 표시한다. */}
+            <View style={styles.orderModalCardPriceRow}>
+              <View style={styles.orderModalCardQtyControl}>
+                <TouchableOpacity
+                  style={styles.orderModalCardQtyBtn}
+                  onPress={() => changeQty(card.id, -1)}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Icon name="remove" size={12} color={COLORS.white} />
+                </TouchableOpacity>
+                <TextInput
+                  style={styles.orderModalCardQtyValue}
+                  value={String(card.quantity)}
+                  onChangeText={(text) => updateQty(card.id, text)}
+                  keyboardType="number-pad"
+                  selectTextOnFocus
+                />
+
+                <TouchableOpacity
+                  style={styles.orderModalCardQtyBtn}
+                  onPress={() => changeQty(card.id, 1)}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Icon name="add" size={12} color={COLORS.white} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.orderModalCardUnitPriceBox}>
+                <Text style={styles.orderModalCardYenMark}>¥</Text>
+                <TextInput
+                  style={styles.orderModalCardUnitPriceInput}
+                  value={String(card.unitPrice)}
+                  onChangeText={(text) => updateUnitPrice(card.id, text)}
+                  keyboardType="decimal-pad"
+                  selectTextOnFocus
+                />
+              </View>
+              <Text style={styles.orderModalCardTotalPrice} numberOfLines={1}>
+                ¥{(card.quantity * card.unitPrice).toFixed(2)}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -2037,6 +2106,14 @@ const CartScreen: React.FC = () => {
           contentContainerStyle={styles.cardsContent}
           showsVerticalScrollIndicator={false}
           onScrollBeginDrag={() => collapseAll()}
+          refreshControl={
+            <RefreshControl
+              refreshing={cartRefreshing}
+              onRefresh={onCartRefresh}
+              colors={[COLORS.red]}
+              tintColor={COLORS.red}
+            />
+          }
         >
           {cartLoading ? (
             <View style={styles.emptyWrap}>
@@ -2325,73 +2402,13 @@ const CartScreen: React.FC = () => {
                 </View>
               </View>
 
-              {/* Order modal — extra services / negotiation / remarks.
-                  When only one cart card is selected, keep the legacy
-                  single-block layout. When 2+ cards are selected,
-                  render one collapsed card per selected item so each
-                  product has its OWN extra-service picker, negotiation
-                  history and remarks (per user's spec). */}
-              {checkedCards.length > 1 ? (
-                <View style={styles.orderModalCardsList}>
-                  {checkedCards.map((c) => renderOrderModalCard(c))}
-                </View>
-              ) : (
-                <>
-                  {/* 부가서비스 — single-card legacy path */}
-                  <View style={styles.orderExtraServiceSection}>
-                    {renderExtraServiceBar()}
-                  </View>
-
-                  {/* 협상내역 — negotiation remarks at bottom of order modal */}
-                  <View style={styles.negotiationSection}>
-                    <View style={styles.negotiationHeader}>
-                      <Text style={styles.negotiationHeaderTitle}>
-                        {t('cartOrder.orderModal.negotiationHistory')}
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.negotiationAddBtn}
-                        onPress={pickNegotiationAttachment}
-                        activeOpacity={0.7}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('cartOrder.orderModal.negotiationAddAttachment')}
-                      >
-                        <Icon name="add" size={18} color={COLORS.text.primary} />
-                      </TouchableOpacity>
-                    </View>
-                    <View style={styles.negotiationBody}>
-                      {negotiationContentImages.length > 0 ? (
-                        <View style={styles.negotiationImagesRow}>
-                          {negotiationContentImages.map((entry) => (
-                            <View key={entry.id} style={styles.negotiationThumbWrap}>
-                              <Image
-                                source={{ uri: entry.fileUri }}
-                                style={styles.negotiationThumb}
-                                resizeMode="cover"
-                              />
-                              <TouchableOpacity
-                                style={styles.negotiationThumbRemove}
-                                onPress={() => removeNegotiationImage(entry.id)}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                              >
-                                <Icon name="close" size={12} color={COLORS.white} />
-                              </TouchableOpacity>
-                            </View>
-                          ))}
-                        </View>
-                      ) : null}
-                      <TextInput
-                        style={styles.negotiationInput}
-                        value={negotiationNote}
-                        onChangeText={setNegotiationNote}
-                        placeholder={t('cartOrder.orderModal.negotiationRemarksPlaceholder')}
-                        placeholderTextColor={COLORS.gray[400]}
-                        multiline
-                        textAlignVertical="top"
-                      />
-                    </View>
-                  </View>
-                </>
-              )}
+              {/* Order modal — 카드별 협상내역 / 비고 / 부가서비스.
+                  선택 카드 수에 관계없이 항상 다중 카드용 레이아웃을 사용한다.
+                  즉 한 개를 선택해도 그 카드 안에 자체 부가서비스 chip /
+                  협상내역 ⊕ 단추 / 비고 입력칸이 카드별로 배치된다. */}
+              <View style={styles.orderModalCardsList}>
+                {checkedCards.map((c) => renderOrderModalCard(c))}
+              </View>
             </ScrollView>
 
             <View style={styles.modalFooter}>
@@ -4234,6 +4251,68 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 6,
+  },
+  // 비고 자리에 들어가는 수량 stepper + 단가 입력 + 총가격 행.
+  orderModalCardPriceRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  orderModalCardQtyControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: PRIMARY_SOFT,
+    borderRadius: 999,
+    padding: 2,
+  },
+  orderModalCardQtyBtn: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: PRIMARY,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderModalCardQtyValue: {
+    minWidth: 24,
+    textAlign: 'center',
+    fontSize: FONTS.sizes.xs,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    paddingHorizontal: 4,
+  },
+  orderModalCardUnitPriceBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    borderRadius: 6,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: 6,
+    height: 26,
+    minWidth: 64,
+    flexShrink: 1,
+  },
+  orderModalCardYenMark: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    marginRight: 2,
+    fontWeight: '600',
+  },
+  orderModalCardUnitPriceInput: {
+    flex: 1,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    padding: 0,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  orderModalCardTotalPrice: {
+    marginLeft: 'auto',
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: PRIMARY,
   },
   orderModalCardNegImagesRow: {
     flexDirection: 'row',
