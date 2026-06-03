@@ -81,6 +81,9 @@ import ChargeScreen from '../screens/main/profileScreen/depositScreen/ChargeScre
 import PointDetailScreen from '../screens/main/profileScreen/depositScreen/PointDetailScreen';
 import CouponScreen from '../screens/main/profileScreen/depositScreen/CouponScreen';
 import BuyListScreen from '../screens/main/profileScreen/settingScreen/BuyListScreen';
+import Rocket3PLListScreen from '../screens/main/profileScreen/settingScreen/Rocket3PLListScreen';
+import VvicHipassListScreen from '../screens/main/profileScreen/settingScreen/VvicHipassListScreen';
+import ShippingAgencyListScreen from '../screens/main/profileScreen/settingScreen/ShippingAgencyListScreen';
 import RefundRequestScreen from '../screens/main/profileScreen/settingScreen/RefundRequestScreen';
 import ProblemProductScreen from '../screens/main/profileScreen/settingScreen/ProblemProductScreen';
 import ProductManagementScreen from '../screens/main/profileScreen/settingScreen/productManagementScreen/ProductManagementScreen';
@@ -202,23 +205,40 @@ const MainTabNavigator = () => {
   
   // Calculate tab bar height and padding based on safe area insets.
   //
-  // Mobile keeps the ORIGINAL sizing (45/15) that was already working —
-  // do not touch it. Tablets are the only environment where the bottom
-  // bar was rendering with the icon and label overlapping in a single
-  // row, so we apply a larger height + label-below-icon override only
+  // Mobile keeps the ORIGINAL sizing (45/15) that was already working
+  // on devices with a gesture-bar / home-indicator (insets.bottom > 0).
+  // Tablets get a larger height + label-below-icon override (see below)
   // when `responsive.isTablet` is true.
+  //
+  // FIX for legacy phones with 3-button navigation (insets.bottom == 0):
+  // the original mobile bar leaves only `45 - 8 - 15 = 22px` of content
+  // area, which is not enough to stack a 24px icon ABOVE a 12px label
+  // — causing the icon and label to overlap on that class of devices.
+  // When the system reports no bottom inset on a phone, we compensate
+  // by raising the base height and trimming paddingBottom so the icon
+  // and label have room to render stacked. Phones that DO report a
+  // non-zero inset keep the original numbers (already laying out fine).
   //
   // On tablets we DO NOT add the full `insets.bottom` to the height
   // and padding (tablets rarely have a home-indicator cutout, and even
   // when they do, the system inset on Android landscape is usually 0).
   // Adding the inset would have created the wide empty gap visible
-  // under the labels in the previous screenshot. Instead we add the
+  // under the labels in a previous screenshot. Instead we add the
   // inset only to the height (so the bar still clears any real cutout)
   // and keep `paddingBottom` at the base value so the labels sit close
   // to the bottom of the bar — matching the mobile look.
   const TAB_BAR_DOWN_OFFSET = 0;
-  const baseTabBarHeight = responsive.isTablet ? 56 : 45;
-  const basePaddingBottom = responsive.isTablet ? 6 : 15;
+  const isLowInsetPhone = !responsive.isTablet && insets.bottom < 8;
+  const baseTabBarHeight = responsive.isTablet
+    ? 56
+    : isLowInsetPhone
+      ? 60
+      : 45;
+  const basePaddingBottom = responsive.isTablet
+    ? 6
+    : isLowInsetPhone
+      ? 6
+      : 15;
   const tabBarHeight = baseTabBarHeight + insets.bottom - TAB_BAR_DOWN_OFFSET;
   const paddingBottom = basePaddingBottom;
   
@@ -351,15 +371,19 @@ const MainTabNavigator = () => {
           shadowRadius: 8,
           elevation: 8,
         },
-        // On tablets only: force label to render BELOW the icon.
-        // React Navigation's bottom-tabs uses an "adaptive" default
-        // that becomes `beside-icon` (a horizontal row) on screens
-        // with a short side ≥ 600px — that's what made the icon and
-        // label overlap in the tablet screenshot. Mobile keeps the
-        // default behaviour (which already shows label below icon
-        // for narrow screens), so this override is gated by
-        // `responsive.isTablet`.
-        ...(responsive.isTablet
+        // Force label to render BELOW the icon on:
+        //   • tablets — React Navigation's adaptive default flips to
+        //     `beside-icon` (horizontal) when the short side ≥ 600px,
+        //     which previously made the icon and label overlap.
+        //   • low-inset phones (3-button nav with insets.bottom == 0) —
+        //     the compact bar plus the adaptive default occasionally
+        //     stacks icon and label on top of each other instead of in
+        //     a vertical column. Pinning the position guarantees the
+        //     column layout regardless of how React Navigation reads
+        //     the available height.
+        // Phones with a gesture bar already render the column layout
+        // correctly under the default, so they're left untouched.
+        ...(responsive.isTablet || isLowInsetPhone
           ? {
               tabBarLabelPosition: 'below-icon' as const,
               tabBarItemStyle: {
@@ -850,8 +874,8 @@ const RootNavigator = () => {
               },
             }}
           />
-          <RootStack.Screen 
-            name="BuyList" 
+          <RootStack.Screen
+            name="BuyList"
             component={BuyListScreen}
             options={{
               headerShown: false,
@@ -864,6 +888,21 @@ const RootNavigator = () => {
                 fontWeight: '600',
               },
             }}
+          />
+          <RootStack.Screen
+            name="Rocket3PLList"
+            component={Rocket3PLListScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="VvicHipassList"
+            component={VvicHipassListScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="ShippingAgencyList"
+            component={ShippingAgencyListScreen}
+            options={{ headerShown: false }}
           />
           <RootStack.Screen name="RefundRequest" component={RefundRequestScreen} options={{ headerShown: false }} />
           <RootStack.Screen

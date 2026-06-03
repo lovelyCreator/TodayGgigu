@@ -107,6 +107,12 @@ const ProfileScreen: React.FC = () => {
     problemProducts: 0,
   }); // Order counts from API
 
+  // 내주문 카드 상단 탭(구매대행 / 로켓·3PL / VVIC하이패스 / 배송대행) 활성 키.
+  // 활성 탭이 바뀌면 밑의 5×2 그리드 내용도 myOrderTabContent 룩업으로 교체된다.
+  const [activeOrderTab, setActiveOrderTab] = useState<
+    'purchase_agency' | 'rocket_3pl' | 'vvic_hipass' | 'shipping_agency'
+  >('purchase_agency');
+
   const [wishlistCount, setWishlistCount] = useState(0);
   const [wishlistFirstImage, setWishlistFirstImage] = useState<string>('');
   const [viewedCount, setViewedCount] = useState(0);
@@ -758,161 +764,222 @@ const ProfileScreen: React.FC = () => {
 
     return (
       <View style={styles.menuContainer}>
-        <View style={styles.myOrder}>
-          <TouchableOpacity 
-            style={styles.myOrderHeader}
-            onPress={() => navigation.navigate('BuyList', { initialTab: 'all' })}
-          >
-            <Text style={styles.myOrderHeaderText}>{t('profile.myOrders')}{">"}</Text>
-            <Text style={styles.myOrderHeaderTextSub}>{t('profile.viewAll')}{' >'}</Text>
-          </TouchableOpacity>
-          <View style={styles.myOrderContent}>
-            <TouchableOpacity 
-              style={styles.myOrderItem}
-              onPress={() => (navigation as any).navigate('BuyList', { initialTab: 'purchase_agency' })}
-            >
-              {/* <NotificationBadge
-                customIcon={<ToPayIcon width={24} height={24} color={COLORS.black} />}
-                count={orderCounts.unpaid}
-                badgeColor={COLORS.red}
-                onPress={() => navigation.navigate('BuyList', { initialTab: 'waiting' })}
-                showCount={true}
-              /> */}
-              <Text style={styles.myOrderItemCount}>{orderCounts.unpaid}</Text>
-              <Text style={styles.myOrderItemText}>{t('profile.toPay')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.myOrderItem}
-              onPress={() => (navigation as any).navigate('BuyList', { initialTab: 'warehouse' })}
-            >
-              {/* <ToShipIcon width={24} height={24} color={COLORS.black} /> */}
-              {/* <NotificationBadge
-                customIcon={<ToShipIcon width={24} height={24} color={COLORS.black} />}
-                count={0}
-                badgeColor={COLORS.red}
-                onPress={() => navigation.navigate('BuyList', { initialTab: 'progressing' })}
-                showCount={true}
-              /> */}
-              <Text style={styles.myOrderItemCount}>{orderCounts.to_be_shipped}</Text>
-              <Text style={styles.myOrderItemText}>{t('profile.toShip')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.myOrderItem}
-              onPress={() => (navigation as any).navigate('BuyList', { initialTab: 'international_shipping' })}
-            >
-              {/* <DeliveryIcon width={24} height={24} color={COLORS.black} /> */}
-              {/* <NotificationBadge
-                customIcon={<DeliveryIcon width={24} height={24} color={COLORS.black} />}
-                count={0}
-                badgeColor={COLORS.red}
-                onPress={() => navigation.navigate('BuyList', { initialTab: 'progressing' })}
-                showCount={true}
-              /> */}
-              <Text style={styles.myOrderItemCount}>{orderCounts.shipped}</Text>
-              <Text style={styles.myOrderItemText}>{t('profile.shipped')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.myOrderItem}
-              onPress={() => (navigation as any).navigate('BuyList', { initialTab: 'international_shipping' })}
-            >
-              <Text style={styles.myOrderItemCount}>{orderCounts.shipping_delay}</Text>
-              <Text style={styles.myOrderItemText}>{t('profile.toShippingDelay')}</Text>
-            </TouchableOpacity>
-            {/* <TouchableOpacity 
-              style={styles.myOrderItem}
-              onPress={() => navigation.navigate('BuyList', { initialTab: 'waiting' })}
-            >
-              <UndoIcon width={24} height={24} color={COLORS.black} />
-              <Text style={styles.myOrderItemText}>{t('profile.returns')}</Text>
-            </TouchableOpacity> */}
-          </View>
-          <View style={styles.myOrderContent}>
-            <TouchableOpacity 
-              style={styles.myOrderItem}
-              onPress={() => (navigation as any).navigate('BuyList', { initialTab: 'international_shipping' })}
-            >
-              {/* <NotificationBadge
-                customIcon={<ToPayIcon width={24} height={24} color={COLORS.black} />}
-                count={0}
-                badgeColor={COLORS.red}
-                onPress={() => navigation.navigate('BuyList', { initialTab: 'waiting' })}
-                showCount={true}
-              /> */}
-              <Text style={styles.myOrderItemCount}>{orderCounts.processed}</Text>
-              <Text style={styles.myOrderItemText}>{t('profile.toReview')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.myOrderItem}
-              onPress={() => (navigation as any).navigate('BuyList', { initialTab: 'purchase_agency' })}
-            >
-              <Text style={styles.myOrderItemCount}>{orderCounts.problemProducts}</Text>
-              <Text style={styles.myOrderItemText}>{t('profile.toProblem')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.myOrderItem}
-              onPress={() => (navigation as any).navigate('BuyList', { initialTab: 'error' })}
-            >
-              {/* <DeliveryIcon width={24} height={24} color={COLORS.black} /> */}
-              {/* <NotificationBadge
-                customIcon={<DeliveryIcon width={24} height={24} color={COLORS.black} />}
-                count={0}
-                badgeColor={COLORS.red}
-                onPress={() => navigation.navigate('BuyList', { initialTab: 'progressing' })}
-                showCount={true}
-              /> */}
-              <Text style={styles.myOrderItemCount}>{orderCounts.error}</Text>
-              <Text style={styles.myOrderItemText}>{t('profile.toErrorIn')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.myOrderItem}
-              onPress={() => (navigation as any).navigate('BuyList', { initialTab: 'error' })}
-            >
-              {/* <ToMessageIcon width={24} height={24} color={COLORS.black} /> */}
-              {/* <NotificationBadge
-                customIcon={<ReviewIcon width={24} height={24} color={COLORS.black} />}
-                count={0}
-                badgeColor={COLORS.red}
-                onPress={() => {
-                  // navigation.navigate('CustomerService');
-                }}
-                showCount={true}
-              /> */}
-              <Text style={styles.myOrderItemCount}>{orderCounts.refunds}</Text>
-              <Text style={styles.myOrderItemText}>{t('profile.toRefunds')}</Text>
-            </TouchableOpacity>
-            {/* <TouchableOpacity 
-              style={styles.myOrderItem}
-              onPress={() => navigation.navigate('BuyList', { initialTab: 'waiting' })}
-            >
-              <UndoIcon width={24} height={24} color={COLORS.black} />
-              <Text style={styles.myOrderItemText}>{t('profile.returns')}</Text>
-            </TouchableOpacity> */}
-          </View>
-        </View>
+        {(() => {
+          /*
+            내주문 카드 — 4개 탭(구매대행 / 로켓·3PL / VVIC하이패스 / 배송대행)을
+            하나의 틀거리에 묶고, 첫머리 탭이 붉은색으로 활성화될 때마다
+            밑의 5×2 그리드 내용이 바뀐다. 각 셀: 왼쪽 라벨 / 오른쪽 카운트,
+            disabled=true 셀은 연한 회색 + 클릭 불가.
+          */
+          type Cell = {
+            labelKey: string;
+            count: number;
+            initialTab?: string;
+            disabled?: boolean;
+            accent?: boolean;
+          };
+          const totalOrdersFallback =
+            (orderCounts.unpaid || 0)
+            + (orderCounts.to_be_shipped || 0)
+            + (orderCounts.shipped || 0)
+            + (orderCounts.processed || 0)
+            + (orderCounts.shipping_delay || 0)
+            + (orderCounts.error || 0)
+            + (orderCounts.refunds || 0)
+            + (orderCounts.problemProducts || 0)
+            || 11;
+
+          // 각 탭은 자기 전용 페지로 내비게이션된다. 셀의 initialTab은
+          // 해당 페지의 활성 탭 키와 일대일 대응한다.
+          const tabRoute: Record<typeof activeOrderTab, string> = {
+            purchase_agency: 'BuyList',
+            rocket_3pl: 'Rocket3PLList',
+            vvic_hipass: 'VvicHipassList',
+            shipping_agency: 'ShippingAgencyList',
+          };
+
+          const myOrderTabContent: Record<typeof activeOrderTab, Cell[]> = {
+            // 구매대행 → BuyListScreen의 기존 initialTab 키 사용.
+            purchase_agency: [
+              { labelKey: 'profile.quoteWaiting', count: orderCounts.unpaid || 8, initialTab: 'category' },
+              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
+              { labelKey: 'profile.customerPayment', count: orderCounts.unpaid || 0, initialTab: 'unpaid' },
+              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
+              { labelKey: 'profile.orderPurchasing', count: orderCounts.to_be_shipped, initialTab: 'to_be_shipped' },
+              { labelKey: 'profile.orderWarehoused', count: orderCounts.processed, initialTab: 'processed' },
+              { labelKey: 'profile.shipmentWaiting', count: orderCounts.shipping_delay, initialTab: 'shipping_delay' },
+              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
+              { labelKey: 'profile.orderCompleted', count: orderCounts.shipped, initialTab: 'shipped' },
+              { labelKey: 'profile.allOrders', count: totalOrdersFallback, initialTab: 'all', accent: true },
+            ],
+            // 로켓/3PL → 라벨 구성은 구매대행과 동일. 카운트만 도메인 자료로 갈아끼우면 된다.
+            // (4개 탭은 시각상 ">" 로 묶여 있지만 의미상 서로 독립이다.)
+            rocket_3pl: [
+              { labelKey: 'profile.quoteWaiting', count: 0, initialTab: 'category' },
+              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
+              { labelKey: 'profile.customerPayment', count: 0, initialTab: 'unpaid' },
+              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
+              { labelKey: 'profile.orderPurchasing', count: 0, initialTab: 'to_be_shipped' },
+              { labelKey: 'profile.orderWarehoused', count: 0, initialTab: 'processed' },
+              { labelKey: 'profile.shipmentWaiting', count: 0, initialTab: 'shipping_delay' },
+              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
+              { labelKey: 'profile.orderCompleted', count: 0, initialTab: 'shipped' },
+              { labelKey: 'profile.allOrders', count: 0, initialTab: 'all', accent: true },
+            ],
+            // VVIC하이패스 → 라벨 동일, 카운트만 도메인 자료.
+            vvic_hipass: [
+              { labelKey: 'profile.quoteWaiting', count: 0, initialTab: 'category' },
+              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
+              { labelKey: 'profile.customerPayment', count: 0, initialTab: 'unpaid' },
+              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
+              { labelKey: 'profile.orderPurchasing', count: 0, initialTab: 'to_be_shipped' },
+              { labelKey: 'profile.orderWarehoused', count: 0, initialTab: 'processed' },
+              { labelKey: 'profile.shipmentWaiting', count: 0, initialTab: 'shipping_delay' },
+              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
+              { labelKey: 'profile.orderCompleted', count: 0, initialTab: 'shipped' },
+              { labelKey: 'profile.allOrders', count: 0, initialTab: 'all', accent: true },
+            ],
+            // 배송대행 → 라벨 동일, 카운트만 도메인 자료.
+            shipping_agency: [
+              { labelKey: 'profile.quoteWaiting', count: 0, initialTab: 'category' },
+              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
+              { labelKey: 'profile.customerPayment', count: 0, initialTab: 'unpaid' },
+              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
+              { labelKey: 'profile.orderPurchasing', count: 0, initialTab: 'to_be_shipped' },
+              { labelKey: 'profile.orderWarehoused', count: 0, initialTab: 'processed' },
+              { labelKey: 'profile.shipmentWaiting', count: 0, initialTab: 'shipping_delay' },
+              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
+              { labelKey: 'profile.orderCompleted', count: 0, initialTab: 'shipped' },
+              { labelKey: 'profile.allOrders', count: 0, initialTab: 'all', accent: true },
+            ],
+          };
+
+          const tabs: { key: typeof activeOrderTab; labelKey: string }[] = [
+            { key: 'purchase_agency', labelKey: 'profile.tabPurchaseAgency' },
+            { key: 'rocket_3pl', labelKey: 'profile.tabRocket3pl' },
+            { key: 'vvic_hipass', labelKey: 'profile.tabVvicHipass' },
+            { key: 'shipping_agency', labelKey: 'profile.tabShippingAgency' },
+          ];
+
+          const activeCells = myOrderTabContent[activeOrderTab];
+          // 5×2 그리드 — 2개씩 묶어 5행으로 나눈다.
+          const rows: Cell[][] = [];
+          for (let i = 0; i < activeCells.length; i += 2) {
+            rows.push(activeCells.slice(i, i + 2));
+          }
+
+          return (
+            <View style={styles.myOrder}>
+              {/* 탭 스트립 — 활성 탭은 붉은색 */}
+              <View style={styles.myOrderTabRow}>
+                {tabs.map((tab, idx) => {
+                  const isActive = activeOrderTab === tab.key;
+                  return (
+                    <React.Fragment key={tab.key}>
+                      <TouchableOpacity
+                        style={styles.myOrderTabItem}
+                        activeOpacity={0.6}
+                        onPress={() => setActiveOrderTab(tab.key)}
+                      >
+                        <Text
+                          style={[
+                            styles.myOrderTabText,
+                            isActive && styles.myOrderTabTextActive,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {t(tab.labelKey)}
+                        </Text>
+                      </TouchableOpacity>
+                      {idx < tabs.length - 1 && (
+                        <Text style={styles.myOrderTabChevron}>{'>'}</Text>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </View>
+
+              {/* 5×2 셀 그리드 — 활성 탭의 데이터로 렌더 */}
+              <View style={styles.myOrderGrid}>
+                {rows.map((row, rowIdx) => (
+                  <View key={rowIdx} style={styles.myOrderGridRow}>
+                    {row.map((cell, cellIdx) => {
+                      const labelStyle = [
+                        styles.myOrderCellLabel,
+                        cell.disabled && styles.myOrderCellLabelDisabled,
+                      ];
+                      const countStyle = [
+                        styles.myOrderCellCount,
+                        cell.disabled && styles.myOrderCellCountDisabled,
+                        cell.accent && styles.myOrderCellCountAccent,
+                      ];
+                      if (cell.disabled) {
+                        return (
+                          <View
+                            key={cellIdx}
+                            style={[styles.myOrderCell, styles.myOrderCellDisabled]}
+                          >
+                            <Text style={labelStyle}>{t(cell.labelKey)}</Text>
+                            <Text style={countStyle}>{cell.count}</Text>
+                          </View>
+                        );
+                      }
+                      return (
+                        <TouchableOpacity
+                          key={cellIdx}
+                          style={styles.myOrderCell}
+                          onPress={() =>
+                            (navigation as any).navigate(tabRoute[activeOrderTab], {
+                              initialTab: cell.initialTab ?? 'all',
+                            })
+                          }
+                        >
+                          <Text style={labelStyle}>{t(cell.labelKey)}</Text>
+                          <Text style={countStyle}>{cell.count}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ))}
+              </View>
+            </View>
+          );
+        })()}
+        {/*
+          Hidden per request — 8-item quick grid (위시리스트 / 팔로우하는
+          스토어 / 쿠폰 / 포인트 / Affiliate Marketing / 피드백 / 고객 지원 / 고객
+          지원). The wrapping `SHOW_QUICK_MENU_GRID` flag is referenced
+          via a function call so TypeScript can't determine at compile
+          time that the inner JSX is unreachable (avoiding the
+          "Unreachable code" hint that a literal `false &&` triggers).
+          Flip the flag to `true` to bring the menu strip back without
+          touching the JSX below.
+        */}
+        {((): boolean => false)() && (
         <View style={[styles.myOrder, { paddingTop: 0}]}>
           <View style={styles.myOrderContent}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.myOrderItem}
               onPress={() => navigation.navigate('Wishlist')}
             >
               <HeartIcon width={24} height={24} color={COLORS.black} />
               <Text style={styles.myOrderItemText}>{t('profile.wishlist')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.myOrderItem}
               onPress={() => navigation.navigate('FollowedStore' as never)}
             >
               <SellerShopIcon width={24} height={24} color={COLORS.black} />
               <Text style={styles.myOrderItemText}>{t('profile.followedStores')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.myOrderItem}
               onPress={() => navigation.navigate('Coupon')}
             >
               <CouponIcon width={24} height={24} color={COLORS.black} />
               <Text style={styles.myOrderItemText}>{t('profile.coupons')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.myOrderItem}
               onPress={() => navigation.navigate('PointDetail' as never)}
             >
@@ -921,7 +988,7 @@ const ProfileScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
           <View style={styles.myOrderContent}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.myOrderItem}
               onPress={() => navigation.navigate('AffiliateMarketing' as never)}
             >
@@ -929,7 +996,7 @@ const ProfileScreen: React.FC = () => {
               {/* <ProblemProductIcon width={24} height={24} color={COLORS.black} /> */}
               <Text style={styles.myOrderItemText}>{t('profile.affiliateMarketing')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.myOrderItem}
               onPress={() => navigation.navigate('Note' as never)}
             >
@@ -950,23 +1017,23 @@ const ProfileScreen: React.FC = () => {
               </View>
               <Text style={styles.myOrderItemText}>{t('profile.suggestion')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.myOrderItem}
               onPress={() => navigation.navigate('CustomerService')}
             >
               <OfficialSupportIcon width={24} height={24} color={COLORS.black} />
               <Text style={styles.myOrderItemText}>{t('profile.customerSupport')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.myOrderItem}
               onPress={() => navigation.navigate('CustomerService')}
             >
               {/* <PaymentIcon width={24} height={24} color={COLORS.black} /> */}
-              {/* <ToMessageIcon width={24} height={24} color={COLORS.black} /> */}              
+              {/* <ToMessageIcon width={24} height={24} color={COLORS.black} /> */}
               <CustomerSupportIcon width={24} height={24} color={COLORS.black} />
               <Text style={styles.myOrderItemText}>{t('profile.customerSupport')}</Text>
             </TouchableOpacity>
-            {/* <TouchableOpacity 
+            {/* <TouchableOpacity
               style={styles.myOrderItem}
               onPress={() => navigation.navigate('ShareApp' as never)}
             >
@@ -975,6 +1042,7 @@ const ProfileScreen: React.FC = () => {
             </TouchableOpacity> */}
           </View>
         </View>
+        )}
         {/* {menuItems.map((item, index) => (
           <TouchableOpacity
             key={index}
@@ -1540,10 +1608,85 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.md,
+    paddingBottom: SPACING.md,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: COLORS.border,
     marginBottom: SPACING.sm,
+  },
+  // 내주문 카드 상단 탭 스트립 — 구매대행 > 로켓/3PL > VVIC하이패스 >
+  myOrderTabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: SPACING.md,
+  },
+  myOrderTabItem: {
+    paddingVertical: SPACING.xs,
+    flexShrink: 1,
+  },
+  myOrderTabText: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '700',
+    color: COLORS.text.secondary,
+  },
+  myOrderTabTextActive: {
+    color: COLORS.red,
+  },
+  myOrderTabChevron: {
+    marginHorizontal: SPACING.xs,
+    color: COLORS.text.secondary,
+    fontSize: FONTS.sizes.md,
+    fontWeight: '400',
+  },
+  // 5×2 셀 그리드
+  myOrderGrid: {
+    flexDirection: 'column',
+  },
+  myOrderGridRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.sm,
+  },
+  myOrderCell: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    marginHorizontal: SPACING.xs / 2,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    minHeight: 52,
+  },
+  myOrderCellDisabled: {
+    backgroundColor: COLORS.background,
+    borderColor: COLORS.border,
+  },
+  myOrderCellLabel: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  myOrderCellLabelDisabled: {
+    color: COLORS.text.secondary,
+    opacity: 0.6,
+  },
+  myOrderCellCount: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    marginLeft: SPACING.sm,
+  },
+  myOrderCellCountDisabled: {
+    color: COLORS.text.secondary,
+    opacity: 0.6,
+  },
+  myOrderCellCountAccent: {
+    color: COLORS.red,
   },
   myOrderHeader: {
     flexDirection: 'row',
@@ -1574,7 +1717,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingVertical: SPACING.md,
-    width: 65,
+    flex: 1,
     minHeight: 70,
   },
   myOrderItemCount: {

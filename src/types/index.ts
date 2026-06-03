@@ -432,6 +432,11 @@ export type RootStackParamList = {
   PointDetail: undefined;
   Coupon: { initialSection?: 'coupon' | 'point' } | undefined;
   BuyList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'error' | 'shipping_delay' | 'refunds' | 'purchase_agency' | 'warehouse' | 'international_shipping' | 'all' } | undefined;
+  // 로켓/3PL, VVIC하이패스, 배송대행 페지는 구매대행과 동일한 9개 단계 라벨(견적대기/고객확인/.../완료/전체주문)을 공유한다.
+  // 4개 도메인은 시각상 ">"로 묶여 있어도 서로 독립이며, 카운트만 도메인별로 다르다.
+  Rocket3PLList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'shipping_delay' | 'all' } | undefined;
+  VvicHipassList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'shipping_delay' | 'all' } | undefined;
+  ShippingAgencyList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'shipping_delay' | 'all' } | undefined;
   ProductManagement: undefined;
   UnitSurvey: undefined;
   OEMSurvey: undefined;
