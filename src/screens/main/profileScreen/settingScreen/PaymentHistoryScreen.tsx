@@ -157,7 +157,12 @@ const PaymentHistoryScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    // 헤더 웃부분(상단 status-bar 인셋)을 흰색으로 통일.
+    // SafeAreaView 가 인셋 영역을 자기 backgroundColor 로 칠하므로
+    // 바깥 SafeAreaView 는 흰색(safeTop), 안쪽 View(container) 는 기존
+    // 회색 배경으로 본문 카드 사이 여백을 유지한다.
+    <SafeAreaView style={styles.safeTop} edges={['top']}>
+      <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -269,11 +274,18 @@ const PaymentHistoryScreen: React.FC = () => {
       </ScrollView>
 
       {renderPickerModal()}
+      </View>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  // SafeAreaView 외곽 — 상단 인셋(헤더 웃부분)을 흰색으로 칠한다.
+  // 헤더와 같은 색이라 위쪽이 깔끔하게 이어진다.
+  safeTop: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

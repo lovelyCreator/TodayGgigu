@@ -324,7 +324,10 @@ export type CartScreenParams = {
 
 export type MainTabParamList = {
   Home: undefined;
-  Category: undefined;
+  // Category 탭은 사용자 요청으로 보텀바에서 제거됨. 대신 상품리스트(ProductList)
+  // 탭이 같은 자리를 차지한다. Category 라우트 자체는 RootStack 에 여전히
+  // 등록돼 있어 다른 화면에서 navigation.navigate('Category') 호출은 계속 동작한다.
+  ProductList: undefined;
   Message:
     | {
         /** Optional deep-link target — 'order' is the default (first tab). */
@@ -443,6 +446,9 @@ export type RootStackParamList = {
   VvicHipassList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'shipping_delay' | 'all' } | undefined;
   ShippingAgencyList: { initialTab?: 'category' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed' | 'shipping_delay' | 'all' } | undefined;
   ProductManagement: undefined;
+  // 홈페지 베스트상품 카드에서 진입. tab 키를 함께 보내면 그 탭이 default
+  // 활성으로 시작한다. 'overall' 이 화면 기본값.
+  BestProducts: { initialTab?: 'popularSeller' | 'price' | 'overall' } | undefined;
   // 상품관리 카드의 편집(✏️) 아이콘에서 진입. 카드의 현재 필드들을 그대로
   // 전달해 폼이 즉시 초기화된다. productId 만 있고 나머지는 옵션이어서
   // 호출자가 일부만 보낼 수도 있다.

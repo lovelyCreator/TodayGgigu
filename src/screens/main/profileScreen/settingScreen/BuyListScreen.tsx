@@ -546,7 +546,9 @@ const BuyListScreen = () => {
   const [headerHeight, setHeaderHeight] = useState(56);
   const [showNavModal, setShowNavModal] = useState(false);
   const [cancelOrderModal, setCancelOrderModal] = useState<{ orderId: string } | null>(null);
-  const [cancelReason, setCancelReason] = useState<string>('Changed my mind');
+  // cancelReason 은 id 문자열만 저장 ('changedMyMind' / 'incorrectInfo' /
+  // 'outOfStock' / 'other'). 표시 라벨은 t() 로 그때그때 번역한다.
+  const [cancelReason, setCancelReason] = useState<string>('changedMyMind');
   const [cancelOtherText, setCancelOtherText] = useState('');
   const [showAllFiltersModal, setShowAllFiltersModal] = useState(false);
   const [filterPlatform, setFilterPlatform] = useState<string>('');
@@ -757,40 +759,74 @@ const BuyListScreen = () => {
   };
 
   const handleRepurchase = (order: Order) => {
+    // 1688 CDN 썸네일에 붙어 있는 _NNNxNNN.jpg 사이즈 접미사 제거.
+    // 백엔드는 원본 URL 로 다시 fetch 하는데 그 사이즈 변형 URL 은 1688에
+    // 존재하지 않아 500 의 원인이 된다 — ProductDetailScreen 과 같은 처리.
+    const stripAlicdnSizeSuffix = (url: string): string =>
+      url ? url.replace(/_\d+x\d+\.(jpg|jpeg|png|webp)$/i, '') : url;
+
     order.items.forEach((item) => {
       const skuAttrs = (item.skuAttributes || []).map((attr: any) => ({
-        attributeId: attr.attributeId ?? 0,
+        // 원본이 string("404") / number(404) 어느 쪽이든 파싱.
+        attributeId:
+          typeof attr.attributeId === 'number'
+            ? attr.attributeId
+            : parseInt(String(attr.attributeId ?? attr.propId ?? '0'), 10) || 0,
         attributeName: attr.attributeName ?? '',
         attributeNameTrans: attr.attributeNameTrans ?? attr.attributeName ?? '',
         value: attr.value ?? '',
         valueTrans: attr.valueTrans ?? attr.value ?? '',
-        skuImageUrl: attr.skuImageUrl,
+        skuImageUrl: stripAlicdnSizeSuffix(attr.skuImageUrl || ''),
       }));
       const repurchasePrice = String(item.price);
-      addToCart({
-        offerId: parseInt(item.offerId, 10) || 0,
-        // 카테고리 정보는 재구매 시 OrderItem 에 없음 — 빈 문자열로 보내면
-        // 백엔드가 offerId 로부터 알아서 채운다 (cartApi 의 문자열 | MultiLang 허용).
-        categoryName: '',
-        subject: item.productName,
-        subjectTrans: item.productName,
-        imageUrl: item.image,
-        skuInfo: {
-          skuId: parseInt(item.skuId || '0', 10) || 0,
-          specId: item.specId || String(item.offerId),
-          price: repurchasePrice,
-          amountOnSale: 999999,
-          consignPrice: repurchasePrice,
-          skuAttributes: skuAttrs,
-          // 백엔드는 onePiecePrice 와 offerPrice 둘 다 요구한다.
-          fenxiaoPriceInfo: { onePiecePrice: repurchasePrice, offerPrice: repurchasePrice },
+      // 다국어 상품명 — companyNameMultiLang 처럼 글자셋에 맞춰 슬롯 채움.
+      // 백엔드의 locale 별 validator(zh 슬롯에 한글이 들어가면 500) 회피.
+      const subjectRaw = String(item.productName || '');
+      const subjectMultiLang: { en?: string; ko?: string; zh?: string } = {};
+      if (subjectRaw) {
+        const hasChinese = /[一-鿿]/.test(subjectRaw);
+        const hasHangul = /[가-힯ᄀ-ᇿ㄰-㆏]/.test(subjectRaw);
+        if (hasChinese) subjectMultiLang.zh = subjectRaw;
+        else if (hasHangul) subjectMultiLang.ko = subjectRaw;
+        else subjectMultiLang.en = subjectRaw;
+      }
+      const source = item.source || '1688';
+      // ProductDetailScreen 패턴과 동일하게: 두 번째 인자로 현재 locale 을 보내
+      // 백엔드가 그 언어 기준으로 응답을 정렬·검증하도록 한다 (default 'en'
+      // 으로 빠지면 한국어 productName 이 영문 validator 에 걸려 500 발생).
+      addToCart(
+        {
+          offerId: parseInt(item.offerId, 10) || 0,
+          // 카테고리 정보는 재구매 시 OrderItem 에 없음 — 빈 문자열로 보내면
+          // 백엔드가 offerId 로부터 알아서 채운다 (cartApi 의 string | MultiLang 허용).
+          categoryName: '',
+          // subject / subjectTrans 모두 사용자가 인지하는 번역 텍스트로 통일
+          // (raw Chinese 가 subject 로 가면 ko-locale validator 에서 500).
+          subject: subjectRaw,
+          subjectTrans: subjectRaw,
+          subjectMultiLang,
+          imageUrl: stripAlicdnSizeSuffix(item.image || ''),
+          source,
+          // originalSource — 백엔드가 SKU 조회 시 marketplace 식별에 사용.
+          originalSource: source,
+          skuInfo: {
+            skuId: parseInt(item.skuId || '0', 10) || 0,
+            specId: item.specId || String(item.offerId),
+            price: repurchasePrice,
+            amountOnSale: 999999,
+            consignPrice: repurchasePrice,
+            cargoNumber: '',
+            skuAttributes: skuAttrs,
+            // 백엔드는 onePiecePrice 와 offerPrice 둘 다 요구.
+            fenxiaoPriceInfo: { onePiecePrice: repurchasePrice, offerPrice: repurchasePrice },
+          },
+          companyName: buildCompanyMultiLang(item.companyName),
+          sellerOpenId: item.sellerOpenId || '',
+          quantity: item.quantity,
+          minOrderQuantity: 1,
         },
-        companyName: buildCompanyMultiLang(item.companyName),
-        sellerOpenId: item.sellerOpenId,
-        source: item.source || '1688',
-        quantity: item.quantity,
-        minOrderQuantity: 1,
-      });
+        locale,
+      );
     });
   };
 
@@ -1737,7 +1773,8 @@ const BuyListScreen = () => {
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() => {
-                setCancelReason(t('buyList.changedMyMind'));
+                // 모달 열 때 기본 사유는 첫 번째 항목(단순 변심) id 로.
+                setCancelReason('changedMyMind');
                 setCancelOtherText('');
                 setCancelOrderModal({ orderId: order.id });
               }}
@@ -2820,7 +2857,7 @@ const BuyListScreen = () => {
           <View style={styles.atcModalContent}>
             {/* Header */}
             <View style={styles.atcModalHeader}>
-              <Text style={styles.atcModalTitle}>Add to Cart</Text>
+              <Text style={styles.atcModalTitle}>{t('buyList.addToCartModal.title')}</Text>
               <TouchableOpacity onPress={() => setAddToCartModalVisible(false)}>
                 <Icon name="close" size={22} color={COLORS.text.primary} />
               </TouchableOpacity>
@@ -2950,7 +2987,7 @@ const BuyListScreen = () => {
 
                 {/* Quantity */}
                 <View style={styles.atcSection}>
-                  <Text style={styles.atcSectionTitle}>Quantity</Text>
+                  <Text style={styles.atcSectionTitle}>{t('buyList.addToCartModal.quantity')}</Text>
                   <View style={styles.atcQtyRow}>
                     <TouchableOpacity style={styles.atcQtyBtn} onPress={() => setAddToCartQuantity(q => Math.max(1, q - 1))}>
                       <Icon name="remove" size={18} color={COLORS.text.primary} />
@@ -2966,7 +3003,7 @@ const BuyListScreen = () => {
 
             {/* Add to cart button */}
             <TouchableOpacity style={styles.atcConfirmButton} onPress={handleConfirmAddToCart}>
-              <Text style={styles.atcConfirmButtonText}>Add to Cart</Text>
+              <Text style={styles.atcConfirmButtonText}>{t('buyList.addToCartModal.confirm')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -3118,31 +3155,39 @@ const BuyListScreen = () => {
             <View style={styles.cancelWarningBox}>
               <Icon name="alert-circle-outline" size={18} color={COLORS.red} style={{ marginTop: 2 }} />
               <Text style={styles.cancelWarningText}>
-                Once cancelled, this action cannot be undone. Coupons and red envelopes will be returned and can be used within their validity period.
+                {t('buyList.cancelOrderWarning')}
               </Text>
             </View>
 
-            <Text style={styles.cancelReasonLabel}>Please select a reason for cancelling the order.</Text>
+            <Text style={styles.cancelReasonLabel}>
+              {t('buyList.cancelOrderSelectReason')}
+            </Text>
 
-            {/* Reasons */}
-            {[t('buyList.changedMyMind'), t('buyList.incorrectInfo'), t('buyList.outOfStock'), t('buyList.other')].map((reason) => (
+            {/* Reasons — stable id + localized label. cancelReason 은 id 를 저장하므로
+                locale 이 바뀌어도 'Other' 분기가 깨지지 않는다. */}
+            {([
+              { id: 'changedMyMind', label: t('buyList.changedMyMind') },
+              { id: 'incorrectInfo', label: t('buyList.incorrectInfo') },
+              { id: 'outOfStock', label: t('buyList.outOfStock') },
+              { id: 'other', label: t('buyList.other') },
+            ] as const).map((reason) => (
               <TouchableOpacity
-                key={reason}
+                key={reason.id}
                 style={styles.cancelReasonRow}
-                onPress={() => setCancelReason(reason)}
+                onPress={() => setCancelReason(reason.id)}
               >
-                <View style={[styles.cancelRadio, cancelReason === reason && styles.cancelRadioSelected]}>
-                  {cancelReason === reason && <Icon name="checkmark" size={12} color={COLORS.white} />}
+                <View style={[styles.cancelRadio, cancelReason === reason.id && styles.cancelRadioSelected]}>
+                  {cancelReason === reason.id && <Icon name="checkmark" size={12} color={COLORS.white} />}
                 </View>
-                <Text style={styles.cancelReasonText}>{reason}</Text>
+                <Text style={styles.cancelReasonText}>{reason.label}</Text>
               </TouchableOpacity>
             ))}
 
-            {/* Other input */}
-            {cancelReason === 'Other' && (
+            {/* Other input — id 비교로 locale 무관하게 동작 */}
+            {cancelReason === 'other' && (
               <TextInput
                 style={styles.cancelOtherInput}
-                placeholder="Please describe your reason..."
+                placeholder={t('buyList.describeReason')}
                 placeholderTextColor={COLORS.text.secondary}
                 value={cancelOtherText}
                 onChangeText={setCancelOtherText}
@@ -3157,8 +3202,8 @@ const BuyListScreen = () => {
                 <Text style={styles.cancelModalCancelText}>{t('common.cancel') || 'Cancel'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.cancelModalConfirmBtn, (cancelReason === 'Other' && !cancelOtherText.trim()) && { opacity: 0.4 }]}
-                disabled={cancelReason === 'Other' && !cancelOtherText.trim()}
+                style={[styles.cancelModalConfirmBtn, (cancelReason === 'other' && !cancelOtherText.trim()) && { opacity: 0.4 }]}
+                disabled={cancelReason === 'other' && !cancelOtherText.trim()}
                 onPress={() => {
                   if (cancelOrderModal) {
                     cancelOrder(cancelOrderModal.orderId);
@@ -3442,16 +3487,16 @@ const BuyListScreen = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.addressModalContent}>
             <View style={styles.addressModalHeader}>
-              <Text style={styles.addressModalTitle}>Edit address</Text>
+              <Text style={styles.addressModalTitle}>{t('buyList.editAddressModal.title')}</Text>
               <TouchableOpacity onPress={() => setAddressModalVisible(false)}>
                 <Icon name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.addressModalLabel}>Currently delivering to:</Text>
+              <Text style={styles.addressModalLabel}>{t('buyList.editAddressModal.currentlyDeliveringTo')}</Text>
               <View style={styles.addressModalRow}>
                 <View style={styles.addressModalDropdown}>
-                  <Text style={styles.addressModalDropdownText}>한국</Text>
+                  <Text style={styles.addressModalDropdownText}>{t('buyList.editAddressModal.countryKorea')}</Text>
                   <Icon name="chevron-down" size={20} color={COLORS.gray[600]} />
                 </View>
                 {/* <TouchableOpacity style={styles.defaultCheckboxRow} onPress={() => setIsDefaultAddress(!isDefaultAddress)}>
@@ -3462,45 +3507,45 @@ const BuyListScreen = () => {
                 </TouchableOpacity> */}
               </View>
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Address information:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('buyList.editAddressModal.addressInformation')}</Text>
               <TouchableOpacity style={styles.addressSearchBtn} onPress={() => setShowKakaoAddress(true)}>
                 <Icon name="search" size={16} color={COLORS.white} />
-                <Text style={styles.addressSearchBtnText}>Search Address (Kakao)</Text>
+                <Text style={styles.addressSearchBtnText}>{t('buyList.editAddressModal.searchAddressKakao')}</Text>
               </TouchableOpacity>
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Postal code:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('buyList.editAddressModal.postalCode')}</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="e.g. 06000"
+                placeholder={t('buyList.postalCode')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.zonecode}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, zonecode: v }))}
                 keyboardType="number-pad"
               />
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Detail address:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('buyList.editAddressModal.detailAddress')}</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="Search address above or enter manually"
+                placeholder={t('buyList.searchAddress')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.detailAddress}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, detailAddress: v }))}
               />
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Recipient name:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('buyList.editAddressModal.recipientName')}</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="Up to 25 characters"
+                placeholder={t('buyList.upTo25Chars')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.recipient}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, recipient: v }))}
                 maxLength={25}
               />
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Mobile number:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('buyList.editAddressModal.mobileNumber')}</Text>
               <View style={styles.addressModalPhoneRow}>
                 <View style={styles.addressModalPhoneCode}>
-                  <Text style={{ fontSize: FONTS.sizes.sm, color: COLORS.text.primary }}>한국 +82</Text>
+                  <Text style={{ fontSize: FONTS.sizes.sm, color: COLORS.text.primary }}>{t('buyList.editAddressModal.koreaDialCode')}</Text>
                   <Icon name="chevron-down" size={20} color={COLORS.gray[600]} />
                 </View>
                 <TextInput
@@ -3511,10 +3556,10 @@ const BuyListScreen = () => {
                 />
               </View>
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Customs clearance code:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('buyList.editAddressModal.customsClearanceCode')}</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="Please enter the customs clearance code"
+                placeholder={t('buyList.enterCustomsCode')}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.customsCode}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, customsCode: v }))}
@@ -3570,7 +3615,7 @@ const BuyListScreen = () => {
                 {isSavingAddress ? (
                   <ActivityIndicator size="small" color={COLORS.white} />
                 ) : (
-                  <Text style={styles.addressModalSaveButtonText}>Save</Text>
+                  <Text style={styles.addressModalSaveButtonText}>{t('buyList.editAddressModal.save')}</Text>
                 )}
               </TouchableOpacity>
             </ScrollView>
@@ -3583,7 +3628,7 @@ const BuyListScreen = () => {
         <View style={styles.kakaoModalOverlay}>
           <View style={styles.kakaoModalContent}>
             <View style={styles.kakaoModalHeader}>
-              <Text style={styles.kakaoModalTitle}>Search Address</Text>
+              <Text style={styles.kakaoModalTitle}>{t('buyList.editAddressModal.kakaoSearchTitle')}</Text>
               <TouchableOpacity onPress={() => setShowKakaoAddress(false)}>
                 <Icon name="close" size={22} color={COLORS.text.primary} />
               </TouchableOpacity>

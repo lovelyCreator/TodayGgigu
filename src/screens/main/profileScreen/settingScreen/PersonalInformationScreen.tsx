@@ -5,10 +5,19 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   Animated,
   Alert,
+  Image,
+  Modal,
 } from 'react-native';
+import {
+  launchCamera,
+  launchImageLibrary,
+  MediaType,
+  ImagePickerResponse,
+  CameraOptions,
+  ImageLibraryOptions,
+} from 'react-native-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -18,6 +27,10 @@ import { COLORS, FONTS, SPACING } from '../../../../constants';
 import { RootStackParamList } from '../../../../types';
 import { useTranslation } from '../../../../hooks/useTranslation';
 import { useAuth } from '../../../../context/AuthContext';
+import {
+  requestCameraPermission,
+  requestPhotoLibraryPermission,
+} from '../../../../utils/permissions';
 
 type Nav = StackNavigationProp<RootStackParamList, 'PersonalInformation'>;
 
@@ -62,7 +75,15 @@ const Toggle: React.FC<{ value: boolean; onChange: (v: boolean) => void }> = ({
 const PersonalInformationScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { t } = useTranslation();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
+  // 아바타 업로드 상태. user.avatar 가 이미 있으면 그것을 초기값으로,
+  // 사용자가 새로 선택하면 그 즉시 갱신해 화면에 미리보기로 반영한다.
+  // 백엔드 업로드 endpoint 가 도입되면 setAvatarLocalUri 호출 직후
+  // 그쪽으로 파일을 POST 하는 한 줄을 추가하면 된다.
+  const [avatarLocalUri, setAvatarLocalUri] = useState<string | null>(
+    typeof user?.avatar === 'string' && user.avatar.trim() !== '' ? user.avatar : null,
+  );
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'account' | 'company'>('account');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -117,10 +138,107 @@ const PersonalInformationScreen: React.FC = () => {
     }
   };
 
-  const avatarSource =
-    user?.avatar && typeof user.avatar === 'string' && user.avatar.trim() !== ''
-      ? { uri: user.avatar }
-      : require('../../../../assets/images/avatar.png');
+  // 아바타는 사용자 이름의 첫 글자를 붉은색 원형 배경 위에 흰색으로 표시.
+  // 이름이 비어 있으면 이메일의 첫 글자, 그것도 없으면 '?' 로 fallback.
+  // avatarLocalUri 가 채워지면(이미지 선택 직후 또는 user.avatar 가 이미 존재)
+  // 첫 글자 대신 그 이미지를 보여준다.
+  const avatarInitial = ((): string => {
+    const raw = (user?.name || user?.email || '').trim();
+    if (!raw) return '?';
+    return raw.charAt(0).toUpperCase();
+  })();
+
+  // ─── 아바타 업로드 핸들러 ────────────────────────────────────────
+  // EditProfileScreen 과 동일한 패턴 — 카메라 / 갤러리 두 옵션을 모달로
+  // 보여주고 사용자가 선택하면 URI 를 state 에 반영. updateUser 로
+  // AuthContext 의 user.avatar 도 즉시 갱신해 다른 화면도 새 이미지를 본다.
+  const applyAvatar = async (uri: string) => {
+    setAvatarLocalUri(uri);
+    setAvatarPickerOpen(false);
+    try {
+      await updateUser({ avatar: uri } as any);
+    } catch {
+      // updateUser 가 실패해도 로컬 미리보기는 유지 — 백엔드 upload endpoint
+      // 도입 전엔 어차피 서버 동기화가 의미 없음. 추후 endpoint 가 생기면
+      // 여기 catch 에 toast 한 줄만 추가.
+    }
+  };
+
+  // 아바타 삭제 — picker 모달의 [삭제] 단추에서 호출. 로컬 미리보기를
+  // null 로 비우고 AuthContext 의 user.avatar 도 빈 문자열로 동기화한다.
+  // 사용자 실수 방지를 위해 Alert 확인 한 단계를 거친다.
+  const handleRemoveAvatar = () => {
+    setAvatarPickerOpen(false);
+    Alert.alert(
+      t('profile.personalInfoScreen.removeAvatarConfirm') || '아바타를 삭제하시겠습니까?',
+      undefined,
+      [
+        { text: t('profile.personalInfoScreen.cancel') || '취소', style: 'cancel' },
+        {
+          text: t('profile.personalInfoScreen.removeAvatar') || '삭제',
+          style: 'destructive',
+          onPress: async () => {
+            setAvatarLocalUri(null);
+            try {
+              await updateUser({ avatar: '' } as any);
+            } catch {
+              // 백엔드 동기화 실패해도 로컬 상태는 이미 비워졌으므로 무시.
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleTakePhoto = async () => {
+    const granted = await requestCameraPermission();
+    if (!granted) {
+      setAvatarPickerOpen(false);
+      Alert.alert(t('common.error'), t('profile.cameraPermissionRequired'));
+      return;
+    }
+    const options: CameraOptions = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.5,
+      saveToPhotos: false,
+    };
+    launchCamera(options, async (response: ImagePickerResponse) => {
+      if (response.didCancel) return setAvatarPickerOpen(false);
+      if (response.errorCode) {
+        setAvatarPickerOpen(false);
+        Alert.alert(t('common.error'), response.errorMessage || t('profile.failedToTakePhoto'));
+        return;
+      }
+      const uri = response.assets?.[0]?.uri;
+      if (uri) await applyAvatar(uri);
+      else setAvatarPickerOpen(false);
+    });
+  };
+
+  const handleChooseFromGallery = async () => {
+    const granted = await requestPhotoLibraryPermission();
+    if (!granted) {
+      setAvatarPickerOpen(false);
+      Alert.alert(t('common.error'), t('profile.photoLibraryPermissionRequired'));
+      return;
+    }
+    const options: ImageLibraryOptions = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.5,
+      selectionLimit: 1,
+    };
+    launchImageLibrary(options, async (response: ImagePickerResponse) => {
+      if (response.didCancel) return setAvatarPickerOpen(false);
+      if (response.errorCode) {
+        setAvatarPickerOpen(false);
+        Alert.alert(t('common.error'), response.errorMessage || t('profile.failedToPickImage'));
+        return;
+      }
+      const uri = response.assets?.[0]?.uri;
+      if (uri) await applyAvatar(uri);
+      else setAvatarPickerOpen(false);
+    });
+  };
 
   const basicRows: { label: string; value: string; strong?: boolean }[] = [
     { label: t('profile.personalInfoScreen.nickname'), value: dash(user?.name) },
@@ -220,11 +338,26 @@ const PersonalInformationScreen: React.FC = () => {
           t('profile.personalInfoScreen.basicInfoDesc'),
         )}
 
-        {/* Avatar */}
+        {/* Avatar — 탭하면 카메라/갤러리 모달이 열려 이미지 업로드 가능.
+            avatarLocalUri 가 있으면 그 이미지를, 없으면 이름 첫 글자(붉은 바탕 + 흰 글씨)를 표시. */}
         <View style={styles.avatarBox}>
-          <View style={styles.avatarRing}>
-            <Image source={avatarSource} style={styles.avatar} />
-          </View>
+          <TouchableOpacity
+            style={styles.avatarRing}
+            activeOpacity={0.85}
+            onPress={() => setAvatarPickerOpen(true)}
+          >
+            {avatarLocalUri ? (
+              <Image source={{ uri: avatarLocalUri }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, styles.avatarInitialBg]}>
+                <Text style={styles.avatarInitialText}>{avatarInitial}</Text>
+              </View>
+            )}
+            {/* 작은 카메라 배지 — 탭 가능함을 시각 단서로 */}
+            <View style={styles.avatarCameraBadge}>
+              <Icon name="camera-outline" size={14} color={COLORS.white} />
+            </View>
+          </TouchableOpacity>
           <View style={styles.verifiedPill}>
             <Icon name="checkmark" size={12} color={COLORS.white} />
             <Text style={styles.verifiedPillText}>
@@ -576,7 +709,11 @@ const PersonalInformationScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    // 헤더 웃부분(=상단 status-bar 인셋) 색을 흰색으로 통일.
+    // SafeAreaView 자체에 흰색 배경을 주면 인셋 영역까지 흰색으로 칠해진다.
+    // body 의 회색 배경은 그 안쪽 View(styles.bodyArea) 에서 별도로 처리.
+    <SafeAreaView style={styles.safeTop} edges={['top']}>
+      <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -628,11 +765,93 @@ const PersonalInformationScreen: React.FC = () => {
         onClose={() => setShowDeleteModal(false)}
         onConfirm={handleDeleteAccount}
       />
+
+      {/* 아바타 업로드 선택 모달 — 카메라 / 갤러리 / 삭제 / 취소 4개 옵션.
+          삭제 단추는 사용자가 이미 아바타를 설정한 경우에만 노출된다. */}
+      <Modal
+        visible={avatarPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAvatarPickerOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.avatarPickerOverlay}
+          activeOpacity={1}
+          onPress={() => setAvatarPickerOpen(false)}
+        >
+          <View
+            style={styles.avatarPickerSheet}
+            onStartShouldSetResponder={() => true}
+          >
+            <TouchableOpacity
+              style={styles.avatarPickerItem}
+              activeOpacity={0.7}
+              onPress={handleTakePhoto}
+            >
+              <Icon name="camera-outline" size={18} color={COLORS.text.primary} />
+              <Text style={styles.avatarPickerItemText}>
+                {t('profile.personalInfoScreen.takePhoto')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.avatarPickerItem, styles.avatarPickerItemBorder]}
+              activeOpacity={0.7}
+              onPress={handleChooseFromGallery}
+            >
+              <Icon name="image-outline" size={18} color={COLORS.text.primary} />
+              <Text style={styles.avatarPickerItemText}>
+                {t('profile.personalInfoScreen.chooseFromGallery')}
+              </Text>
+            </TouchableOpacity>
+            {/* 취소 + 삭제 — 한 행에 나란히 배치. 삭제 단추는 아바타가
+                실제로 설정돼 있을 때만 노출. */}
+            <View
+              style={[
+                styles.avatarPickerFooterRow,
+                styles.avatarPickerItemBorder,
+              ]}
+            >
+              <TouchableOpacity
+                style={[styles.avatarPickerFooterBtn, styles.avatarPickerCancel]}
+                activeOpacity={0.7}
+                onPress={() => setAvatarPickerOpen(false)}
+              >
+                <Text style={[styles.avatarPickerItemText, styles.avatarPickerCancelText]}>
+                  {t('profile.personalInfoScreen.cancel')}
+                </Text>
+              </TouchableOpacity>
+              {!!avatarLocalUri && (
+                <TouchableOpacity
+                  style={[
+                    styles.avatarPickerFooterBtn,
+                    styles.avatarPickerCancel,
+                    styles.avatarPickerFooterDivider,
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={handleRemoveAvatar}
+                >
+                  <Text style={[styles.avatarPickerItemText, styles.avatarPickerRemoveText]}>
+                    {t('profile.personalInfoScreen.removeAvatar')}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+      </View>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  // SafeAreaView 외곽 — 상단 인셋(status-bar 위 영역)을 흰색으로 칠한다.
+  // 헤더와 같은 색이라 헤더 위쪽이 깔끔하게 이어진다.
+  safeTop: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  // 본문 컨테이너 — 인셋 아래 부분은 기존처럼 회색 배경 유지.
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -743,6 +962,90 @@ const styles = StyleSheet.create({
     width: 92,
     height: 92,
     borderRadius: 46,
+  },
+  // 아바타 자리에 이름의 첫 글자를 표시할 때 — 붉은색 원형 바탕.
+  avatarInitialBg: {
+    backgroundColor: COLORS.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // 흰색 굵은 첫 글자. 원 크기(92) 대비 약 40% 정도의 큰 글자.
+  avatarInitialText: {
+    color: COLORS.white,
+    fontSize: 44,
+    fontWeight: '700',
+    lineHeight: 50,
+  },
+  // 아바타 우하단에 떠 있는 카메라 배지 — 탭 가능한 단서.
+  avatarCameraBadge: {
+    position: 'absolute',
+    right: 2,
+    bottom: 2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: COLORS.red,
+    borderWidth: 2,
+    borderColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // 아바타 업로드 picker — 화면 하단에 떠오르는 시트.
+  avatarPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  avatarPickerSheet: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingBottom: SPACING.md,
+  },
+  avatarPickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+  },
+  avatarPickerItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
+  },
+  avatarPickerItemText: {
+    fontSize: FONTS.sizes.md,
+    color: COLORS.text.primary,
+  },
+  avatarPickerCancel: {
+    justifyContent: 'center',
+    marginTop: SPACING.xs,
+  },
+  avatarPickerCancelText: {
+    color: COLORS.red,
+    fontWeight: '600',
+  },
+  // 푸터 행 — 취소 / 삭제 단추 두 개를 가로로 나란히 배치.
+  avatarPickerFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  avatarPickerFooterBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+  },
+  // 취소·삭제 사이 vertical hairline 구분선.
+  avatarPickerFooterDivider: {
+    borderLeftWidth: 1,
+    borderLeftColor: COLORS.gray[100],
+  },
+  // 삭제 단추 텍스트 — 같은 붉은 톤이지만 의미 분리를 위해 별도 키 사용.
+  avatarPickerRemoveText: {
+    color: COLORS.red,
+    fontWeight: '700',
   },
   verifiedPill: {
     flexDirection: 'row',

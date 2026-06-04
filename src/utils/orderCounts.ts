@@ -208,8 +208,12 @@ export const computeProfileOrderCountsByDomain = (
   for (const order of orders) {
     buckets[classifyOrderDomain(order)].push(order);
   }
+  // 구매대행 탭은 사용자가 인지하는 "발주관리 전체" 의미라 모든 주문을 합쳐서
+  // 카운트한다. 즉 로켓·VVIC·배송대행 도메인의 주문도 그쪽 진행상태에 따라
+  // 구매대행 셀(견적대기/고객결제/구매중/...)에 함께 누적된다.
+  // 다른 3개 도메인(로켓/VVIC/배송대행)은 자기 도메인 주문만으로 한정.
   return {
-    purchase_agency: computeProfileOrderCounts(buckets.purchase_agency),
+    purchase_agency: computeProfileOrderCounts(orders),
     rocket_3pl: computeProfileOrderCounts(buckets.rocket_3pl),
     vvic_hipass: computeProfileOrderCounts(buckets.vvic_hipass),
     shipping_agency: computeProfileOrderCounts(buckets.shipping_agency),

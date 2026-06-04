@@ -520,7 +520,7 @@ const HomeScreen: React.FC = () => {
         <TouchableOpacity
           style={styles.guestInsightCard}
           activeOpacity={0.88}
-          onPress={() => navigation.navigate('Search' as never)}
+          onPress={() => (navigation as any).navigate('BestProducts')}
         >
           <Text style={styles.guestInsightTitle}>{t('home.guestInsightBestProductsTitle')}</Text>
           <Text style={styles.guestInsightMeta}>{t('home.guestInsightBestProductsMeta')}</Text>
@@ -692,9 +692,16 @@ const HomeScreen: React.FC = () => {
       </Svg>
     );
 
-    const items = [
-      { title: 'home.logisticsCard1Title', d1: 'home.logisticsCard1D1', icon: SurveyIcon },
-      { title: 'home.logisticsCard2Title', d1: 'home.logisticsCard2D1', icon: FactoryIcon },
+    // 카드별 내비게이션 대상 — 시장조사(UnitSurvey)는 설정 → 시장조사 →
+    // 단가조사 항목과 같은 페지로 진입한다. OEM공장조사는 그 옆 메뉴 페지.
+    const items: {
+      title: string;
+      d1: string;
+      icon: React.ReactNode;
+      route: 'UnitSurvey' | 'OEMSurvey';
+    }[] = [
+      { title: 'home.logisticsCard1Title', d1: 'home.logisticsCard1D1', icon: SurveyIcon, route: 'UnitSurvey' },
+      { title: 'home.logisticsCard2Title', d1: 'home.logisticsCard2D1', icon: FactoryIcon, route: 'OEMSurvey' },
     ];
     return (
       <View style={[styles.guestWelcomeServiceCardsRow, { gap: cardGap }]}>
@@ -703,7 +710,7 @@ const HomeScreen: React.FC = () => {
             key={it.title}
             style={[styles.logisticsServiceCard, { width: cardWidth }]}
             activeOpacity={0.88}
-            onPress={() => navigation.navigate('CustomerService' as never)}
+            onPress={() => (navigation as any).navigate(it.route)}
           >
             {it.icon}
             <View style={styles.logisticsServiceTextCol}>

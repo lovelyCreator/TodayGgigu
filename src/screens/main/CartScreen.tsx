@@ -926,6 +926,59 @@ const CartScreen: React.FC = () => {
           </View>
         </View>
 
+        {/* 더보기/접기 토글 — 카드 우하단. card.expanded 를 그대로 공유하므로
+            장바구니 본문에서 펼친 카드는 이 모달에서도 펼친 상태로 시작한다. */}
+        <View style={styles.orderModalCardExpandRow}>
+          <TouchableOpacity
+            style={styles.orderModalCardExpandBtn}
+            onPress={() => toggleExpand(card.id)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.orderModalCardExpandText}>
+              {card.expanded ? t('cartOrder.card.collapse') : t('cartOrder.card.viewMore')}
+            </Text>
+            <Icon
+              name={card.expanded ? 'chevron-up' : 'chevron-down'}
+              size={10}
+              color={COLORS.primary}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* 펼쳐졌을 때만 — 비고 / 라벨 / 삭제. 카트 본문 카드의 BOTTOM 과 동일한 구성. */}
+        {card.expanded && (
+          <View style={styles.orderModalCardExpanded}>
+            <Text style={styles.remarksLabel}>{t('cartOrder.card.remarks')}</Text>
+            <TextInput
+              style={styles.remarksInput}
+              multiline
+              maxLength={200}
+              placeholder={t('cartOrder.card.remarksPlaceholder')}
+              placeholderTextColor={COLORS.gray[400]}
+              value={card.remarks}
+              onChangeText={(txt) => updateRemarks(card.id, txt)}
+            />
+            <Text style={styles.remarksCounter}>{card.remarks.length}/200</Text>
+            <View style={styles.bottomActions}>
+              <TouchableOpacity
+                style={styles.labelRowBtn}
+                onPress={() => openLabelModal(card.id)}
+              >
+                {/* pricetag-outline 아이콘은 프로젝트 Icon 레지스트리에 없어
+                    물음표(?)로 렌더되던 문제 — 아이콘 제거하고 텍스트만 표시. */}
+                <Text style={styles.labelRowText}>{t('cartOrder.card.label')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteRowBtn}
+                onPress={() => handleDeleteOne(card.id)}
+              >
+                <Icon name="trash-outline" size={12} color={COLORS.primary} />
+                <Text style={styles.deleteRowText}>{t('cartOrder.card.delete')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Center: extra-service selector. Label hidden once chips exist. */}
         <View style={styles.orderModalCardServiceBar}>
           {hasSvc ? (
@@ -1992,7 +2045,8 @@ const CartScreen: React.FC = () => {
                 style={styles.labelRowBtn}
                 onPress={() => openLabelModal(card.id)}
               >
-                <Icon name="pricetag-outline" size={12} color={COLORS.white} />
+                {/* pricetag-outline 은 Icon 레지스트리에 없어 물음표(?)로
+                    렌더되던 문제 — 아이콘 제거하고 텍스트만 표시. */}
                 <Text style={styles.labelRowText}>{t('cartOrder.card.label')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -2720,8 +2774,9 @@ const CartScreen: React.FC = () => {
                 style={[styles.modalFooterBtn, styles.modalCancelBtn]}
                 onPress={pickLabelFile}
               >
-                <Icon name="cloud-upload-outline" size={14} color={COLORS.text.primary} />
-                <Text style={[styles.modalCancelText, { marginLeft: 4 }]}>{t('cartOrder.labelModal.fileUpload')}</Text>
+                {/* cloud-upload-outline 은 Icon 레지스트리에 없어 물음표(?)로
+                    렌더되던 문제 — 아이콘 제거하고 텍스트만 표시. */}
+                <Text style={styles.modalCancelText}>{t('cartOrder.labelModal.fileUpload')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalFooterBtn, styles.modalConfirmBtn]}
@@ -4313,6 +4368,34 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     fontWeight: '700',
     color: PRIMARY,
+  },
+  // 더보기/접기 토글 — 카드 우하단. 우측 정렬 + 살구색 톤.
+  orderModalCardExpandRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+  },
+  orderModalCardExpandBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: PRIMARY_SOFT,
+    borderRadius: 8,
+  },
+  orderModalCardExpandText: {
+    fontSize: 10,
+    color: PRIMARY,
+    fontWeight: '600',
+  },
+  // 펼친 상태의 비고 + 라벨 + 삭제 영역. 카트 본문 카드의 cardBottom 과
+  // 시각이 동일하도록 같은 자식 스타일(remarksLabel/Input/Counter/bottomActions/labelRowBtn/deleteRowBtn) 재사용.
+  orderModalCardExpanded: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
   },
   orderModalCardNegImagesRow: {
     flexDirection: 'row',

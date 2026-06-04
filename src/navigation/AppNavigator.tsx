@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, TouchableOpacity, StyleSheet } from 'react-native';
+import { Text, View, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // import Svg, { Defs, RadialGradient as SvgRadialGradient, Stop, Rect } from 'react-native-svg';
 import { useAuth } from '../context/AuthContext';
@@ -88,6 +88,7 @@ import RefundRequestScreen from '../screens/main/profileScreen/settingScreen/Ref
 import ProblemProductScreen from '../screens/main/profileScreen/settingScreen/ProblemProductScreen';
 import ProductManagementScreen from '../screens/main/profileScreen/settingScreen/productManagementScreen/ProductManagementScreen';
 import OnlineProductEditScreen from '../screens/main/profileScreen/settingScreen/productManagementScreen/OnlineProductEditScreen';
+import BestProductsScreen from '../screens/main/bestProductsScreen/BestProductsScreen';
 import UnitSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/UnitSurveyScreen';
 import OEMSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/OEMSurveyScreen';
 import MyDeliveriesScreen from '../screens/main/profileScreen/settingScreen/MyDeliveriesScreen';
@@ -258,11 +259,19 @@ const MainTabNavigator = () => {
 
           if (route.name === 'Home') {
             return <HomeIcon width={iconSize} height={iconSize} color={iconColor} />;
-          } else if (route.name === 'Category') {
-            return focused ? (
-              <SelectedCategoryIcon width={iconSize} height={iconSize} color={iconColor} />
-            ) : (
-              <CategoryIcon width={iconSize} height={iconSize} color={iconColor} />
+          } else if (route.name === 'ProductList') {
+            // 사용자 제공 마스코트 아이콘. PNG 라 색 변경이 불가하므로 focused
+            // 상태에서는 살짝 확대해 강조 (다른 탭의 색 변화 대신).
+            return (
+              <Image
+                source={require('../assets/icons/mascot.png')}
+                style={{
+                  width: iconSize,
+                  height: iconSize,
+                  resizeMode: 'contain',
+                  transform: [{ scale: focused ? 1.1 : 1 }],
+                }}
+              />
             );
           } else if (route.name === 'Message') {
             return (
@@ -308,7 +317,7 @@ const MainTabNavigator = () => {
         tabBarLabel: ({ focused }) => {
           let label = '';
           if (route.name === 'Home') label = t('navigation.home');
-          else if (route.name === 'Category') label = t('navigation.category');
+          else if (route.name === 'ProductList') label = t('navigation.productList');
           else if (route.name === 'Message') label = t('navigation.message');
           // else if (route.name === 'Live') label = t('navigation.live');
           else if (route.name === 'Cart') label = t('navigation.cart');
@@ -403,7 +412,10 @@ const MainTabNavigator = () => {
       })}
     >
       <MainTab.Screen name="Home" component={HomeScreen} />
-      <MainTab.Screen name="Category" component={CategoryTabScreen} />
+      {/* Category 탭은 보텀바에서 제거되고 상품관리(ProductList) 화면이
+          그 자리를 차지한다. Category 라우트는 RootStack 에 여전히 등록돼 있어
+          다른 화면에서 navigation.navigate('Category') 호출은 계속 동작한다. */}
+      <MainTab.Screen name="ProductList" component={ProductManagementScreen} />
       <MainTab.Screen name="Message" component={MessageScreen} />
       {/* <MainTab.Screen name="Live" component={LiveScreen} /> */}
       <MainTab.Screen name="Cart" component={DEMO_MODE ? CartScreenDemo : CartScreen} />
@@ -914,6 +926,11 @@ const RootNavigator = () => {
           <RootStack.Screen
             name="OnlineProductEdit"
             component={OnlineProductEditScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="BestProducts"
+            component={BestProductsScreen}
             options={{ headerShown: false }}
           />
           <RootStack.Screen
