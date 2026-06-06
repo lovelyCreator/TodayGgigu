@@ -8,7 +8,7 @@
  * params 의 productId 로 productListApi.getProducts 응답에서 찾아온다.
  */
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,20 +19,53 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import {
+  launchCamera,
+  launchImageLibrary,
+  MediaType,
+  ImagePickerResponse,
+  CameraOptions,
+  ImageLibraryOptions,
+} from 'react-native-image-picker';
 import Icon from '../../../../../components/Icon';
+import { SkeletonBlock } from '../../../../../components/Skeleton';
 import { COLORS, FONTS, SPACING } from '../../../../../constants';
 import { RootStackParamList } from '../../../../../types';
 import { useTranslation } from '../../../../../hooks/useTranslation';
 import { productsApi } from '../../../../../services/productsApi';
+import {
+  requestCameraPermission,
+  requestPhotoLibraryPermission,
+} from '../../../../../utils/permissions';
 
 type Nav = StackNavigationProp<RootStackParamList, 'OnlineProductEdit'>;
 type RouteParams = RouteProp<RootStackParamList, 'OnlineProductEdit'>;
 
 const BACK_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
+
+// 카테고리 드롭다운에서 사용 가능한 옵션들.
+// 'uncategorized' 만 별도 처리(저장 시 빈 문자열) 하고 나머지는 라벨을
+// 그대로 categoryName 으로 저장한다. labelKey 는 i18n 키, fallback 은
+// 키 미존재 시 보여줄 한국어 라벨.
+const CATEGORY_OPTIONS: {
+  key: string;
+  labelKey: string;
+  fallback: string;
+}[] = [
+  { key: 'uncategorized', labelKey: 'profile.productMgmt.onlineEdit.uncategorized', fallback: '미분류' },
+  { key: 'apparel', labelKey: 'profile.productMgmt.onlineEdit.catApparel', fallback: '의류' },
+  { key: 'accessory', labelKey: 'profile.productMgmt.onlineEdit.catAccessory', fallback: '잡화/액세서리' },
+  { key: 'home', labelKey: 'profile.productMgmt.onlineEdit.catHome', fallback: '생활/주방' },
+  { key: 'beauty', labelKey: 'profile.productMgmt.onlineEdit.catBeauty', fallback: '뷰티/화장품' },
+  { key: 'toy', labelKey: 'profile.productMgmt.onlineEdit.catToy', fallback: '완구/취미' },
+  { key: 'digital', labelKey: 'profile.productMgmt.onlineEdit.catDigital', fallback: '디지털/가전' },
+  { key: 'other', labelKey: 'profile.productMgmt.onlineEdit.catOther', fallback: '기타' },
+];
 
 const OnlineProductEditScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
@@ -53,7 +86,43 @@ const OnlineProductEditScreen: React.FC = () => {
   );
   const [optionLabel, setOptionLabel] = useState(initial.option1 ?? '');
   const [remark, setRemark] = useState('');
+  // 옵션1·2 의 각 그룹에서 선택된 값. 그룹별 '값' 문자열을 저장한다.
+  // 옵션 그리드(색상/사이즈 카드)에서 카드 탭 시 갱신됨.
+  const [selectedOptionValues, setSelectedOptionValues] = useState<Record<string, string>>({});
+  // SKU 행별 단가 / 비고 / 라벨 — skuId 키로 보관. API 의 SKU 가격을 초기값으로
+  // 채우고, 사용자가 행 안의 TextInput 으로 덮어쓸 수 있다.
+  const [skuPriceMap, setSkuPriceMap] = useState<Record<string, string>>({});
+  const [skuRemarkMap, setSkuRemarkMap] = useState<Record<string, string>>({});
+  // 라벨설정 모달 — SKU 행의 라벨 컬럼에서 ✏️ 아이콘 누르면 진입.
+  // 현재 편집 중인 행의 id 가 null 이 아닌 동안 모달이 떠 있음.
+  const [labelModalRowId, setLabelModalRowId] = useState<string | null>(null);
+  const [labelType, setLabelType] = useState<'product' | 'foodInspect'>('product');
+  const [labelFormat, setLabelFormat] = useState<'50x80' | '40x60'>('50x80');
+  const [labelProductName, setLabelProductName] = useState<string>('');
+  const [labelContent, setLabelContent] = useState<string>('');
+  const [labelBarcode, setLabelBarcode] = useState<string>('(01)01234567890128TEC-IT');
+  const [labelFileUri, setLabelFileUri] = useState<string | null>(null);
+  // 바코드 이미지 확인 모달 — 라벨 컬럼의 👁 아이콘에서 진입.
+  // 라벨 미리보기 카드만 단독으로 보여 주는 read-only 뷰어.
+  const [barcodeViewerOpen, setBarcodeViewerOpen] = useState<boolean>(false);
   const [thumbUrl, setThumbUrl] = useState<string>(initial.thumbnailUrl ?? '');
+  // 썸네일 추가 단추 → 카메라 / 갤러리 선택 모달 노출.
+  const [thumbPickerOpen, setThumbPickerOpen] = useState(false);
+  // 카테고리 드롭다운 — 카테고리 행 바로 아래 anchored 팝오버.
+  // categoryName 은 현재 선택된 항목 (초기엔 initial.categoryName 또는 '미분류').
+  // categoryRowRef.measureInWindow 로 행의 화면 좌표를 잡아 그 바로 아래에
+  // 드롭다운을 표시한다 (BuyListScreen 의 발주관리 칩 패턴과 동일).
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
+  const [categoryName, setCategoryName] = useState<string>(
+    initial.categoryName || '',
+  );
+  const [categoryRowLayout, setCategoryRowLayout] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const categoryRowRef = useRef<View>(null);
   // GET /products/detail 응답 전체 — 추후 UI 확장을 위해 보관.
   // detailLoading 은 본문 위쪽에 작은 인디케이터로 표시된다.
   const [detail, setDetail] = useState<any>(null);
@@ -100,6 +169,25 @@ const OnlineProductEditScreen: React.FC = () => {
           const firstImg =
             p.productImage?.images?.[0] || p.productImageTrans?.images?.[0];
           if (firstImg) setThumbUrl(String(firstImg));
+          // SKU 가격 / 라벨 / 비고 맵 시드 — 처음엔 단가만 채우고 비고는 빈칸.
+          const seededPrices: Record<string, string> = {};
+          (p.productSkuInfos || []).forEach((sku: any) => {
+            const id = String(sku.skuId || sku.specId || '');
+            if (!id) return;
+            const price =
+              sku?.fenxiaoPriceInfo?.offerPrice ?? sku?.consignPrice ?? sku?.price ?? '';
+            seededPrices[id] = String(price);
+          });
+          setSkuPriceMap(seededPrices);
+          // 첫 SKU 의 옵션값들을 selectedOptionValues 초기값으로 사용 →
+          // 그리드에서 첫 카드가 자동으로 강조된 상태로 보임.
+          const seededSelected: Record<string, string> = {};
+          (firstSku?.skuAttributes || []).forEach((attr: any) => {
+            const name = String(attr.attributeNameTrans || attr.attributeName || '');
+            const val = String(attr.valueTrans || attr.value || '');
+            if (name && val) seededSelected[name] = val;
+          });
+          setSelectedOptionValues(seededSelected);
         } else {
           setDetailError(res.message || 'Failed to load product detail');
         }
@@ -117,6 +205,156 @@ const OnlineProductEditScreen: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.offerId, initial.productId, initial.source, locale]);
 
+  // ─── 상품스펙: 옵션 그룹 & SKU 행 가공 ─────────────────────────────
+  // detail.productSkuInfos 의 skuAttributes 를 그룹별로 모아 (옵션1, 옵션2 …)
+  // {name, values:[{value, image}]} 로 변환. 그리드 카드 렌더링에 사용.
+  // SKU 그 자체는 표 행으로 그대로 펼친다.
+  const optionGroups = useMemo(() => {
+    const skus: any[] = detail?.productSkuInfos || [];
+    if (!skus.length) return [] as { name: string; values: { value: string; image?: string }[] }[];
+    // 그룹 이름(예: '색상', 'Size') 별로 값들을 dedup. 값마다 첫 이미지를 보관.
+    const groups: Map<string, Map<string, string | undefined>> = new Map();
+    skus.forEach((sku: any) => {
+      const attrs: any[] = sku.skuAttributes || [];
+      attrs.forEach((attr: any) => {
+        const name = String(attr.attributeNameTrans || attr.attributeName || '').trim();
+        const value = String(attr.valueTrans || attr.value || '').trim();
+        if (!name || !value) return;
+        if (!groups.has(name)) groups.set(name, new Map());
+        const m = groups.get(name)!;
+        if (!m.has(value)) m.set(value, attr.skuImageUrl);
+      });
+    });
+    return Array.from(groups.entries()).map(([name, valMap]) => ({
+      name,
+      values: Array.from(valMap.entries()).map(([value, image]) => ({ value, image })),
+    }));
+  }, [detail]);
+
+  const skuRows = useMemo(() => {
+    const skus: any[] = detail?.productSkuInfos || [];
+    // 옵션 표에는 '크기(사이즈)' 만 노출하도록 사용자 요청.
+    // 색상은 위쪽 옵션1 그리드에서 이미 골랐으므로 표에선 마지막 attribute
+    // (대부분 사이즈 — S/M/L/XL/…) 만 보여준다.
+    // 같은 사이즈가 색상 수만큼 반복되는 문제를 막기 위해 name 으로 dedup.
+    const seen = new Set<string>();
+    const rows: { id: string; name: string }[] = [];
+    for (const sku of skus) {
+      const attrs: any[] = sku.skuAttributes || [];
+      const lastAttr = attrs[attrs.length - 1];
+      const name = lastAttr
+        ? String(lastAttr.valueTrans || lastAttr.value || '')
+        : '';
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      rows.push({
+        id: String(sku.skuId || sku.specId || name),
+        name,
+      });
+    }
+    return rows;
+  }, [detail]);
+
+  // ─── 썸네일 추가 단추 → 카메라 / 갤러리 선택 ────────────────────────
+  // PersonalInformationScreen 의 아바타 픽커와 동일한 패턴.
+  // 권한 거절 / 사용자 취소 / 응답 오류는 모두 picker 닫기로 일관 처리.
+  const handleTakeThumbPhoto = async () => {
+    const granted = await requestCameraPermission();
+    if (!granted) {
+      setThumbPickerOpen(false);
+      Alert.alert(t('common.error'), t('profile.cameraPermissionRequired'));
+      return;
+    }
+    const options: CameraOptions = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.7,
+      saveToPhotos: false,
+    };
+    launchCamera(options, (response: ImagePickerResponse) => {
+      setThumbPickerOpen(false);
+      if (response.didCancel) return;
+      if (response.errorCode) {
+        Alert.alert(
+          t('common.error'),
+          response.errorMessage || t('profile.failedToTakePhoto'),
+        );
+        return;
+      }
+      const uri = response.assets?.[0]?.uri;
+      if (uri) setThumbUrl(uri);
+    });
+  };
+
+  const handleChooseThumbFromGallery = async () => {
+    const granted = await requestPhotoLibraryPermission();
+    if (!granted) {
+      setThumbPickerOpen(false);
+      Alert.alert(t('common.error'), t('profile.photoLibraryPermissionRequired'));
+      return;
+    }
+    const options: ImageLibraryOptions = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.7,
+      selectionLimit: 1,
+    };
+    launchImageLibrary(options, (response: ImagePickerResponse) => {
+      setThumbPickerOpen(false);
+      if (response.didCancel) return;
+      if (response.errorCode) {
+        Alert.alert(
+          t('common.error'),
+          response.errorMessage || t('profile.failedToPickImage'),
+        );
+        return;
+      }
+      const uri = response.assets?.[0]?.uri;
+      if (uri) setThumbUrl(uri);
+    });
+  };
+
+  // ─── 라벨설정 모달 핸들러 ─────────────────────────────────────────
+  // 라벨 컬럼의 ✏️ 아이콘 누르면 그 행 id 를 기록 + 기본 폼 값 시드.
+  // 닫기/저장 시엔 모달만 닫고 입력값은 state 에 그대로 남김 → 다시 열면
+  // 직전 편집 내용 유지.
+  const openLabelModal = (rowId: string) => {
+    setLabelModalRowId(rowId);
+    if (!labelProductName) setLabelProductName(productName);
+  };
+  // 바코드 이미지 확인 모달도 동일하게 열기 전에 상품명을 시드 — 사용자가
+  // ✏️ 를 한 번도 안 누르고 곧바로 👁 만 누른 경우 미리보기에 상품명이
+  // 비어 있던 문제 해결.
+  const openBarcodeViewer = () => {
+    if (!labelProductName) setLabelProductName(productName);
+    setBarcodeViewerOpen(true);
+  };
+  const closeLabelModal = () => setLabelModalRowId(null);
+  const saveLabelModal = () => {
+    // 백엔드 update endpoint 도입 전까지는 단순히 모달만 닫음.
+    setLabelModalRowId(null);
+  };
+  // 라벨 이미지 업로드 — 갤러리에서 1장 선택.
+  const pickLabelFile = async () => {
+    const granted = await requestPhotoLibraryPermission();
+    if (!granted) {
+      Alert.alert(t('common.error'), t('profile.photoLibraryPermissionRequired'));
+      return;
+    }
+    const options: ImageLibraryOptions = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.7,
+      selectionLimit: 1,
+    };
+    launchImageLibrary(options, (response: ImagePickerResponse) => {
+      if (response.didCancel) return;
+      if (response.errorCode) {
+        Alert.alert(t('common.error'), response.errorMessage || t('profile.failedToPickImage'));
+        return;
+      }
+      const uri = response.assets?.[0]?.uri;
+      if (uri) setLabelFileUri(uri);
+    });
+  };
+
   const onConfirm = () => {
     // 백엔드 update endpoint 연결 전까지는 단순히 사용자에게 알림만.
     Alert.alert(
@@ -133,23 +371,33 @@ const OnlineProductEditScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
+    // 헤더 위쪽 상태바 인셋 영역까지 흰색이 되도록 SafeAreaView 를
+    // 흰색 safeTop 으로 두고, 그 아래에 회색 배경 본문 컨테이너를 둔다.
+    // (PaymentHistoryScreen 과 동일한 split 패턴 — container 가 회색이면
+    // 상태바 영역이 회색으로 나와 헤더의 흰색과 분리되어 보이는 문제 해결.)
+    <View style={styles.root}>
+      <SafeAreaView style={styles.safeTop} edges={['top']}>
+        {/* Header */}
+        <View style={styles.header}>
         <TouchableOpacity
           hitSlop={BACK_HIT_SLOP}
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
           <View style={styles.backCircle}>
-            <Icon name="chevron-back" size={18} color={COLORS.white} />
+            <Icon name="chevron-back" size={18} color={COLORS.text.primary} />
           </View>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
           {t('profile.productMgmt.onlineEdit.title') || '온라인상품편집'}
         </Text>
         <View style={styles.backButton} />
-      </View>
+        </View>
+      </SafeAreaView>
+      {/* 본문 컨테이너 — 회색 배경(원래 container 가 갖던 색)을 여기로 옮김.
+          기존 ScrollView 가 styles.body 를 이미 쓰고 있어 충돌을 피하려고
+          여기는 styles.bodyWrap 로 둠. */}
+      <View style={styles.bodyWrap}>
 
       {/* 수기입력 tab */}
       <View style={styles.tabBar}>
@@ -212,12 +460,25 @@ const OnlineProductEditScreen: React.FC = () => {
             <Text style={styles.formLabel}>
               {t('profile.productMgmt.onlineEdit.category') || '카테고리'}
             </Text>
-            <View style={styles.formInputWrap}>
+            {/* 카테고리 선택자 — 탭하면 행 바로 아래에 드롭다운 모달이 떠서
+                카테고리 옵션 중 하나를 고를 수 있다. ref + measureInWindow 로
+                행의 화면 좌표를 잡아 드롭다운 위치를 동기화. */}
+            <TouchableOpacity
+              ref={categoryRowRef as any}
+              style={styles.formInputWrap}
+              activeOpacity={0.7}
+              onPress={() => {
+                categoryRowRef.current?.measureInWindow((x, y, width, height) => {
+                  setCategoryRowLayout({ x, y, width, height });
+                });
+                setCategoryDropdownOpen(true);
+              }}
+            >
               <Text style={styles.formInputText} numberOfLines={1}>
-                {initial.categoryName || t('profile.productMgmt.onlineEdit.uncategorized') || '미분류'}
+                {categoryName || t('profile.productMgmt.onlineEdit.uncategorized') || '미분류'}
               </Text>
               <Icon name="chevron-down" size={14} color={COLORS.gray[500]} />
-            </View>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.formRow}>
@@ -233,9 +494,16 @@ const OnlineProductEditScreen: React.FC = () => {
                   <Icon name="image-outline" size={20} color={COLORS.gray[400]} />
                 </View>
               )}
-              <View style={styles.thumbnailAddBox}>
+              {/* 추가(+) 단추 — 탭하면 카메라/갤러리 선택 모달이 열림.
+                  기존엔 <View> 라 onPress 가 없어 동작하지 않던 문제 해결. */}
+              <TouchableOpacity
+                style={styles.thumbnailAddBox}
+                activeOpacity={0.7}
+                onPress={() => setThumbPickerOpen(true)}
+                hitSlop={BACK_HIT_SLOP}
+              >
                 <Icon name="add" size={18} color={COLORS.red} />
-              </View>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -260,48 +528,204 @@ const OnlineProductEditScreen: React.FC = () => {
             ) : null}
           </View>
 
-          <View style={styles.optionTableHeader}>
-            <Text style={[styles.optionCellHeader, { flex: 2 }]}>
-              {t('profile.productMgmt.onlineEdit.option') || '옵션'}
-            </Text>
-            <Text style={[styles.optionCellHeader, { flex: 1 }]}>
-              {t('profile.productMgmt.onlineEdit.unitPrice') || '단가'}
-            </Text>
-            <Text style={[styles.optionCellHeader, { flex: 1 }]}>
-              {t('profile.productMgmt.onlineEdit.label') || '라벨'}
-            </Text>
-            <Text style={[styles.optionCellHeader, { flex: 1 }]}>
-              {t('profile.productMgmt.onlineEdit.remark') || '비고'}
-            </Text>
-          </View>
+          {/* 로딩 중에는 옵션 그리드 + SKU 표 모양의 skeleton 을 보여줘
+              사용자가 화면이 무엇으로 채워질지 미리 파악할 수 있게 함.
+              SkeletonBlock 은 useNativeDriver pulse 애니메이션 (0.4 ↔ 1 opacity).
+              상품 상세 응답이 도착하면 (detailLoading=false) 실제 카드/표로 교체. */}
+          {detailLoading ? (
+            <View style={styles.specSkeletonWrap}>
+              {/* 옵션 그리드 skeleton — 1행: 라벨 + 카드 6개 (2줄 × 3개) */}
+              <View style={styles.specSkelGroupRow}>
+                <SkeletonBlock width={40} height={14} borderRadius={4} />
+                <View style={styles.specSkelCards}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <View key={i} style={styles.specSkelCard}>
+                      <SkeletonBlock width={28} height={28} borderRadius={4} />
+                      <SkeletonBlock width={'60%' as any} height={10} borderRadius={3} />
+                    </View>
+                  ))}
+                </View>
+              </View>
+              {/* SKU 표 헤더 skeleton */}
+              <View style={styles.specSkelTableHeader}>
+                <SkeletonBlock width={'18%' as any} height={12} borderRadius={3} />
+                <SkeletonBlock width={'15%' as any} height={12} borderRadius={3} />
+                <SkeletonBlock width={'10%' as any} height={12} borderRadius={3} />
+                <SkeletonBlock width={'15%' as any} height={12} borderRadius={3} />
+              </View>
+              {/* SKU 표 행 skeleton — 5줄 */}
+              {Array.from({ length: 5 }).map((_, i) => (
+                <View key={i} style={styles.specSkelTableRow}>
+                  <SkeletonBlock width={'30%' as any} height={28} borderRadius={4} />
+                  <SkeletonBlock width={'18%' as any} height={28} borderRadius={4} />
+                  <SkeletonBlock width={'15%' as any} height={28} borderRadius={4} />
+                  <SkeletonBlock width={'25%' as any} height={28} borderRadius={4} />
+                </View>
+              ))}
+            </View>
+          ) : null}
 
-          <View style={styles.optionTableRow}>
-            <TextInput
-              style={[styles.optionCellInput, { flex: 2 }]}
-              value={optionLabel}
-              onChangeText={setOptionLabel}
-              placeholderTextColor={COLORS.gray[400]}
-            />
-            <View style={[styles.optionPriceWrap, { flex: 1 }]}>
-              <Text style={styles.yenMark}>¥</Text>
+          {/* 옵션 그룹별 그리드 — 1열에 옵션 라벨(옵션1, 옵션2 …) +
+              그 옆에 값들의 카드 그리드 (썸네일 + 이름). 선택된 카드는
+              붉은 테두리 + 옅은 붉은 배경으로 강조. 카드 탭 → 그 그룹의
+              selectedOptionValues[그룹명] 갱신.
+              옵션2(사이즈) 는 사용자 요청으로 노출하지 않음 — slice(0, 1)
+              로 첫 번째 그룹(색상) 만 렌더. */}
+          {!detailLoading && optionGroups.slice(0, 1).map((group, gIdx) => (
+            <View key={group.name + gIdx} style={styles.optionGroupRow}>
+              <Text style={styles.optionGroupLabel}>
+                {`${t('profile.productMgmt.onlineEdit.option') || '옵션'}${gIdx + 1}`}
+              </Text>
+              <View style={styles.optionGroupCards}>
+                {group.values.map((v) => {
+                  const isSelected = selectedOptionValues[group.name] === v.value;
+                  return (
+                    <TouchableOpacity
+                      key={v.value}
+                      style={[
+                        styles.optionGroupCard,
+                        isSelected && styles.optionGroupCardSelected,
+                      ]}
+                      activeOpacity={0.7}
+                      onPress={() =>
+                        setSelectedOptionValues((prev) => ({ ...prev, [group.name]: v.value }))
+                      }
+                    >
+                      {v.image ? (
+                        <Image
+                          source={{ uri: v.image }}
+                          style={styles.optionGroupCardImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.optionGroupCardImage,
+                            styles.optionGroupCardImagePlaceholder,
+                          ]}
+                        />
+                      )}
+                      <Text
+                        style={[
+                          styles.optionGroupCardText,
+                          isSelected && styles.optionGroupCardTextSelected,
+                        ]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {v.value}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          ))}
+
+          {/* SKU 표 — 헤더 + SKU 당 한 행 (옵션 이름 / 단가 / 라벨 / 비고).
+              로딩 중엔 위 skeleton 이 자리잡고 있으므로 이중 노출을 피해 hidden. */}
+          {!detailLoading && (
+            <View style={styles.optionTableHeader}>
+              <Text style={[styles.optionCellHeader, { flex: 2 }]}>
+                {t('profile.productMgmt.onlineEdit.option') || '옵션'}
+              </Text>
+              <Text style={[styles.optionCellHeader, { flex: 1 }]}>
+                {t('profile.productMgmt.onlineEdit.unitPrice') || '단가'}
+              </Text>
+              <Text style={[styles.optionCellHeader, { flex: 1 }]}>
+                {t('profile.productMgmt.onlineEdit.label') || '라벨'}
+              </Text>
+              <Text style={[styles.optionCellHeader, { flex: 1 }]}>
+                {t('profile.productMgmt.onlineEdit.remark') || '비고'}
+              </Text>
+            </View>
+          )}
+
+          {!detailLoading && skuRows.length === 0 && (
+            // SKU 가 아직 안 들어왔으면 (또는 비어 있으면) 기존 단일 행으로 fallback.
+            <View style={styles.optionTableRow}>
               <TextInput
-                style={styles.optionPriceInput}
-                value={unitPrice}
-                onChangeText={setUnitPrice}
-                keyboardType="decimal-pad"
+                style={[styles.optionCellInput, { flex: 2 }]}
+                value={optionLabel}
+                onChangeText={setOptionLabel}
+                placeholderTextColor={COLORS.gray[400]}
+              />
+              <View style={[styles.optionPriceWrap, { flex: 1 }]}>
+                <Text style={styles.yenMark}>¥</Text>
+                <TextInput
+                  style={styles.optionPriceInput}
+                  value={unitPrice}
+                  onChangeText={setUnitPrice}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={[styles.optionLabelCell, { flex: 1 }]}>
+                <TouchableOpacity
+                  onPress={() => openLabelModal('fallback')}
+                  hitSlop={BACK_HIT_SLOP}
+                >
+                  <Icon name="pencil" size={14} color={COLORS.gray[500]} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={openBarcodeViewer}
+                  hitSlop={BACK_HIT_SLOP}
+                >
+                  <Icon name="eye-outline" size={14} color={COLORS.gray[500]} />
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={[styles.optionCellInput, { flex: 1 }]}
+                value={remark}
+                onChangeText={setRemark}
+                placeholderTextColor={COLORS.gray[400]}
               />
             </View>
-            <View style={[styles.optionLabelCell, { flex: 1 }]}>
-              <Icon name="pencil" size={14} color={COLORS.gray[500]} />
-              <Icon name="eye-outline" size={14} color={COLORS.gray[500]} />
+          )}
+          {!detailLoading && skuRows.length > 0 && skuRows.map((row) => (
+            <View key={row.id} style={styles.optionTableRow}>
+              <TextInput
+                style={[styles.optionCellInput, { flex: 2 }]}
+                value={row.name}
+                editable={false}
+                placeholderTextColor={COLORS.gray[400]}
+              />
+              <View style={[styles.optionPriceWrap, { flex: 1 }]}>
+                <Text style={styles.yenMark}>¥</Text>
+                <TextInput
+                  style={styles.optionPriceInput}
+                  value={skuPriceMap[row.id] ?? ''}
+                  onChangeText={(txt) =>
+                    setSkuPriceMap((prev) => ({ ...prev, [row.id]: txt }))
+                  }
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={[styles.optionLabelCell, { flex: 1 }]}>
+                <TouchableOpacity
+                  onPress={() => openLabelModal(row.id)}
+                  hitSlop={BACK_HIT_SLOP}
+                >
+                  <Icon name="pencil" size={14} color={COLORS.gray[500]} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={openBarcodeViewer}
+                  hitSlop={BACK_HIT_SLOP}
+                >
+                  <Icon name="eye-outline" size={14} color={COLORS.gray[500]} />
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={[styles.optionCellInput, { flex: 1 }]}
+                value={skuRemarkMap[row.id] ?? ''}
+                onChangeText={(txt) =>
+                  setSkuRemarkMap((prev) => ({ ...prev, [row.id]: txt }))
+                }
+                placeholder={t('profile.productMgmt.onlineEdit.remark') || '비고'}
+                placeholderTextColor={COLORS.gray[400]}
+              />
             </View>
-            <TextInput
-              style={[styles.optionCellInput, { flex: 1 }]}
-              value={remark}
-              onChangeText={setRemark}
-              placeholderTextColor={COLORS.gray[400]}
-            />
-          </View>
+          ))}
+
         </View>
       </ScrollView>
 
@@ -324,12 +748,513 @@ const OnlineProductEditScreen: React.FC = () => {
           </Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+      </View>
+
+      {/* 썸네일 추가 시 노출되는 카메라/갤러리 선택 모달 —
+          PersonalInformationScreen 의 아바타 픽커 스타일을 따른다. */}
+      <Modal
+        visible={thumbPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setThumbPickerOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.thumbPickerOverlay}
+          activeOpacity={1}
+          onPress={() => setThumbPickerOpen(false)}
+        >
+          <View
+            style={styles.thumbPickerSheet}
+            onStartShouldSetResponder={() => true}
+          >
+            <TouchableOpacity
+              style={styles.thumbPickerItem}
+              activeOpacity={0.7}
+              onPress={handleTakeThumbPhoto}
+            >
+              <Icon name="camera-outline" size={18} color={COLORS.text.primary} />
+              <Text style={styles.thumbPickerItemText}>
+                {t('profile.personalInfoScreen.takePhoto')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.thumbPickerItem, styles.thumbPickerItemBorder]}
+              activeOpacity={0.7}
+              onPress={handleChooseThumbFromGallery}
+            >
+              <Icon name="image-outline" size={18} color={COLORS.text.primary} />
+              <Text style={styles.thumbPickerItemText}>
+                {t('profile.personalInfoScreen.chooseFromGallery')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.thumbPickerItem, styles.thumbPickerItemBorder, styles.thumbPickerCancel]}
+              activeOpacity={0.7}
+              onPress={() => setThumbPickerOpen(false)}
+            >
+              <Text style={styles.thumbPickerCancelText}>
+                {t('profile.personalInfoScreen.cancel') || '취소'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 카테고리 드롭다운 — 카테고리 행 바로 아래 떠 있는 anchored 팝오버.
+          top/left/width 모두 categoryRowLayout (행의 measureInWindow 결과) 로
+          인라인 오버라이드해 드롭다운이 행 너비와 정확히 일치하도록 한다.
+          백드롭 탭으로 닫힘. */}
+      <Modal
+        visible={categoryDropdownOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCategoryDropdownOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.categoryDropdownBackdrop}
+          activeOpacity={1}
+          onPress={() => setCategoryDropdownOpen(false)}
+        >
+          <View
+            style={[
+              styles.categoryDropdownAnchor,
+              categoryRowLayout && {
+                top: categoryRowLayout.y + categoryRowLayout.height + 4,
+                left: categoryRowLayout.x,
+                width: categoryRowLayout.width,
+              },
+            ]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.categoryDropdownCard}>
+              {CATEGORY_OPTIONS.map((opt, idx) => {
+                const label =
+                  opt.key === 'uncategorized'
+                    ? t('profile.productMgmt.onlineEdit.uncategorized') || '미분류'
+                    : t(opt.labelKey) || opt.fallback;
+                const isSelected =
+                  (categoryName || '미분류') === label ||
+                  (!categoryName && opt.key === 'uncategorized');
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[
+                      styles.categoryDropdownItem,
+                      idx > 0 && styles.categoryDropdownItemBorder,
+                      isSelected && styles.categoryDropdownItemSelected,
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      setCategoryName(opt.key === 'uncategorized' ? '' : label);
+                      setCategoryDropdownOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryDropdownItemText,
+                        isSelected && styles.categoryDropdownItemTextSelected,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {label}
+                    </Text>
+                    {isSelected && (
+                      <Icon name="checkmark" size={14} color={COLORS.red} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 라벨설정 모달 — 상품스펙 표의 ✏️ 아이콘에서 진입.
+          CartScreen 의 라벨모달과 동일 패턴 + 좌측 하단에 '라벨 이미지 업로드' 단추 추가.
+          입력값(라벨종류 / 양식 / 상품명 / 라벨 내용 / 바코드 / 이미지) 은
+          state 로 보관되어 다음 열기 때도 유지됨. */}
+      <Modal
+        visible={labelModalRowId !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeLabelModal}
+      >
+        <View style={styles.labelModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={closeLabelModal}
+          />
+          <View style={styles.labelModalCard}>
+            {/* 헤더 — 좌측 타이틀, 우측 닫기 X */}
+            <View style={styles.labelModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.labelModalTitle}>
+                  {t('cartOrder.labelModal.title')}
+                </Text>
+                <Text style={styles.labelModalSubtitle} numberOfLines={1}>
+                  {t('cartOrder.labelModal.titleHint') || '상품/식검 라벨을 설정하고 미리 확인하세요.'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={closeLabelModal} hitSlop={BACK_HIT_SLOP}>
+                <Icon name="close" size={20} color={COLORS.text.secondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.labelModalBody}
+              contentContainerStyle={styles.labelModalBodyContent}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* 라벨종류 — 상품라벨 / 식검라벨 두 칩 */}
+              <Text style={styles.labelSectionLabel}>
+                {t('cartOrder.labelModal.labelType')}
+              </Text>
+              <View style={styles.labelChipsRow}>
+                {(['product', 'foodInspect'] as const).map((k) => (
+                  <TouchableOpacity
+                    key={k}
+                    style={[
+                      styles.labelChip,
+                      labelType === k && styles.labelChipActive,
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => setLabelType(k)}
+                  >
+                    <Text
+                      style={[
+                        styles.labelChipText,
+                        labelType === k && styles.labelChipTextActive,
+                      ]}
+                    >
+                      {k === 'product'
+                        ? t('cartOrder.labelModal.productLabel')
+                        : t('cartOrder.labelModal.foodLabel')}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* 라벨양식 — 50×80 / 40×60 */}
+              <Text style={styles.labelSectionLabel}>
+                {t('cartOrder.labelModal.labelFormat')}
+              </Text>
+              <View style={styles.labelChipsRow}>
+                {(['50x80', '40x60'] as const).map((k) => (
+                  <TouchableOpacity
+                    key={k}
+                    style={[
+                      styles.labelChip,
+                      labelFormat === k && styles.labelChipActive,
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => setLabelFormat(k)}
+                  >
+                    <Text
+                      style={[
+                        styles.labelChipText,
+                        labelFormat === k && styles.labelChipTextActive,
+                      ]}
+                    >
+                      {k === '50x80'
+                        ? t('cartOrder.labelModal.format5080')
+                        : t('cartOrder.labelModal.format4060')}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* 상품명 입력 */}
+              <Text style={styles.labelSectionLabel}>
+                {t('cartOrder.labelModal.productName')}
+              </Text>
+              <TextInput
+                style={styles.labelInputBox}
+                value={labelProductName}
+                onChangeText={setLabelProductName}
+                placeholder={t('cartOrder.labelModal.productNamePlaceholder')}
+                placeholderTextColor={COLORS.gray[400]}
+              />
+
+              {/* 라벨 내용 입력 */}
+              <Text style={styles.labelSectionLabel}>
+                {t('cartOrder.labelModal.contentInput')}
+              </Text>
+              <TextInput
+                style={styles.labelContentBox}
+                value={labelContent}
+                onChangeText={setLabelContent}
+                placeholder={t('cartOrder.labelModal.contentPlaceholder')}
+                placeholderTextColor={COLORS.gray[400]}
+                multiline
+              />
+
+              {/* 바코드 번호 */}
+              <Text style={styles.labelSectionLabel}>
+                {t('cartOrder.labelModal.barcodeNumber')}
+              </Text>
+              <TextInput
+                style={styles.labelInputBox}
+                value={labelBarcode}
+                onChangeText={setLabelBarcode}
+                placeholder={t('cartOrder.labelModal.barcodePlaceholder')}
+                placeholderTextColor={COLORS.gray[400]}
+              />
+
+              {/* 라벨 업로드 단추 — '라벨 이미지 업로드' 에서 사용자 요청으로 이름 변경 */}
+              <TouchableOpacity
+                style={styles.labelUploadBtn}
+                activeOpacity={0.7}
+                onPress={pickLabelFile}
+              >
+                <Icon name="arrow-up" size={14} color={COLORS.text.primary} />
+                <Text style={styles.labelUploadText}>
+                  {t('cartOrder.labelModal.labelUpload')}
+                </Text>
+              </TouchableOpacity>
+              {labelFileUri ? (
+                <View style={styles.labelFilePreviewWrap}>
+                  <Image
+                    source={{ uri: labelFileUri }}
+                    style={styles.labelFilePreview}
+                    resizeMode="cover"
+                  />
+                  <TouchableOpacity
+                    style={styles.labelFileRemove}
+                    onPress={() => setLabelFileUri(null)}
+                  >
+                    <Icon name="close" size={12} color={COLORS.white} />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {/* 라벨 미리보기 — 라벨양식에 따라 크기 변경 (50×80 → 세로 / 40×60 → 가로).
+                  실시간으로 상품명, 라벨 내용, 바코드가 반영된다.
+                  우상단에 크기 배지 (예: '50 × 80 mm'). 식검라벨이면 좌상단에 식검 배지.
+                  CartScreen 의 라벨모달과 동일한 시각 구성을 따른다. */}
+              <View style={styles.previewHeaderRow}>
+                <Text style={styles.labelSectionLabel}>
+                  {t('cartOrder.labelModal.preview') || '라벨 미리보기'}
+                </Text>
+                <View style={styles.previewDimBadge}>
+                  <Text style={styles.previewDimBadgeText}>
+                    {labelFormat === '50x80'
+                      ? t('cartOrder.labelModal.dim5080') || '50 × 80 mm'
+                      : t('cartOrder.labelModal.dim4060') || '40 × 60 mm'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.previewWrap}>
+                <View
+                  style={[
+                    styles.previewCard,
+                    labelFormat === '50x80'
+                      ? styles.previewCard5080
+                      : styles.previewCard4060,
+                  ]}
+                >
+                  {labelType === 'foodInspect' && (
+                    <View style={styles.foodBadge}>
+                      {/* restaurant-outline 은 Icon 레지스트리에 없어서 안드로이드
+                          에서 ? 로 렌더되던 문제 해결 — 🍴 이모지로 대체.
+                          이모지는 OS 폰트에 내장돼 별도 리소스 의존성 없음. */}
+                      <Text style={styles.foodBadgeIcon}>🍴</Text>
+                      <Text style={styles.foodBadgeText}>
+                        {t('cartOrder.labelModal.foodBadge') || '식품용'}
+                      </Text>
+                    </View>
+                  )}
+                  {!(labelType === 'foodInspect' && labelFormat === '40x60') && (
+                    <Text style={styles.previewProductName}>
+                      {(t('cartOrder.labelModal.productName') || '상품명')}: {labelProductName}
+                    </Text>
+                  )}
+                  {!(labelType === 'product' && labelFormat === '40x60') && !!labelContent && (
+                    <Text style={styles.previewContent}>{labelContent}</Text>
+                  )}
+                  {!(labelType === 'foodInspect' && labelFormat === '40x60') && (
+                    <View style={styles.barcodePreview}>
+                      <View style={styles.barcodeLines}>
+                        {Array.from({ length: 28 }).map((_, i) => (
+                          <View
+                            key={i}
+                            style={[
+                              styles.barcodeBar,
+                              { width: (i % 3) + 1 },
+                              i % 2 === 0 && styles.barcodeBarThick,
+                            ]}
+                          />
+                        ))}
+                      </View>
+                      <Text style={styles.barcodeText}>{labelBarcode}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Footer — 취소 / 저장 */}
+            <View style={styles.labelModalFooter}>
+              <TouchableOpacity
+                style={[styles.labelModalFooterBtn, styles.labelModalCancelBtn]}
+                activeOpacity={0.7}
+                onPress={closeLabelModal}
+              >
+                <Text style={styles.labelModalCancelText}>
+                  {t('profile.productMgmt.onlineEdit.cancel') || '취소'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.labelModalFooterBtn, styles.labelModalSaveBtn]}
+                activeOpacity={0.7}
+                onPress={saveLabelModal}
+              >
+                <Text style={styles.labelModalSaveText}>
+                  {t('cartOrder.labelModal.save') || '저장'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 바코드 이미지 확인 모달 — 라벨 컬럼의 👁 아이콘에서 진입.
+          라벨 미리보기 카드만 단독으로 보여주는 read-only 뷰어. 라벨설정 모달의
+          state(라벨 종류 / 양식 / 상품명 / 내용 / 바코드)를 그대로 미리보기에
+          반영. 닫기 / 확인 두 단추로 종료. */}
+      <Modal
+        visible={barcodeViewerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBarcodeViewerOpen(false)}
+      >
+        <View style={styles.labelModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setBarcodeViewerOpen(false)}
+          />
+          <View style={styles.labelModalCard}>
+            {/* 헤더 — 좌측 타이틀, 우측 닫기 X */}
+            <View style={styles.barcodeViewerHeader}>
+              <Text style={styles.labelModalTitle}>
+                {t('cartOrder.labelModal.barcodeImageCheck') || '바코드 이미지 확인'}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setBarcodeViewerOpen(false)}
+                hitSlop={BACK_HIT_SLOP}
+              >
+                <Icon name="close" size={20} color={COLORS.text.secondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.labelModalBody}
+              contentContainerStyle={styles.labelModalBodyContent}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+            >
+              {/* 라벨 미리보기 — 라벨설정 모달의 미리보기와 동일한 카드 */}
+              <View style={styles.previewHeaderRow}>
+                <Text style={styles.labelSectionLabel}>
+                  {t('cartOrder.labelModal.preview') || '라벨 미리보기'}
+                </Text>
+                <View style={styles.previewDimBadge}>
+                  <Text style={styles.previewDimBadgeText}>
+                    {labelFormat === '50x80'
+                      ? t('cartOrder.labelModal.dim5080') || '50 × 80 mm'
+                      : t('cartOrder.labelModal.dim4060') || '40 × 60 mm'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.previewWrap}>
+                <View
+                  style={[
+                    styles.previewCard,
+                    labelFormat === '50x80'
+                      ? styles.previewCard5080
+                      : styles.previewCard4060,
+                  ]}
+                >
+                  {labelType === 'foodInspect' && (
+                    <View style={styles.foodBadge}>
+                      <Icon
+                        name="restaurant-outline"
+                        size={10}
+                        color={COLORS.text.primary}
+                      />
+                      <Text style={styles.foodBadgeText}>
+                        {t('cartOrder.labelModal.foodBadge') || '식품용'}
+                      </Text>
+                    </View>
+                  )}
+                  {!(labelType === 'foodInspect' && labelFormat === '40x60') && (
+                    <Text style={styles.previewProductName}>
+                      {(t('cartOrder.labelModal.productName') || '상품명')}: {labelProductName}
+                    </Text>
+                  )}
+                  {!(labelType === 'product' && labelFormat === '40x60') && !!labelContent && (
+                    <Text style={styles.previewContent}>{labelContent}</Text>
+                  )}
+                  {!(labelType === 'foodInspect' && labelFormat === '40x60') && (
+                    <View style={styles.barcodePreview}>
+                      <View style={styles.barcodeLines}>
+                        {Array.from({ length: 28 }).map((_, i) => (
+                          <View
+                            key={i}
+                            style={[
+                              styles.barcodeBar,
+                              { width: (i % 3) + 1 },
+                              i % 2 === 0 && styles.barcodeBarThick,
+                            ]}
+                          />
+                        ))}
+                      </View>
+                      <Text style={styles.barcodeText}>{labelBarcode}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Footer — 닫기 / 확인 */}
+            <View style={styles.labelModalFooter}>
+              <TouchableOpacity
+                style={[styles.labelModalFooterBtn, styles.labelModalCancelBtn]}
+                activeOpacity={0.7}
+                onPress={() => setBarcodeViewerOpen(false)}
+              >
+                <Text style={styles.labelModalCancelText}>
+                  {t('cartOrder.labelModal.close') || '닫기'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.labelModalFooterBtn, styles.labelModalSaveBtn]}
+                activeOpacity={0.7}
+                onPress={() => setBarcodeViewerOpen(false)}
+              >
+                <Text style={styles.labelModalSaveText}>
+                  {t('profile.productMgmt.onlineEdit.confirm') || '확인'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
+  // ─── 헤더 상태바 인셋 흰색 처리용 split ───────────────────────────
+  // root: 전체 화면. safeTop 만 흰색 → 상태바 인셋 영역이 흰색이 됨.
+  // bodyWrap: 헤더 아래 본문 영역 — 원래 container 가 갖던 회색 배경.
+  root: { flex: 1, backgroundColor: COLORS.background },
+  safeTop: { backgroundColor: COLORS.white },
+  bodyWrap: { flex: 1, backgroundColor: COLORS.background },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -345,7 +1270,9 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: COLORS.red,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -413,14 +1340,22 @@ const styles = StyleSheet.create({
   formInputDisabled: { backgroundColor: COLORS.gray[100] },
   formInputDisabledText: { flex: 1, fontSize: FONTS.sizes.sm, color: COLORS.gray[500] },
   formInputText: { flex: 1, fontSize: FONTS.sizes.sm, color: COLORS.text.primary },
+  // TextInput: 안드로이드에서 height/minHeight + paddingVertical 조합이
+  // 한글의 윗부분(자모 머리)을 잘라먹는 케이스가 있다. 첫 번째 그림처럼
+  // 글자가 통째로 보이게 하려면 (1) padding 만으로 행 높이를 만들고,
+  // (2) includeFontPadding 을 그대로 두어 안드로이드가 내장 line metric
+  // 으로 글자 위/아래 여백을 자동 확보하게 해야 한다. height/minHeight 를
+  // 모두 제거하고, 폰트와 동일한 sm 로 되돌려 disabled 행과 글자 크기 일관성 확보.
   formInput: {
     flex: 1,
     borderWidth: 1,
     borderColor: COLORS.gray[300],
     borderRadius: 6,
     paddingHorizontal: SPACING.sm,
-    height: 36,
+    paddingTop: 8,
+    paddingBottom: 8,
     fontSize: FONTS.sizes.sm,
+    lineHeight: FONTS.sizes.sm * 1.5,
     color: COLORS.text.primary,
   },
 
@@ -442,6 +1377,374 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // ─── 썸네일 추가 단추 → 카메라/갤러리 선택 모달 ────────────────────
+  thumbPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  thumbPickerSheet: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    paddingVertical: SPACING.sm,
+  },
+  thumbPickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+  },
+  thumbPickerItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
+  },
+  thumbPickerItemText: {
+    fontSize: FONTS.sizes.md,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  thumbPickerCancel: {
+    justifyContent: 'center',
+  },
+  thumbPickerCancelText: {
+    fontSize: FONTS.sizes.md,
+    color: COLORS.red,
+    fontWeight: '700',
+  },
+  // ─── 라벨설정 모달 ────────────────────────────────────────────────
+  labelModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.md,
+  },
+  labelModalCard: {
+    width: '100%',
+    maxWidth: 760,
+    maxHeight: '92%',
+    backgroundColor: COLORS.white,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  labelModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.sm,
+    backgroundColor: 'rgba(255, 85, 0, 0.04)',
+  },
+  // 바코드 이미지 확인 모달 — read-only 뷰어용. 라벨설정 모달과 달리 살구색
+  // 강조 배경 없이 깔끔한 흰색 + 하단 보더만.
+  barcodeViewerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[100],
+  },
+  labelModalTitle: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '800',
+    color: COLORS.text.primary,
+  },
+  labelModalSubtitle: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  labelModalBody: {
+    paddingHorizontal: SPACING.md,
+  },
+  labelModalBodyContent: {
+    paddingVertical: SPACING.sm,
+    paddingBottom: SPACING.md,
+  },
+  labelSectionLabel: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '700',
+    marginTop: SPACING.sm,
+    marginBottom: 6,
+  },
+  labelChipsRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  labelChip: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  labelChipActive: {
+    borderColor: COLORS.red,
+    backgroundColor: 'rgba(255, 85, 0, 0.06)',
+  },
+  labelChipText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  labelChipTextActive: {
+    color: COLORS.red,
+    fontWeight: '700',
+  },
+  labelInputBox: {
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+    paddingHorizontal: SPACING.sm,
+    paddingTop: 8,
+    paddingBottom: 8,
+    fontSize: FONTS.sizes.sm,
+    lineHeight: FONTS.sizes.sm * 1.5,
+    color: COLORS.text.primary,
+  },
+  labelContentBox: {
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+    paddingHorizontal: SPACING.sm,
+    paddingTop: 8,
+    paddingBottom: 8,
+    fontSize: FONTS.sizes.sm,
+    lineHeight: FONTS.sizes.sm * 1.5,
+    color: COLORS.text.primary,
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  labelUploadBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+  },
+  labelUploadText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  labelFilePreviewWrap: {
+    marginTop: SPACING.sm,
+    width: 120,
+    height: 120,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+  },
+  labelFilePreview: {
+    width: '100%',
+    height: '100%',
+  },
+  labelFileRemove: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // ─── 라벨 미리보기 ─────────────────────────────────────────────────
+  // 헤더 행 (제목 + 크기 배지) + 중앙 정렬된 라벨 카드.
+  previewHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: SPACING.md,
+  },
+  previewDimBadge: {
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  previewDimBadgeText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    fontWeight: '600',
+  },
+  previewWrap: {
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+  },
+  // CartScreen 의 미리보기 카드와 동일한 비율 — 흰 배경 + 옅은 테두리.
+  previewCard: {
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+    padding: 12,
+    position: 'relative',
+  },
+  previewCard5080: {
+    width: 220,
+    height: 350,
+  },
+  previewCard4060: {
+    width: 280,
+    height: 180,
+  },
+  foodBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  foodBadgeText: {
+    fontSize: 9,
+    color: COLORS.text.primary,
+    marginLeft: 2,
+    fontWeight: '600',
+  },
+  // 🍴 이모지 사이즈 — Text 의 fontSize 가 그대로 이모지 글리프 크기를 결정.
+  foodBadgeIcon: {
+    fontSize: 10,
+    lineHeight: 12,
+  },
+  previewProductName: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    marginBottom: 4,
+    lineHeight: 16,
+  },
+  previewContent: {
+    fontSize: 10,
+    color: COLORS.text.primary,
+    lineHeight: 14,
+    marginBottom: 8,
+  },
+  // 바코드 시각화 — 마지막에 위치, 자동으로 카드 하단에 붙음.
+  barcodePreview: {
+    marginTop: 'auto',
+    alignItems: 'center',
+  },
+  barcodeLines: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 40,
+  },
+  barcodeBar: {
+    height: '100%',
+    backgroundColor: '#000',
+    marginRight: 1,
+  },
+  barcodeBarThick: {
+    backgroundColor: '#000',
+  },
+  barcodeText: {
+    fontSize: 10,
+    color: '#000',
+    marginTop: 2,
+    letterSpacing: 1,
+  },
+  labelModalFooter: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
+    justifyContent: 'flex-end',
+  },
+  labelModalFooterBtn: {
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: 10,
+    borderRadius: 8,
+    minWidth: 72,
+    alignItems: 'center',
+  },
+  labelModalCancelBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    backgroundColor: COLORS.white,
+  },
+  labelModalCancelText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '600',
+  },
+  labelModalSaveBtn: {
+    backgroundColor: COLORS.red,
+  },
+  labelModalSaveText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.white,
+    fontWeight: '800',
+  },
+  // ─── 카테고리 드롭다운 (행 바로 아래 anchored 팝오버) ──────────────
+  // 백드롭은 전체 화면 — 바깥 탭으로 닫기. anchor 는 absolute 로 떠 있고
+  // top/left/width 는 인라인 스타일로 매번 오버라이드된다 (measureInWindow).
+  categoryDropdownBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+  },
+  categoryDropdownAnchor: {
+    position: 'absolute',
+  },
+  categoryDropdownCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  categoryDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 10,
+  },
+  categoryDropdownItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
+  },
+  categoryDropdownItemSelected: {
+    backgroundColor: 'rgba(255, 85, 0, 0.06)',
+  },
+  categoryDropdownItemText: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+  },
+  categoryDropdownItemTextSelected: {
+    color: COLORS.red,
+    fontWeight: '700',
+  },
   thumbnailHint: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.red,
@@ -449,6 +1752,114 @@ const styles = StyleSheet.create({
     paddingLeft: 90,
   },
 
+  // ─── 상품스펙 로딩 skeleton ────────────────────────────────────────
+  // 실제 옵션 그리드 + SKU 표 모양을 흉내내는 placeholder.
+  specSkeletonWrap: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.md,
+  },
+  specSkelGroupRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  specSkelCards: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.xs,
+  },
+  specSkelCard: {
+    width: '31%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  specSkelTableHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: SPACING.xs,
+    marginTop: SPACING.xs,
+  },
+  specSkelTableRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  // ─── 옵션 그룹 그리드 (색상/사이즈 카드들) ─────────────────────────
+  // 한 줄에 라벨('옵션1') + 카드들이 wrap 으로 흐른다.
+  optionGroupRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    gap: SPACING.sm,
+  },
+  optionGroupLabel: {
+    width: 40,
+    paddingTop: 8,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '600',
+  },
+  // 카드들을 한 줄에 여러 개씩 wrap. 각 카드는 폭이 정확히 같도록 percent
+  // width 사용 (한 줄 4개 = 25% - gap 보정 → 23%). gap 으로 자연스러운 여백.
+  optionGroupCards: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.xs,
+  },
+  // 카드 크기를 고정해 행/렬 정렬이 깔끔하게 맞도록.
+  // width: 약 31% → 한 줄에 3개씩 (gap 빼고). minWidth 제거.
+  optionGroupCard: {
+    width: '31%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  optionGroupCardSelected: {
+    borderColor: COLORS.red,
+    backgroundColor: 'rgba(255, 85, 0, 0.06)',
+  },
+  optionGroupCardImage: {
+    width: 28,
+    height: 28,
+    borderRadius: 4,
+    backgroundColor: COLORS.gray[100],
+  },
+  optionGroupCardImagePlaceholder: {
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+  },
+  // 이름이 카드 폭을 넘어가면 … 으로 잘리도록 flex: 1 + numberOfLines=1
+  // 조합. flexShrink: 1 은 부모 row 안에서 텍스트가 줄어들도록 보장.
+  optionGroupCardText: {
+    flex: 1,
+    flexShrink: 1,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+  },
+  optionGroupCardTextSelected: {
+    color: COLORS.red,
+    fontWeight: '700',
+  },
   optionTableHeader: {
     flexDirection: 'row',
     backgroundColor: COLORS.gray[100],
@@ -474,26 +1885,40 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 6,
     gap: 4,
   },
+  // SKU 표의 TextInput — 한글 자모가 위/아래로 잘리는 문제 해결.
+  // 고정 height 대신 padding 만으로 행 높이를 만들고, lineHeight 명시.
+  // (formInput 과 동일한 패턴)
   optionCellInput: {
-    height: 30,
     fontSize: FONTS.sizes.xs,
+    lineHeight: FONTS.sizes.xs * 1.6,
     color: COLORS.text.primary,
     borderWidth: 1,
     borderColor: COLORS.gray[200],
     borderRadius: 4,
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
+    paddingTop: 6,
+    paddingBottom: 6,
   },
   optionPriceWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 30,
+    minHeight: 32,
     borderWidth: 1,
     borderColor: COLORS.gray[200],
     borderRadius: 4,
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
   },
   yenMark: { fontSize: FONTS.sizes.xs, color: COLORS.text.primary, marginRight: 2 },
-  optionPriceInput: { flex: 1, fontSize: FONTS.sizes.xs, color: COLORS.text.primary, padding: 0 },
+  // 단가 입력칸도 동일하게 lineHeight + padding 확보.
+  optionPriceInput: {
+    flex: 1,
+    fontSize: FONTS.sizes.xs,
+    lineHeight: FONTS.sizes.xs * 1.6,
+    color: COLORS.text.primary,
+    padding: 0,
+    paddingVertical: 2,
+  },
   optionLabelCell: {
     flexDirection: 'row',
     alignItems: 'center',

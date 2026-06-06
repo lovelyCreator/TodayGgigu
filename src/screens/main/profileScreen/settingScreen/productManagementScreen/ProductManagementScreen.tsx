@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Icon from '../../../../../components/Icon';
-import { ScreenSkeleton } from '../../../../../components/Skeleton';
+import { ScreenSkeleton, SkeletonBlock } from '../../../../../components/Skeleton';
 import { COLORS, FONTS, SPACING } from '../../../../../constants';
 import { RootStackParamList } from '../../../../../types';
 import { useTranslation } from '../../../../../hooks/useTranslation';
@@ -34,14 +34,28 @@ const BACK_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 // getProductDetail 의 productSkuInfos 항목을 한 줄 표시에 필요한 최소 필드로
 // 추려 둔 것 — name 은 옵션 텍스트(예: "춤추는 우주오리 + 드라이버"),
 // optionLabel 은 우측 작은 셀렉터 알약 텍스트(없으면 '기본').
-type CartModalSku = {
+// 장바구니 모달에서 한 행 = 한 색상 그룹.
+// sizes 는 그 색상에 묶인 SKU 들 (각 사이즈 → 가격/skuId).
+// selectedSizeIdx 는 우측 알약 드롭다운에서 선택된 사이즈의 인덱스.
+type CartModalSizeVariant = {
   skuId: string;
   specId: string;
-  name: string;
-  optionLabel: string;
+  size: string;        // 예: 'S', 'M', '2XL'
   price: number;
+  attributes: any[];
+};
+type CartModalSku = {
+  // 그룹 식별자 — 색상 이름 또는 SKU id (단일 그룹일 때).
+  skuId: string;
+  specId: string;
+  name: string;        // 색상 이름 (예: '화이트')
+  optionLabel: string; // 우측 알약 라벨 — 보통 '색상' 같은 attribute 이름. 빈 그룹은 '기본'.
+  price: number;       // 현재 선택된 사이즈의 가격
   image: string;
   attributes: any[];
+  // 이 색상에 포함된 사이즈 옵션들.
+  sizes: CartModalSizeVariant[];
+  selectedSizeIdx: number;
 };
 
 // ─── 캘린더 도우미 (시작/종료 날짜 선택 모달에서 사용) ───────────────
@@ -198,8 +212,17 @@ const ProductManagementScreen: React.FC = () => {
     { value: 'soldOut', label: t('profile.productMgmt.typeOptions.soldOut') },
     { value: 'hidden', label: t('profile.productMgmt.typeOptions.hidden') },
   ];
+  // 카테고리 드롭다운 옵션 — OnlineProductEditScreen 의 카테고리 옵션과
+  // 동일한 i18n 키를 재사용해 두 화면이 일관된 카테고리 목록을 갖도록 함.
   const categoryOptions = [
     { value: 'all', label: t('profile.productMgmt.all') },
+    { value: 'apparel', label: t('profile.productMgmt.onlineEdit.catApparel') },
+    { value: 'accessory', label: t('profile.productMgmt.onlineEdit.catAccessory') },
+    { value: 'home', label: t('profile.productMgmt.onlineEdit.catHome') },
+    { value: 'beauty', label: t('profile.productMgmt.onlineEdit.catBeauty') },
+    { value: 'toy', label: t('profile.productMgmt.onlineEdit.catToy') },
+    { value: 'digital', label: t('profile.productMgmt.onlineEdit.catDigital') },
+    { value: 'other', label: t('profile.productMgmt.onlineEdit.catOther') },
   ];
   const labelTypeOptions = [
     { value: 'select', label: t('profile.productMgmt.labelOptions.select') },
@@ -233,6 +256,16 @@ const ProductManagementScreen: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 상품다운로드 단추 → 단추 바로 아래에 떠 있는 anchored 드롭다운(3개 옵션:
+  // 이미지 Excel 다운 / Excel 다운 / 식검 다운).
+  const [downloadDropdownOpen, setDownloadDropdownOpen] = useState<boolean>(false);
+  const [downloadBtnLayout, setDownloadBtnLayout] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const downloadBtnRef = useRef<View>(null);
   // 장바구니 담기 모달 — 상품 카드의 장바구니 아이콘에서 진입.
   // 모달이 열릴 때 productsApi.getProductDetail 로 SKU 목록을 받아오고,
   // 각 SKU 마다 옵션/가격/수량 행을 렌더한다. 수량이 0 이상인 SKU 만 실제로
@@ -241,6 +274,8 @@ const ProductManagementScreen: React.FC = () => {
   const [cartModalSkus, setCartModalSkus] = useState<CartModalSku[]>([]);
   const [cartModalQtyMap, setCartModalQtyMap] = useState<Record<string, number>>({});
   const [cartModalExpanded, setCartModalExpanded] = useState<boolean>(false);
+  // 사이즈 드롭다운이 열린 색상 그룹의 인덱스. -1 = 모두 닫힘.
+  const [cartModalOpenSizeIdx, setCartModalOpenSizeIdx] = useState<number>(-1);
   const [cartModalLoading, setCartModalLoading] = useState<boolean>(false);
 
 
@@ -629,9 +664,17 @@ const ProductManagementScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
+            ref={downloadBtnRef as any}
             style={[styles.outlineButton, !hasSelection && styles.outlineButtonDisabled]}
             activeOpacity={0.7}
             disabled={!hasSelection}
+            onPress={() => {
+              // 단추의 화면 좌표를 측정해 그 바로 아래에 드롭다운을 배치.
+              downloadBtnRef.current?.measureInWindow((x, y, width, height) => {
+                setDownloadBtnLayout({ x, y, width, height });
+              });
+              setDownloadDropdownOpen(true);
+            }}
           >
             <Text
               style={[
@@ -688,6 +731,7 @@ const ProductManagementScreen: React.FC = () => {
     setCartModalSkus([]);
     setCartModalQtyMap({});
     setCartModalExpanded(false);
+    setCartModalOpenSizeIdx(-1);
     setCartModalLoading(true);
     try {
       const offerId = item.offerId || item._id;
@@ -711,31 +755,58 @@ const ProductManagementScreen: React.FC = () => {
           apiProduct ? Object.keys(apiProduct).slice(0, 20) : null,
         );
       }
-      const skus: CartModalSku[] = rawSkus.map((sku: any) => {
-        const attrs = sku.skuAttributes || [];
-        const name =
-          attrs
-            .map((a: any) => a.valueTrans || a.value || '')
-            .filter(Boolean)
-            .join(' + ') || item.productName;
-        const optionLabel =
-          attrs[0]?.attributeNameTrans ||
-          attrs[0]?.attributeName ||
-          t('profile.productMgmt.cartModal.optionDefault');
-        const image =
-          attrs.find((a: any) => a.skuImageUrl)?.skuImageUrl || galleryFirst;
-        return {
+      // SKU 를 '색상' 으로 그룹핑. 한 행 = 한 색상, 우측 알약 = 사이즈 드롭다운.
+      // 1688 SKU 의 attribute 는 보통 [색상, 사이즈] 순서이므로:
+      //   attrs[0] = 색상,  attrs[1] = 사이즈.  단일 attribute 면 그것만.
+      const groupsMap = new Map<string, CartModalSku>();
+      for (const sku of rawSkus) {
+        const attrs: any[] = sku.skuAttributes || [];
+        const color = String(attrs[0]?.valueTrans || attrs[0]?.value || '').trim();
+        const size = String(attrs[1]?.valueTrans || attrs[1]?.value || '').trim();
+        const groupKey = color || String(sku.skuId || sku.specId || '');
+        const skuPrice = Number(sku.price ?? sku.consignPrice ?? item.unitPrice ?? 0);
+        const variant: CartModalSizeVariant = {
           skuId: String(sku.skuId || ''),
           specId: String(sku.specId || ''),
-          name,
-          optionLabel: String(optionLabel),
-          price: Number(sku.price ?? sku.consignPrice ?? item.unitPrice ?? 0),
-          image,
+          size,
+          price: skuPrice,
           attributes: attrs,
         };
-      });
+        const existing = groupsMap.get(groupKey);
+        if (existing) {
+          existing.sizes.push(variant);
+        } else {
+          const optionLabel =
+            attrs[1]?.attributeNameTrans ||
+            attrs[1]?.attributeName ||
+            attrs[0]?.attributeNameTrans ||
+            attrs[0]?.attributeName ||
+            t('profile.productMgmt.cartModal.optionDefault');
+          const image =
+            attrs.find((a: any) => a.skuImageUrl)?.skuImageUrl || galleryFirst;
+          groupsMap.set(groupKey, {
+            skuId: String(sku.skuId || ''),
+            specId: String(sku.specId || ''),
+            name: color || item.productName,
+            optionLabel: String(optionLabel),
+            price: skuPrice,
+            image,
+            attributes: attrs,
+            sizes: [variant],
+            selectedSizeIdx: 0,
+          });
+        }
+      }
+      const skus: CartModalSku[] = Array.from(groupsMap.values());
       // SKU 가 하나도 없으면 SellerProduct 자체를 단일 SKU 로 fallback.
       if (skus.length === 0) {
+        const fallbackVariant: CartModalSizeVariant = {
+          skuId: String(item.skuId || ''),
+          specId: String(item.specId || item.offerId || ''),
+          size: '',
+          price: Number(item.unitPrice ?? 0),
+          attributes: [],
+        };
         skus.push({
           skuId: String(item.skuId || ''),
           specId: String(item.specId || item.offerId || ''),
@@ -744,11 +815,20 @@ const ProductManagementScreen: React.FC = () => {
           price: Number(item.unitPrice ?? 0),
           image: galleryFirst,
           attributes: [],
+          sizes: [fallbackVariant],
+          selectedSizeIdx: 0,
         });
       }
       setCartModalSkus(skus);
     } catch {
       // 상세 조회 실패 → fallback 으로 카드 단일 SKU 사용.
+      const fallbackVariant: CartModalSizeVariant = {
+        skuId: String(item.skuId || ''),
+        specId: String(item.specId || item.offerId || ''),
+        size: '',
+        price: Number(item.unitPrice ?? 0),
+        attributes: [],
+      };
       setCartModalSkus([
         {
           skuId: String(item.skuId || ''),
@@ -758,6 +838,8 @@ const ProductManagementScreen: React.FC = () => {
           price: Number(item.unitPrice ?? 0),
           image: thumbOf(item) || item.productUrl || '',
           attributes: [],
+          sizes: [fallbackVariant],
+          selectedSizeIdx: 0,
         },
       ]);
     } finally {
@@ -765,32 +847,38 @@ const ProductManagementScreen: React.FC = () => {
     }
   };
 
-  // 모달의 '장바구니 추가' — 수량 > 0 인 SKU 각각을 addToCart 로 담는다.
+  // 모달의 '장바구니 추가' — 수량 > 0 인 (색상, 사이즈) variant 마다 addToCart.
   const confirmCartModal = () => {
     const item = cartModalProduct;
     if (!item) return;
-    const positive = cartModalSkus.filter((s) => (cartModalQtyMap[s.skuId] ?? 0) > 0);
-    if (positive.length === 0) {
+    // 그룹 각각의 모든 사이즈 variant 를 평탄화해서 qty > 0 인 것만.
+    const targets: { group: CartModalSku; variant: CartModalSizeVariant; qty: number }[] = [];
+    for (const group of cartModalSkus) {
+      for (const variant of group.sizes) {
+        const qty = cartModalQtyMap[variant.skuId] ?? 0;
+        if (qty > 0) targets.push({ group, variant, qty });
+      }
+    }
+    if (targets.length === 0) {
       showToast(t('profile.productMgmt.cartModal.qtyRequired') || 'Please enter a quantity', 'error');
       return;
     }
-    for (const sku of positive) {
-      const qty = cartModalQtyMap[sku.skuId] ?? 0;
-      const priceStr = String(sku.price ?? 0);
+    for (const { group, variant, qty } of targets) {
+      const priceStr = String(variant.price ?? group.price ?? 0);
       addToCart(
         {
           offerId: parseInt(item.offerId || '0', 10) || 0,
           categoryName: '',
           subject: item.productName,
           subjectTrans: item.productName,
-          imageUrl: sku.image || thumbOf(item) || item.productUrl || '',
+          imageUrl: group.image || thumbOf(item) || item.productUrl || '',
           skuInfo: {
-            skuId: parseInt(sku.skuId || '0', 10) || 0,
-            specId: sku.specId || String(item.offerId || ''),
+            skuId: parseInt(variant.skuId || '0', 10) || 0,
+            specId: variant.specId || String(item.offerId || ''),
             price: priceStr,
             amountOnSale: 999999,
             consignPrice: priceStr,
-            skuAttributes: sku.attributes || [],
+            skuAttributes: variant.attributes || group.attributes || [],
             fenxiaoPriceInfo: { onePiecePrice: priceStr, offerPrice: priceStr },
           },
           companyName: buildCompanyMultiLang(item.company),
@@ -806,6 +894,7 @@ const ProductManagementScreen: React.FC = () => {
     setCartModalSkus([]);
     setCartModalQtyMap({});
     setCartModalExpanded(false);
+    setCartModalOpenSizeIdx(-1);
   };
 
   const handleCardImageSearch = async (item: SellerProduct) => {
@@ -1168,12 +1257,16 @@ const ProductManagementScreen: React.FC = () => {
         animationType="fade"
         onRequestClose={() => setCartModalProduct(null)}
       >
-        <TouchableOpacity
-          style={styles.cartModalBackdrop}
-          activeOpacity={1}
-          onPress={() => setCartModalProduct(null)}
-        >
-          <View style={styles.cartModalCard} onStartShouldSetResponder={() => true}>
+        {/* 백드롭 — TouchableWithoutFeedback 대신 단순 View 로 두고
+            바깥 빈 영역에만 dismiss zone TouchableOpacity 를 깔아 둠으로써
+            카드 내부의 ScrollView 제스처와 충돌하지 않게 함. */}
+        <View style={styles.cartModalBackdrop}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setCartModalProduct(null)}
+          />
+          <View style={styles.cartModalCard}>
             {/* 헤더 — 좌측 주황 아이콘 박스 + 타이틀/설명, 우측 닫기 X */}
             <View style={styles.cartModalHeader}>
               <View style={styles.cartModalIconBox}>
@@ -1219,30 +1312,55 @@ const ProductManagementScreen: React.FC = () => {
               )}
 
               {/* SKU 행 리스트 — SKU 가 많아 화면 밖으로 넘칠 때를 대비해
-                  ScrollView 로 감싸 maxHeight 안에서 자체 스크롤. */}
+                  ScrollView 로 감싸 maxHeight 안에서 자체 스크롤.
+                  scrollEnabled / keyboardShouldPersistTaps / removeClippedSubviews
+                  설정으로 안드로이드에서 스크롤 제스처가 백드롭 TouchableOpacity
+                  의 onPress 와 충돌해 잠기는 케이스를 차단. */}
               <ScrollView
                 style={styles.cartModalSkuList}
                 contentContainerStyle={styles.cartModalSkuListContent}
                 showsVerticalScrollIndicator
                 nestedScrollEnabled
+                scrollEnabled
+                keyboardShouldPersistTaps="handled"
+                onStartShouldSetResponderCapture={() => false}
               >
                 {cartModalLoading && (
-                  <View style={styles.cartModalLoadingBox}>
-                    <ActivityIndicator size="small" color={COLORS.red} />
+                  // 로딩 중 — ActivityIndicator 대신 실제 SKU 행을 모방한
+                  // skeleton 5줄. SkeletonBlock 은 useNativeDriver pulse 애니메이션.
+                  <View>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <View key={i} style={styles.cartModalSkuBlock}>
+                        <View style={styles.cartModalSkuLine}>
+                          <SkeletonBlock width={32} height={32} borderRadius={6} />
+                          <View style={{ flex: 1 }}>
+                            <SkeletonBlock width={'70%' as any} height={12} borderRadius={3} />
+                          </View>
+                          <SkeletonBlock width={64} height={24} borderRadius={6} />
+                        </View>
+                        <View style={styles.cartModalSkuLine2}>
+                          <SkeletonBlock width={56} height={14} borderRadius={3} />
+                          <SkeletonBlock width={72} height={24} borderRadius={6} />
+                        </View>
+                      </View>
+                    ))}
                   </View>
                 )}
                 {!cartModalLoading &&
-                  visibleSkus.map((sku) => {
-                    const qty = cartModalQtyMap[sku.skuId] ?? 0;
-                    // 각 SKU 행은 두 줄로 분리해 좁은 화면에서도 모든 정보가 보이도록 함:
-                    //   ① 썸네일 + 이름(flex:1) + 옵션 알약
-                    //   ② 우측 정렬 — 가격 + 수량(- / N / +)
+                  visibleSkus.map((sku, gIdx) => {
+                    // 한 행 = 한 색상 그룹. 현재 선택된 사이즈의 variant 정보를 추출.
+                    const selectedVariant = sku.sizes[sku.selectedSizeIdx] || sku.sizes[0];
+                    const variantSkuId = selectedVariant?.skuId || sku.skuId;
+                    const qty = cartModalQtyMap[variantSkuId] ?? 0;
+                    const price = selectedVariant?.price ?? sku.price;
+                    const hasSizes = sku.sizes.length > 0 && sku.sizes.some((s) => s.size);
+                    const sizeOpen = cartModalOpenSizeIdx === gIdx;
                     return (
                       <View
-                        key={sku.skuId || sku.specId}
+                        key={sku.skuId || sku.specId || sku.name}
                         style={styles.cartModalSkuBlock}
                       >
-                        {/* 1행 */}
+                        {/* 1행 — 썸네일 + 색상 이름 + 사이즈 알약 드롭다운 */}
                         <View style={styles.cartModalSkuLine}>
                           {sku.image ? (
                             <Image
@@ -1261,27 +1379,76 @@ const ProductManagementScreen: React.FC = () => {
                           <Text style={styles.cartModalSkuName} numberOfLines={2}>
                             {sku.name}
                           </Text>
-                          <View style={styles.cartModalOptionPill}>
+                          {/* 사이즈 알약 — 탭하면 같은 행 아래로 사이즈 목록 펼침.
+                              사이즈가 없거나 1개뿐이면 탭 비활성. */}
+                          <TouchableOpacity
+                            style={styles.cartModalOptionPill}
+                            activeOpacity={hasSizes && sku.sizes.length > 1 ? 0.7 : 1}
+                            onPress={() => {
+                              if (!hasSizes || sku.sizes.length <= 1) return;
+                              setCartModalOpenSizeIdx((prev) => (prev === gIdx ? -1 : gIdx));
+                            }}
+                          >
                             <Text style={styles.cartModalOptionText} numberOfLines={1}>
-                              {sku.optionLabel}
+                              {selectedVariant?.size || sku.optionLabel}
                             </Text>
-                            <Icon name="chevron-down" size={12} color={COLORS.text.secondary} />
-                          </View>
+                            <Icon
+                              name={sizeOpen ? 'chevron-up' : 'chevron-down'}
+                              size={12}
+                              color={COLORS.text.secondary}
+                            />
+                          </TouchableOpacity>
                         </View>
+                        {/* 사이즈 드롭다운 — 알약 바로 아래에 inline 으로 펼침 */}
+                        {sizeOpen && (
+                          <View style={styles.cartModalSizeDropdown}>
+                            {sku.sizes.map((variant, sIdx) => {
+                              const isSel = sIdx === sku.selectedSizeIdx;
+                              return (
+                                <TouchableOpacity
+                                  key={variant.skuId || `${sIdx}`}
+                                  style={[
+                                    styles.cartModalSizeOption,
+                                    isSel && styles.cartModalSizeOptionSelected,
+                                  ]}
+                                  activeOpacity={0.7}
+                                  onPress={() => {
+                                    // 그룹의 selectedSizeIdx 갱신 + 드롭다운 닫기.
+                                    setCartModalSkus((prev) =>
+                                      prev.map((g, idx) =>
+                                        idx === gIdx ? { ...g, selectedSizeIdx: sIdx } : g,
+                                      ),
+                                    );
+                                    setCartModalOpenSizeIdx(-1);
+                                  }}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.cartModalSizeOptionText,
+                                      isSel && styles.cartModalSizeOptionTextSelected,
+                                    ]}
+                                  >
+                                    {variant.size || sku.optionLabel}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        )}
                         {/* 2행 — 우측 정렬, 가격 + 수량 컨트롤 */}
                         <View style={styles.cartModalSkuLine2}>
-                          <Text style={styles.cartModalPrice}>¥ {sku.price.toFixed(2)}</Text>
+                          <Text style={styles.cartModalPrice}>¥ {price.toFixed(2)}</Text>
                           <View style={styles.cartModalQtyBox}>
                             <TouchableOpacity
                               style={styles.cartModalQtyBtn}
-                              onPress={() => setQty(sku.skuId, qty - 1)}
+                              onPress={() => setQty(variantSkuId, qty - 1)}
                             >
                               <Icon name="remove" size={14} color={COLORS.text.primary} />
                             </TouchableOpacity>
                             <Text style={styles.cartModalQtyValue}>{qty}</Text>
                             <TouchableOpacity
                               style={styles.cartModalQtyBtn}
-                              onPress={() => setQty(sku.skuId, qty + 1)}
+                              onPress={() => setQty(variantSkuId, qty + 1)}
                             >
                               <Icon name="add" size={14} color={COLORS.text.primary} />
                             </TouchableOpacity>
@@ -1331,7 +1498,7 @@ const ProductManagementScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     );
   };
@@ -1507,6 +1674,63 @@ const ProductManagementScreen: React.FC = () => {
         {renderPickerModal()}
         {renderDateRangeModal()}
         {renderCartModal()}
+
+        {/* 상품다운로드 드롭다운 — 상품다운로드 단추 바로 아래에 떠 있는
+            anchored 팝오버. measureInWindow 결과로 단추 너비와 위치에 정확히
+            정렬되며, 백드롭 탭으로 닫힘. 3개 옵션: 이미지 Excel 다운 /
+            Excel 다운 / 식검 다운. */}
+        <Modal
+          visible={downloadDropdownOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setDownloadDropdownOpen(false)}
+        >
+          <TouchableOpacity
+            style={styles.downloadDropdownBackdrop}
+            activeOpacity={1}
+            onPress={() => setDownloadDropdownOpen(false)}
+          >
+            <View
+              style={[
+                styles.downloadDropdownAnchor,
+                downloadBtnLayout && {
+                  top: downloadBtnLayout.y + downloadBtnLayout.height + 4,
+                  // 단추가 작아 드롭다운 콘텐츠가 더 넓을 수 있으므로 최소 폭
+                  // 보장. left 는 단추의 left 그대로 사용.
+                  left: downloadBtnLayout.x,
+                  minWidth: Math.max(downloadBtnLayout.width, 140),
+                },
+              ]}
+              onStartShouldSetResponder={() => true}
+            >
+              <View style={styles.downloadDropdownCard}>
+                {([
+                  ['imageExcel', 'profile.productMgmt.downloadOptions.imageExcel'],
+                  ['excel', 'profile.productMgmt.downloadOptions.excel'],
+                  ['foodInspect', 'profile.productMgmt.downloadOptions.foodInspect'],
+                ] as const).map(([key, i18nKey], idx) => (
+                  <TouchableOpacity
+                    key={key}
+                    style={[
+                      styles.downloadDropdownItem,
+                      idx > 0 && styles.downloadDropdownItemBorder,
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      // 백엔드 다운로드 endpoint 도입 전까지는 드롭다운만 닫음.
+                      setDownloadDropdownOpen(false);
+                    }}
+                  >
+                    <Text style={styles.downloadDropdownItemText} numberOfLines={1}>
+                      {t(i18nKey)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
         {/* 이미지 검색 결과 모달 — 카드의 검색(🔍) 아이콘에서 진입.
             ProductDetailScreen 의 유사 상품 검색 모달과 동일한 컴포넌트. */}
         {imageSearchVisible && (
@@ -1774,6 +1998,41 @@ const styles = StyleSheet.create({
   },
   outlineButtonTextDisabled: {
     color: COLORS.gray[400],
+  },
+  // ─── 상품다운로드 anchored 드롭다운 ───────────────────────────────
+  // 백드롭은 전체 화면 — 바깥 탭으로 닫기. anchor 는 absolute 로 떠 있고
+  // top/left/minWidth 는 인라인 스타일로 measureInWindow 결과 오버라이드.
+  downloadDropdownBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+  },
+  downloadDropdownAnchor: {
+    position: 'absolute',
+  },
+  downloadDropdownCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  downloadDropdownItem: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 10,
+  },
+  downloadDropdownItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
+  },
+  downloadDropdownItemText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '500',
   },
   viewToggle: {
     flexDirection: 'row',
@@ -2128,6 +2387,37 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.primary,
     fontWeight: '500',
+  },
+  // 사이즈 드롭다운 — 사이즈 알약 바로 아래 인라인으로 펼침.
+  // 가로 wrap 된 사이즈 칩들 (S/M/L/XL/…). 선택된 칩은 붉은 강조.
+  cartModalSizeDropdown: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+    paddingHorizontal: 38, // 좌측 32px 썸네일 + 6px gap 만큼 들여쓰기
+  },
+  cartModalSizeOption: {
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  cartModalSizeOptionSelected: {
+    borderColor: COLORS.red,
+    backgroundColor: 'rgba(255, 85, 0, 0.06)',
+  },
+  cartModalSizeOptionText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  cartModalSizeOptionTextSelected: {
+    color: COLORS.red,
+    fontWeight: '700',
   },
   cartModalPrice: {
     fontSize: FONTS.sizes.sm,

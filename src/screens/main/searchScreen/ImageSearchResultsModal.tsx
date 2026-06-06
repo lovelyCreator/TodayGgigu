@@ -18,6 +18,7 @@ import { useAppSelector } from '../../../store/hooks';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../../constants';
 import { RootStackParamList, Product } from '../../../types';
 import { ProductCard, SortDropdown, PriceFilterModal } from '../../../components';
+import { SkeletonBlock } from '../../../components/Skeleton';
 import { useAuth } from '../../../context/AuthContext';
 import { translations } from '../../../i18n/translations';
 import { productsApi } from '../../../services/productsApi';
@@ -426,8 +427,39 @@ const ImageSearchResultsModal: React.FC<ImageSearchResultsModalProps> = ({
         />
 
         {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
+          // 로딩 — ActivityIndicator + 텍스트 대신 실제 결과 그리드를 모방한
+          // 2-열 카드 skeleton (6개) + 그 아래 단조로움을 줄이는 작은 텍스트.
+          // SkeletonBlock 은 useNativeDriver opacity pulse (0.4 ↔ 1).
+          <View style={styles.loadingSkeletonWrap}>
+            <View style={styles.loadingSkeletonGrid}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <View key={i} style={styles.loadingSkeletonCard}>
+                  <SkeletonBlock
+                    width={CARD_WIDTH}
+                    height={CARD_WIDTH}
+                    borderRadius={BORDER_RADIUS.md}
+                  />
+                  <SkeletonBlock
+                    width={'90%' as any}
+                    height={12}
+                    borderRadius={3}
+                    style={{ marginTop: 8 }}
+                  />
+                  <SkeletonBlock
+                    width={'60%' as any}
+                    height={12}
+                    borderRadius={3}
+                    style={{ marginTop: 6 }}
+                  />
+                  <SkeletonBlock
+                    width={'40%' as any}
+                    height={14}
+                    borderRadius={3}
+                    style={{ marginTop: 8 }}
+                  />
+                </View>
+              ))}
+            </View>
             <Text style={styles.loadingText}>{t('imageSearch.searching')}</Text>
           </View>
         ) : (
@@ -708,6 +740,27 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: FONTS.sizes.md,
     color: COLORS.text.secondary,
+  },
+  // ─── 검색 로딩 skeleton — 실제 결과 그리드와 동일한 2-열 카드 형태 ───
+  loadingSkeletonWrap: {
+    flex: 1,
+    paddingTop: SPACING.md,
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.lg,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  loadingSkeletonGrid: {
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: SPACING.md,
+  },
+  // 한 장의 결과 카드 자리 — 이미지(정사각) + 텍스트 줄 + 가격 줄.
+  loadingSkeletonCard: {
+    width: CARD_WIDTH,
   },
   productGrid: {
     paddingHorizontal: SPACING.md,
