@@ -21,6 +21,7 @@ import { COLORS, FONTS, SPACING } from '../../../../../constants';
 import { RootStackParamList } from '../../../../../types';
 import { useTranslation } from '../../../../../hooks/useTranslation';
 import { productListApi, SellerProduct } from '../../../../../services/productListApi';
+import { productsApi } from '../../../../../services/productsApi';
 import { useAddToCartMutation } from '../../../../../hooks/useAddToCartMutation';
 import { useToast } from '../../../../../context/ToastContext';
 import ImageSearchResultsModal from '../../../searchScreen/ImageSearchResultsModal';
@@ -28,6 +29,20 @@ import ImageSearchResultsModal from '../../../searchScreen/ImageSearchResultsMod
 type Nav = StackNavigationProp<RootStackParamList, 'ProductManagement'>;
 
 const BACK_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
+
+// 장바구니 담기 모달에서 사용하는 SKU 행의 정규화 타입.
+// getProductDetail 의 productSkuInfos 항목을 한 줄 표시에 필요한 최소 필드로
+// 추려 둔 것 — name 은 옵션 텍스트(예: "춤추는 우주오리 + 드라이버"),
+// optionLabel 은 우측 작은 셀렉터 알약 텍스트(없으면 '기본').
+type CartModalSku = {
+  skuId: string;
+  specId: string;
+  name: string;
+  optionLabel: string;
+  price: number;
+  image: string;
+  attributes: any[];
+};
 
 // ─── 캘린더 도우미 (시작/종료 날짜 선택 모달에서 사용) ───────────────
 const DAY_LABELS_KO = ['일', '월', '화', '수', '목', '금', '토'];
@@ -159,7 +174,7 @@ const ProductManagementScreen: React.FC = () => {
   // 검색 아이콘을 누르면 ImageSearchResultsModal 을 띄운다. 모달은
   // imageUri + imageBase64 둘 다 필요해 RNFS 로 thumbnail 을 임시 받아 base64 화.
   const { showToast } = useToast();
-  const { mutate: addToCart } = useAddToCartMutation({
+  const { mutate: addToCart, isLoading: isAddingToCart } = useAddToCartMutation({
     onSuccess: () => {
       showToast(
         t('profile.productMgmt.addedToCart') || '장바구니에 담겼습니다',
@@ -218,6 +233,15 @@ const ProductManagementScreen: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 장바구니 담기 모달 — 상품 카드의 장바구니 아이콘에서 진입.
+  // 모달이 열릴 때 productsApi.getProductDetail 로 SKU 목록을 받아오고,
+  // 각 SKU 마다 옵션/가격/수량 행을 렌더한다. 수량이 0 이상인 SKU 만 실제로
+  // 장바구니에 담긴다. SKU 가 많으면 기본 3 개만 노출하고 '더보기' 로 펼침.
+  const [cartModalProduct, setCartModalProduct] = useState<SellerProduct | null>(null);
+  const [cartModalSkus, setCartModalSkus] = useState<CartModalSku[]>([]);
+  const [cartModalQtyMap, setCartModalQtyMap] = useState<Record<string, number>>({});
+  const [cartModalExpanded, setCartModalExpanded] = useState<boolean>(false);
+  const [cartModalLoading, setCartModalLoading] = useState<boolean>(false);
 
 
   // 'YYYY-MM-DD' + '12:00 AM' / '11:59 PM' 같은 사람이 읽는 시각 문자열을
@@ -657,32 +681,131 @@ const ProductManagementScreen: React.FC = () => {
     return { en: s };
   };
 
-  const handleCardAddToCart = (item: SellerProduct) => {
-    const priceStr = String(item.unitPrice ?? 0);
-    addToCart(
-      {
-        offerId: parseInt(item.offerId || '0', 10) || 0,
-        categoryName: '',
-        subject: item.productName,
-        subjectTrans: item.productName,
-        imageUrl: thumbOf(item) || item.productUrl || '',
-        skuInfo: {
-          skuId: parseInt(item.skuId || '0', 10) || 0,
-          specId: item.specId || String(item.offerId || ''),
-          price: priceStr,
-          amountOnSale: 999999,
-          consignPrice: priceStr,
-          skuAttributes: [],
-          fenxiaoPriceInfo: { onePiecePrice: priceStr, offerPrice: priceStr },
+  // 카드의 장바구니 아이콘 — 곧바로 담지 않고 SKU 옵션 선택 모달을 연다.
+  // productsApi.getProductDetail 로 실제 SKU 리스트를 받아와 옵션 행을 채운다.
+  const handleCardAddToCart = async (item: SellerProduct) => {
+    setCartModalProduct(item);
+    setCartModalSkus([]);
+    setCartModalQtyMap({});
+    setCartModalExpanded(false);
+    setCartModalLoading(true);
+    try {
+      const offerId = item.offerId || item._id;
+      const res = await productsApi.getProductDetail(offerId, '1688', locale);
+      // productsApi.getProductDetail 의 반환 형식 — { success, data: response.data.data }
+      // 그래서 product 는 res.data.product (또는 fallback 들).
+      const apiProduct: any =
+        (res.data as any)?.product ??
+        (res.data as any)?.data?.product ??
+        res.data;
+      const galleryFirst: string =
+        apiProduct?.productImage?.images?.[0] || thumbOf(item) || item.productUrl || '';
+      const rawSkus: any[] = apiProduct?.productSkuInfos || [];
+      if (__DEV__) {
+        console.log(
+          '[cartModal] getProductDetail',
+          offerId,
+          'productSkuInfos len =',
+          rawSkus.length,
+          'keys:',
+          apiProduct ? Object.keys(apiProduct).slice(0, 20) : null,
+        );
+      }
+      const skus: CartModalSku[] = rawSkus.map((sku: any) => {
+        const attrs = sku.skuAttributes || [];
+        const name =
+          attrs
+            .map((a: any) => a.valueTrans || a.value || '')
+            .filter(Boolean)
+            .join(' + ') || item.productName;
+        const optionLabel =
+          attrs[0]?.attributeNameTrans ||
+          attrs[0]?.attributeName ||
+          t('profile.productMgmt.cartModal.optionDefault');
+        const image =
+          attrs.find((a: any) => a.skuImageUrl)?.skuImageUrl || galleryFirst;
+        return {
+          skuId: String(sku.skuId || ''),
+          specId: String(sku.specId || ''),
+          name,
+          optionLabel: String(optionLabel),
+          price: Number(sku.price ?? sku.consignPrice ?? item.unitPrice ?? 0),
+          image,
+          attributes: attrs,
+        };
+      });
+      // SKU 가 하나도 없으면 SellerProduct 자체를 단일 SKU 로 fallback.
+      if (skus.length === 0) {
+        skus.push({
+          skuId: String(item.skuId || ''),
+          specId: String(item.specId || item.offerId || ''),
+          name: item.productName,
+          optionLabel: t('profile.productMgmt.cartModal.optionDefault'),
+          price: Number(item.unitPrice ?? 0),
+          image: galleryFirst,
+          attributes: [],
+        });
+      }
+      setCartModalSkus(skus);
+    } catch {
+      // 상세 조회 실패 → fallback 으로 카드 단일 SKU 사용.
+      setCartModalSkus([
+        {
+          skuId: String(item.skuId || ''),
+          specId: String(item.specId || item.offerId || ''),
+          name: item.productName,
+          optionLabel: t('profile.productMgmt.cartModal.optionDefault'),
+          price: Number(item.unitPrice ?? 0),
+          image: thumbOf(item) || item.productUrl || '',
+          attributes: [],
         },
-        companyName: buildCompanyMultiLang(item.company),
-        sellerOpenId: '',
-        source: '1688',
-        quantity: 1,
-        minOrderQuantity: 1,
-      },
-      locale,
-    );
+      ]);
+    } finally {
+      setCartModalLoading(false);
+    }
+  };
+
+  // 모달의 '장바구니 추가' — 수량 > 0 인 SKU 각각을 addToCart 로 담는다.
+  const confirmCartModal = () => {
+    const item = cartModalProduct;
+    if (!item) return;
+    const positive = cartModalSkus.filter((s) => (cartModalQtyMap[s.skuId] ?? 0) > 0);
+    if (positive.length === 0) {
+      showToast(t('profile.productMgmt.cartModal.qtyRequired') || 'Please enter a quantity', 'error');
+      return;
+    }
+    for (const sku of positive) {
+      const qty = cartModalQtyMap[sku.skuId] ?? 0;
+      const priceStr = String(sku.price ?? 0);
+      addToCart(
+        {
+          offerId: parseInt(item.offerId || '0', 10) || 0,
+          categoryName: '',
+          subject: item.productName,
+          subjectTrans: item.productName,
+          imageUrl: sku.image || thumbOf(item) || item.productUrl || '',
+          skuInfo: {
+            skuId: parseInt(sku.skuId || '0', 10) || 0,
+            specId: sku.specId || String(item.offerId || ''),
+            price: priceStr,
+            amountOnSale: 999999,
+            consignPrice: priceStr,
+            skuAttributes: sku.attributes || [],
+            fenxiaoPriceInfo: { onePiecePrice: priceStr, offerPrice: priceStr },
+          },
+          companyName: buildCompanyMultiLang(item.company),
+          sellerOpenId: '',
+          source: '1688',
+          quantity: qty,
+          minOrderQuantity: 1,
+        },
+        locale,
+      );
+    }
+    setCartModalProduct(null);
+    setCartModalSkus([]);
+    setCartModalQtyMap({});
+    setCartModalExpanded(false);
   };
 
   const handleCardImageSearch = async (item: SellerProduct) => {
@@ -732,12 +855,26 @@ const ProductManagementScreen: React.FC = () => {
     const thumb = thumbOf(item);
     return (
       <TouchableOpacity
-        style={[styles.productCard, viewMode === 'grid' && styles.productCardGrid]}
+        // 선택된 카드에는 붉은 테두리가 표시되어 체크 상태가 카드 전체에서
+        // 시각적으로 확실히 드러나게 한다 (작은 체크박스만으론 인지가 약함).
+        style={[
+          styles.productCard,
+          viewMode === 'grid' && styles.productCardGrid,
+          checked && styles.productCardSelected,
+        ]}
         activeOpacity={0.8}
         onPress={() => toggleSelectOne(item._id)}
       >
-        <View style={[styles.checkbox, checked && styles.checkboxChecked, styles.cardCheckbox]}>
-          {checked && <Icon name="checkmark" size={12} color={COLORS.white} />}
+        {/* 좌상단 체크박스 — 선택 시 붉은 채움 + 흰색 체크마크.
+            크기를 22 로 키우고 zIndex 를 명시해 이미지/액션 아이콘 위에 항상 노출. */}
+        <View
+          style={[
+            styles.checkbox,
+            styles.cardCheckbox,
+            checked && styles.checkboxChecked,
+          ]}
+        >
+          {checked && <Icon name="checkmark" size={14} color={COLORS.white} />}
         </View>
         {thumb ? (
           <Image source={{ uri: thumb }} style={styles.productImage} resizeMode="cover" />
@@ -1007,6 +1144,198 @@ const ProductManagementScreen: React.FC = () => {
     );
   };
 
+  // ─── 장바구니 담기 모달 ─────────────────────────────────────────
+  // 상품 카드의 장바구니 아이콘에서 진입. 옵션을 선택해 장바구니에 담을
+  // 상품을 구성하는 패널 — 스크린샷의 디자인을 따라 헤더 / 상품 정보 행 /
+  // SKU 옵션 행(이미지 + 이름 + 옵션 셀렉터 + 가격 + 수량 컨트롤) /
+  // '장바구니 추가' 확정 단추로 구성. SellerProduct 는 단일 SKU 라
+  // 옵션 행은 1줄로 렌더된다.
+  const renderCartModal = () => {
+    const item = cartModalProduct;
+    if (!item) return null;
+    const mainThumb = thumbOf(item) || item.productUrl || '';
+    // 기본 노출 SKU 수 — 그 이상은 '더보기 (N)' 으로 토글.
+    const VISIBLE = 3;
+    const hasMore = cartModalSkus.length > VISIBLE;
+    const visibleSkus = cartModalExpanded ? cartModalSkus : cartModalSkus.slice(0, VISIBLE);
+    const setQty = (skuId: string, next: number) =>
+      setCartModalQtyMap((prev) => ({ ...prev, [skuId]: Math.max(0, next) }));
+    const totalQty = Object.values(cartModalQtyMap).reduce((s, n) => s + (n || 0), 0);
+    return (
+      <Modal
+        visible={!!cartModalProduct}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCartModalProduct(null)}
+      >
+        <TouchableOpacity
+          style={styles.cartModalBackdrop}
+          activeOpacity={1}
+          onPress={() => setCartModalProduct(null)}
+        >
+          <View style={styles.cartModalCard} onStartShouldSetResponder={() => true}>
+            {/* 헤더 — 좌측 주황 아이콘 박스 + 타이틀/설명, 우측 닫기 X */}
+            <View style={styles.cartModalHeader}>
+              <View style={styles.cartModalIconBox}>
+                <Icon name="cart-outline" size={18} color={COLORS.white} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cartModalTitle}>
+                  {t('profile.productMgmt.cartModal.title')}
+                </Text>
+                <Text style={styles.cartModalSubtitle} numberOfLines={1}>
+                  {t('profile.productMgmt.cartModal.subtitle')}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setCartModalProduct(null)} hitSlop={BACK_HIT_SLOP}>
+                <Icon name="close" size={20} color={COLORS.text.secondary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* 상품 정보 — 이름 + 소스 배지 */}
+            <View style={styles.cartModalProductRow}>
+              <Text style={styles.cartModalProductName} numberOfLines={2}>
+                {item.productName}
+              </Text>
+              <View style={styles.cartModalSourceBadge}>
+                <Text style={styles.cartModalSourceText}>1688</Text>
+              </View>
+            </View>
+
+            <View style={styles.cartModalDivider} />
+
+            {/* SKU 옵션 영역 — 좌측 큰 썸네일 + 우측 SKU 행 리스트(스크롤 가능) */}
+            <View style={styles.cartModalSkuRow}>
+              {mainThumb ? (
+                <Image
+                  source={{ uri: mainThumb }}
+                  style={styles.cartModalMainImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.cartModalMainImage, styles.cartModalMainImagePlaceholder]}>
+                  <Icon name="image-outline" size={32} color={COLORS.gray[400]} />
+                </View>
+              )}
+
+              {/* SKU 행 리스트 — SKU 가 많아 화면 밖으로 넘칠 때를 대비해
+                  ScrollView 로 감싸 maxHeight 안에서 자체 스크롤. */}
+              <ScrollView
+                style={styles.cartModalSkuList}
+                contentContainerStyle={styles.cartModalSkuListContent}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+              >
+                {cartModalLoading && (
+                  <View style={styles.cartModalLoadingBox}>
+                    <ActivityIndicator size="small" color={COLORS.red} />
+                  </View>
+                )}
+                {!cartModalLoading &&
+                  visibleSkus.map((sku) => {
+                    const qty = cartModalQtyMap[sku.skuId] ?? 0;
+                    // 각 SKU 행은 두 줄로 분리해 좁은 화면에서도 모든 정보가 보이도록 함:
+                    //   ① 썸네일 + 이름(flex:1) + 옵션 알약
+                    //   ② 우측 정렬 — 가격 + 수량(- / N / +)
+                    return (
+                      <View
+                        key={sku.skuId || sku.specId}
+                        style={styles.cartModalSkuBlock}
+                      >
+                        {/* 1행 */}
+                        <View style={styles.cartModalSkuLine}>
+                          {sku.image ? (
+                            <Image
+                              source={{ uri: sku.image }}
+                              style={styles.cartModalSkuThumb}
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <View
+                              style={[
+                                styles.cartModalSkuThumb,
+                                styles.cartModalMainImagePlaceholder,
+                              ]}
+                            />
+                          )}
+                          <Text style={styles.cartModalSkuName} numberOfLines={2}>
+                            {sku.name}
+                          </Text>
+                          <View style={styles.cartModalOptionPill}>
+                            <Text style={styles.cartModalOptionText} numberOfLines={1}>
+                              {sku.optionLabel}
+                            </Text>
+                            <Icon name="chevron-down" size={12} color={COLORS.text.secondary} />
+                          </View>
+                        </View>
+                        {/* 2행 — 우측 정렬, 가격 + 수량 컨트롤 */}
+                        <View style={styles.cartModalSkuLine2}>
+                          <Text style={styles.cartModalPrice}>¥ {sku.price.toFixed(2)}</Text>
+                          <View style={styles.cartModalQtyBox}>
+                            <TouchableOpacity
+                              style={styles.cartModalQtyBtn}
+                              onPress={() => setQty(sku.skuId, qty - 1)}
+                            >
+                              <Icon name="remove" size={14} color={COLORS.text.primary} />
+                            </TouchableOpacity>
+                            <Text style={styles.cartModalQtyValue}>{qty}</Text>
+                            <TouchableOpacity
+                              style={styles.cartModalQtyBtn}
+                              onPress={() => setQty(sku.skuId, qty + 1)}
+                            >
+                              <Icon name="add" size={14} color={COLORS.text.primary} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+              </ScrollView>
+            </View>
+
+            {/* 푸터 — 좌측 '더보기 (N) ▾' / 우측 '장바구니 추가' 단추 */}
+            <View style={styles.cartModalFooter}>
+              {hasMore ? (
+                <TouchableOpacity
+                  style={styles.cartModalMoreBtn}
+                  onPress={() => setCartModalExpanded((v) => !v)}
+                >
+                  <Text style={styles.cartModalMoreText}>
+                    {cartModalExpanded
+                      ? t('profile.productMgmt.cartModal.collapse')
+                      : `${t('profile.productMgmt.cartModal.more')} (${cartModalSkus.length - VISIBLE})`}
+                  </Text>
+                  <Icon
+                    name={cartModalExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={12}
+                    color={COLORS.text.secondary}
+                  />
+                </TouchableOpacity>
+              ) : (
+                <View />
+              )}
+              <TouchableOpacity
+                style={[
+                  styles.cartModalConfirmBtn,
+                  totalQty <= 0 && styles.cartModalConfirmBtnDisabled,
+                ]}
+                disabled={totalQty <= 0 || isAddingToCart}
+                onPress={confirmCartModal}
+              >
+                <Icon name="cart-outline" size={14} color={COLORS.white} />
+                <Text style={styles.cartModalConfirmText}>
+                  {isAddingToCart
+                    ? t('product.addingToCart')
+                    : t('profile.productMgmt.cartModal.confirm')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    );
+  };
+
   const renderDateRangeModal = () => {
     if (!dateModalOpen) return null;
     const nextMonth = new Date(
@@ -1177,6 +1506,7 @@ const ProductManagementScreen: React.FC = () => {
         </ScrollView>
         {renderPickerModal()}
         {renderDateRangeModal()}
+        {renderCartModal()}
         {/* 이미지 검색 결과 모달 — 카드의 검색(🔍) 아이콘에서 진입.
             ProductDetailScreen 의 유사 상품 검색 모달과 동일한 컴포넌트. */}
         {imageSearchVisible && (
@@ -1486,8 +1816,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: SPACING.sm,
     left: SPACING.sm,
-    zIndex: 2,
+    // 카드 이미지 / 액션 아이콘 위에 항상 노출되도록 z 우선순위를 올린다.
+    zIndex: 5,
+    elevation: 5,
+    width: 22,
+    height: 22,
     backgroundColor: COLORS.white,
+  },
+  // 선택된 카드의 시각적 강조 — 붉은 테두리 + 살짝 붉은 배경 틴트.
+  productCardSelected: {
+    borderWidth: 1.5,
+    borderColor: COLORS.red,
+    backgroundColor: 'rgba(255, 85, 0, 0.04)',
   },
   productImage: {
     width: 80,
@@ -1635,6 +1975,225 @@ const styles = StyleSheet.create({
     left: -1000,
     width: 560,
     maxWidth: '95%',
+  },
+  // ─── 장바구니 담기 모달 ─────────────────────────────────────────
+  cartModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.md,
+  },
+  cartModalCard: {
+    // 멀티 SKU 행을 충분히 담도록 너비/높이를 늘림.
+    width: '100%',
+    maxWidth: 860,
+    maxHeight: '90%',
+    backgroundColor: COLORS.white,
+    borderRadius: 12,
+    padding: SPACING.md,
+  },
+  cartModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingBottom: SPACING.sm,
+  },
+  cartModalIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: COLORS.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cartModalTitle: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '800',
+    color: COLORS.text.primary,
+  },
+  cartModalSubtitle: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  cartModalProductRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.gray[50],
+    borderRadius: 8,
+    padding: SPACING.sm,
+    marginTop: SPACING.xs,
+    gap: SPACING.sm,
+  },
+  cartModalProductName: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  cartModalSourceBadge: {
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  cartModalSourceText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    fontWeight: '600',
+  },
+  cartModalDivider: {
+    height: 1,
+    backgroundColor: COLORS.gray[100],
+    marginVertical: SPACING.sm,
+  },
+  cartModalSkuRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  cartModalMainImage: {
+    width: 96,
+    height: 96,
+    borderRadius: 8,
+    backgroundColor: COLORS.gray[100],
+  },
+  cartModalMainImagePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cartModalSkuList: {
+    flex: 1,
+    // SKU 가 많아도 모달이 화면 밖으로 넘치지 않도록 리스트 자체의 높이를 제한.
+    // 안에서 ScrollView 가 자체적으로 스크롤된다.
+    maxHeight: 360,
+  },
+  cartModalSkuListContent: {
+    gap: SPACING.sm,
+    paddingBottom: SPACING.xs,
+  },
+  // SKU 상세 fetch 중 가운데 로딩 인디케이터.
+  cartModalLoadingBox: {
+    paddingVertical: SPACING.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // 각 SKU 한 블록 — 2줄(이미지+이름+옵션 / 가격+수량) 을 세로로 묶음.
+  // 행 사이 구분이 잘 보이도록 옅은 회색 하단 보더를 둠.
+  cartModalSkuBlock: {
+    paddingVertical: SPACING.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[100],
+  },
+  cartModalSkuLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  // SKU 행의 두 번째 줄 — 우측 정렬, 가격 + 수량 컨트롤.
+  cartModalSkuLine2: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: SPACING.sm,
+    marginTop: 6,
+  },
+  cartModalSkuThumb: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    backgroundColor: COLORS.gray[100],
+  },
+  cartModalSkuName: {
+    flex: 1,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  cartModalOptionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    minWidth: 64,
+    justifyContent: 'space-between',
+  },
+  cartModalOptionText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  cartModalPrice: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '800',
+    color: COLORS.red,
+    minWidth: 56,
+    textAlign: 'right',
+  },
+  cartModalQtyBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+  },
+  cartModalQtyBtn: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cartModalQtyValue: {
+    minWidth: 24,
+    textAlign: 'center',
+    fontSize: FONTS.sizes.xs,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  cartModalFooter: {
+    flexDirection: 'row',
+    // 좌측: '더보기 (N) ▾' (있을 때만) / 우측: '장바구니 추가' 단추.
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: SPACING.md,
+  },
+  cartModalMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: 6,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+  },
+  cartModalMoreText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '600',
+  },
+  cartModalConfirmBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.red,
+    borderRadius: 8,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  cartModalConfirmBtnDisabled: {
+    opacity: 0.5,
+  },
+  cartModalConfirmText: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '800',
+    color: COLORS.white,
   },
   dateModalCard: {
     backgroundColor: COLORS.white,

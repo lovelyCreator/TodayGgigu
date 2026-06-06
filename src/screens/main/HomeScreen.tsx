@@ -15,6 +15,7 @@ import {
   PermissionsAndroid,
   Linking,
   Clipboard,
+  Modal,
 } from 'react-native';
 import { launchCamera, launchImageLibrary, MediaType, ImagePickerResponse, CameraOptions, ImageLibraryOptions } from 'react-native-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -44,6 +45,7 @@ import { useDeleteFromWishlistMutation } from '../../hooks/useDeleteFromWishlist
 import { useSocket } from '../../context/SocketContext';
 import { inquiryApi } from '../../services/inquiryApi';
 import { orderApi, Order, OrderItem, mapLocaleToOrdersLang } from '../../services/orderApi';
+import { productsApi } from '../../services/productsApi';
 import Svg, { Circle, Path } from 'react-native-svg';
 const LogoImage = require('../../assets/images/logo.png');
 const KAKAO_CS_CHANNEL_URL = 'http://pf.kakao.com/_xlXLEX';
@@ -209,6 +211,12 @@ const HomeScreen: React.FC = () => {
   const [initialLoading, setInitialLoading] = useState(true); // New state for initial loading
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  // 베스트상품 카드 우측에 표시할 1등 상품 썸네일. /products/search 응답의
+  // products[0].image 를 한 번만 fetch 해서 캐싱한다. fetch 실패 시 null 로
+  // 두면 회색 placeholder 가 그대로 노출되어 카드 레이아웃은 깨지지 않는다.
+  const [bestProductThumb, setBestProductThumb] = useState<string | null>(null);
+  // 인기검색순위 모달 — 인사이트 카드의 '인기검색순위 Hot10' 단추에서 열림.
+  const [showPopularRankingModal, setShowPopularRankingModal] = useState(false);
   const { unreadCount: socketUnreadCount, onUnreadCountUpdated } = useSocket(); // Get total unread count from socket context
   const [unreadCount, setUnreadCount] = useState(0); // Local state for unread count (from REST API)
   const platforms = ['1688', 'taobao', 'myCompany'];
@@ -248,6 +256,42 @@ const HomeScreen: React.FC = () => {
   useEffect(() => {
     setUnreadCount(socketUnreadCount);
   }, [socketUnreadCount]);
+
+  // 베스트상품 카드의 우측 썸네일을 위해 1등 상품 이미지 한 번 fetch.
+  // /products/search 의 첫 번째 결과만 사용한다. BestProductsScreen 과 동일한
+  // keyword '玩具' 로 호출해 일관성 유지.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // 시그니처: keyword, source, country, page, pageSize, sort?, priceStart?,
+        // priceEnd?, filter?, requireAuth, sellerOpenId?
+        // pageSize=10 으로 1~10등 상품을 받아 10번째(index 9) 이미지를 사용한다.
+        const res = await productsApi.searchProductsByKeyword(
+          '玩具',
+          '1688',
+          locale,
+          1,
+          10,
+          undefined, // sort
+          undefined, // priceStart
+          undefined, // priceEnd
+          undefined, // filter
+          false,     // requireAuth — 비로그인 게스트 카드에도 표시
+        );
+        if (cancelled) return;
+        const list = res.data?.data?.products ?? [];
+        // 10번째 상품을 우선 사용, 응답이 10개 미만이면 가능한 마지막 항목으로 fallback.
+        const tenth = list[9] ?? list[list.length - 1];
+        if (tenth?.image) setBestProductThumb(tenth.image);
+      } catch {
+        // 실패 시 thumb 가 null 로 남아 회색 placeholder 가 나옴 — 별도 알림 X.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [locale]);
   
   // Get categories for selected platform (using store instead)
   const getCompanyCategories = () => {
@@ -479,22 +523,38 @@ const HomeScreen: React.FC = () => {
         <TouchableOpacity
           style={styles.guestInsightCard}
           activeOpacity={0.88}
-          onPress={() => navigation.navigate('Search' as never)}
+          onPress={() => setShowPopularRankingModal(true)}
         >
-          <Text style={styles.guestInsightTitle}>{t('home.guestInsightPopularTitle')}</Text>
-          <View style={styles.guestInsightLine}>
-            <Text style={styles.guestInsightRank}>1</Text>
-            <Text style={styles.guestInsightItem} numberOfLines={1}>
+          {/* 헤더 — "인기검색순위" + 우측에 작은 붉은 "Hot10" 알약 배지 */}
+          <View style={styles.popularCardHeader}>
+            <Text style={styles.popularCardTitle} numberOfLines={1}>
+              {t('home.popularRankingModal.title')}
+            </Text>
+            <View style={styles.popularCardHot10Badge}>
+              <Text style={styles.popularCardHot10Text}>Hot10</Text>
+            </View>
+          </View>
+          {/* 1행: 🔥 + 붉은 원형 1 + 선물 세트 + ↑ 2 */}
+          <View style={styles.popularCardLine}>
+            <Text style={styles.popularCardFire}>🔥</Text>
+            <View style={styles.popularCardRankBadge}>
+              <Text style={styles.popularCardRankText}>1</Text>
+            </View>
+            <Text style={styles.popularCardItem} numberOfLines={1}>
               {t('home.guestInsightPopularItem1')}
             </Text>
-            <Text style={styles.guestInsightUp}>{t('home.guestInsightPopularUp1')}</Text>
+            <Text style={styles.popularCardUp}>{t('home.guestInsightPopularUp1')}</Text>
           </View>
-          <View style={styles.guestInsightLine}>
-            <Text style={styles.guestInsightRank}>2</Text>
-            <Text style={styles.guestInsightItem} numberOfLines={1}>
+          {/* 2행: 🔥 + 붉은 원형 2 + 가방 + ↑ 10 */}
+          <View style={styles.popularCardLine}>
+            <Text style={styles.popularCardFire}>🔥</Text>
+            <View style={styles.popularCardRankBadge}>
+              <Text style={styles.popularCardRankText}>2</Text>
+            </View>
+            <Text style={styles.popularCardItem} numberOfLines={1}>
               {t('home.guestInsightPopularItem2')}
             </Text>
-            <Text style={styles.guestInsightUp}>{t('home.guestInsightPopularUp2')}</Text>
+            <Text style={styles.popularCardUp}>{t('home.guestInsightPopularUp2')}</Text>
           </View>
         </TouchableOpacity>
         <TouchableOpacity
@@ -518,13 +578,33 @@ const HomeScreen: React.FC = () => {
           <View style={styles.guestInsightThumb} />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.guestInsightCard}
+          style={[styles.guestInsightCard, styles.bestProductsCard]}
           activeOpacity={0.88}
           onPress={() => (navigation as any).navigate('BestProducts')}
         >
-          <Text style={styles.guestInsightTitle}>{t('home.guestInsightBestProductsTitle')}</Text>
-          <Text style={styles.guestInsightMeta}>{t('home.guestInsightBestProductsMeta')}</Text>
-          <View style={styles.guestInsightThumb} />
+          {/* 카드 전체를 relative 컨테이너로 두고 썸네일을 우하단에 absolute 배치.
+              텍스트들은 좌상단부터 자연스럽게 흐른다 — 스크린샷의 레이아웃과 일치. */}
+          <Text style={styles.guestInsightTitle}>
+            {t('home.guestInsightBestProductsTitle')}
+          </Text>
+          <Text style={styles.bestProductsSubtitle}>
+            {t('home.guestInsightBestProductsMeta')} Top10
+          </Text>
+          <Text style={styles.bestProductsTop10}>Top10</Text>
+          <Text style={styles.bestProductsCta}>
+            {t('home.guestInsightBestProductsCta')}{' '}&gt;
+          </Text>
+          {/* 1등 상품 썸네일 — 카드의 우하단에 absolute 위치.
+              fetch 실패 시 회색 placeholder 로 보임. */}
+          {bestProductThumb ? (
+            <Image
+              source={{ uri: bestProductThumb }}
+              style={styles.bestProductsThumb}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={[styles.bestProductsThumb, styles.bestProductsThumbPlaceholder]} />
+          )}
         </TouchableOpacity>
       </View>
     </View>
@@ -2070,6 +2150,56 @@ const HomeScreen: React.FC = () => {
         onTakePhoto={handleTakePhoto}
         onChooseFromGallery={handleChooseFromGallery}
       />
+
+      {/* 인기검색순위 모달 — 인사이트 카드의 '인기검색순위 Hot10' 단추에서 열림.
+          2-열 × 5-행 (총 10개 행) 그리드: 각 행은 [인기 10 | 랜크 번호 | 아이템명 | 상승 N]. */}
+      <Modal
+        visible={showPopularRankingModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPopularRankingModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.popularModalBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowPopularRankingModal(false)}
+        >
+          <View
+            style={styles.popularModalCard}
+            onStartShouldSetResponder={() => true}
+          >
+            {/* 헤더 — 🔥 인기 검색 순위 */}
+            <View style={styles.popularModalHeader}>
+              <Text style={styles.popularModalHeaderEmoji}>🔥</Text>
+              <Text style={styles.popularModalHeaderText}>
+                {t('home.popularRankingModal.title')}
+              </Text>
+            </View>
+            {/* 2-열 × 5-행 그리드 — 10개 순위 항목 */}
+            <View style={styles.popularRowsGrid}>
+              {Array.from({ length: 10 }).map((_, idx) => (
+                <View key={idx} style={styles.popularRowCell}>
+                  <View style={styles.popularRow}>
+                    <Text style={styles.popularRowLeftLabel}>
+                      {t('home.popularRankingModal.popularBadge')}
+                    </Text>
+                    <View style={styles.popularRowDivider} />
+                    <View style={styles.popularRowRankBadge}>
+                      <Text style={styles.popularRowRankText}>{idx + 1}</Text>
+                    </View>
+                    <Text style={styles.popularRowItem} numberOfLines={1}>
+                      {t('home.popularRankingModal.itemPlaceholder')}
+                    </Text>
+                    <Text style={styles.popularRowUp}>
+                      {t('home.popularRankingModal.upLabel')} 2
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -2089,6 +2219,155 @@ const styles = StyleSheet.create({
   },
   gradientFill: {
     flex: 1,
+  },
+  // ─── 인기검색순위 카드 (홈 인사이트 그리드 좌상단) ──────────────
+  popularCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    marginBottom: SPACING.xs,
+  },
+  popularCardTitle: {
+    flex: 0,
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '800',
+    color: COLORS.text.primary,
+  },
+  // 작은 붉은 알약 배지 "Hot10"
+  popularCardHot10Badge: {
+    backgroundColor: COLORS.red,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  popularCardHot10Text: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.white,
+  },
+  // 1 행 — 🔥 + 붉은 원형 랭크 + 아이템 + 우측 ↑N
+  popularCardLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  popularCardFire: {
+    fontSize: FONTS.sizes.xs,
+    marginRight: 4,
+  },
+  // 카드용 작은 붉은 원형 랭크 배지 (모달 것보다 작게)
+  popularCardRankBadge: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  popularCardRankText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: COLORS.white,
+  },
+  popularCardItem: {
+    flex: 1,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  popularCardUp: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.red,
+    fontWeight: '700',
+    marginLeft: SPACING.xs,
+  },
+  // ─── 인기검색순위 모달 ──────────────────────────────────────────
+  popularModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.md,
+  },
+  popularModalCard: {
+    width: '100%',
+    maxWidth: 720,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+  },
+  popularModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  popularModalHeaderEmoji: {
+    fontSize: FONTS.sizes.lg,
+  },
+  popularModalHeaderText: {
+    fontSize: FONTS.sizes.lg,
+    fontWeight: '800',
+    color: COLORS.red,
+  },
+  // 2-열 × 5-행 그리드 — 항목 셀들이 가로/세로로 깔끔히 정렬되도록 flexWrap.
+  popularRowsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  popularRowCell: {
+    // 2-열 — 부모 gap(SPACING.sm) 을 빼고 50% 폭.
+    width: '48.5%',
+  },
+  popularRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 85, 0, 0.06)',
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.sm,
+  },
+  popularRowLeftLabel: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.red,
+    fontWeight: '700',
+    marginRight: SPACING.sm,
+  },
+  popularRowDivider: {
+    width: 1,
+    height: 14,
+    backgroundColor: COLORS.gray[300],
+    marginRight: SPACING.sm,
+  },
+  popularRowRankBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.sm,
+  },
+  popularRowRankText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.white,
+  },
+  popularRowItem: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '500',
+  },
+  popularRowUp: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.red,
+    fontWeight: '700',
+    marginLeft: SPACING.sm,
   },
   scrollView: {
     minHeight: '100%',
@@ -2334,6 +2613,48 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: BORDER_RADIUS.md,
     backgroundColor: COLORS.gray[200],
+    borderWidth: 1,
+    borderColor: FIGMA_OVERLAY_05,
+  },
+  // 베스트상품 카드 — 다른 3개 카드와 동일한 크기 유지(부모 guestInsightCard
+  // 의 minHeight: 112 를 그대로 상속). 텍스트가 썸네일과 겹치지 않도록
+  // paddingRight 으로 우측 공간 확보, 텍스트 라인 간격은 거의 0 으로 압축해
+  // 4줄(타이틀 + 서브 + Top10 + 바로가기) 이 자연스럽게 들어가게 한다.
+  bestProductsCard: {
+    position: 'relative',
+    // 텍스트 라인과 우하단 썸네일(52px) 사이의 가로 간격을 줄임.
+    // 다른 3개 카드와 같은 너비/높이를 유지하면서 텍스트 영역만 우측으로 더 확장.
+    paddingRight: 0,
+  },
+  bestProductsSubtitle: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    fontWeight: '600',
+    marginTop: 0,
+  },
+  bestProductsTop10: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '900',
+    color: COLORS.red,
+    marginTop: 0,
+  },
+  bestProductsCta: {
+    marginTop: 0,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    fontWeight: '500',
+  },
+  // 카드의 우하단에 떠 있는 1등 상품 썸네일 (원래 크기 52×52 유지).
+  bestProductsThumb: {
+    position: 'absolute',
+    right: SPACING.sm,
+    bottom: SPACING.sm,
+    width: 52,
+    height: 52,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.gray[100],
+  },
+  bestProductsThumbPlaceholder: {
     borderWidth: 1,
     borderColor: FIGMA_OVERLAY_05,
   },

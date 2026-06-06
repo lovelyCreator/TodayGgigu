@@ -174,7 +174,15 @@ export const translations = {
       guestInsightMerchantsTitle: 'Popular merchants',
       guestInsightMerchantsMeta: 'Best merchants Top 10',
       guestInsightBestProductsTitle: 'Best products',
-      guestInsightBestProductsMeta: 'Best products Top 10',
+      guestInsightBestProductsMeta: 'Best products',
+      guestInsightBestProductsCta: 'Go now',
+      // Popular ranking modal (opened from the "popular ranking Hot10" card)
+      popularRankingModal: {
+        title: 'Popular Search Ranking',
+        popularBadge: 'Hot 10',
+        upLabel: 'Up',
+        itemPlaceholder: 'Gift set',
+      },
       // BestProductsScreen (navigated from the "best products" insight card)
       bestProducts: {
         title: 'Best Products',
@@ -1255,6 +1263,16 @@ For return assistance, please contact our customer service team with your order 
         delete: 'Delete',
         loadingDone: 'Loading complete',
         empty: 'No products',
+        // Add-to-cart modal (opened from the cart icon on a card)
+        cartModal: {
+          title: 'Select Product',
+          subtitle: 'Choose options to compose products for your cart',
+          optionDefault: 'Default',
+          confirm: 'Add to cart',
+          qtyRequired: 'Please enter a quantity',
+          more: 'More',
+          collapse: 'Collapse',
+        },
         deleteConfirm: 'Delete selected products?',
         addedToCart: 'Added to cart',
         loadingImage: 'Loading image...',
@@ -2648,7 +2666,15 @@ Supports credit and check cards from various banks for recharging and payments.`
       guestInsightMerchantsTitle: '热门商家',
       guestInsightMerchantsMeta: '最佳商家 Top10',
       guestInsightBestProductsTitle: '爆款商品',
-      guestInsightBestProductsMeta: '最佳商品 Top10',
+      guestInsightBestProductsMeta: '爆款商品',
+      guestInsightBestProductsCta: '立即前往',
+      // 热门搜索排行 弹窗 (从"热门搜索排行 Hot10"卡片打开)
+      popularRankingModal: {
+        title: '热门搜索排行',
+        popularBadge: 'Hot 10',
+        upLabel: '上升',
+        itemPlaceholder: '礼物套装',
+      },
       // 爆款商品页面（从"爆款商品"洞察卡片进入）
       bestProducts: {
         title: '爆款商品',
@@ -3397,6 +3423,16 @@ Supports credit and check cards from various banks for recharging and payments.`
         delete: '删除',
         loadingDone: '加载完成',
         empty: '暂无产品',
+        // 加入购物车弹窗 (从卡片的购物车图标进入)
+        cartModal: {
+          title: '商品选择',
+          subtitle: '选择选项以组合加入购物车的商品',
+          optionDefault: '默认',
+          confirm: '加入购物车',
+          qtyRequired: '请输入数量',
+          more: '更多',
+          collapse: '收起',
+        },
         deleteConfirm: '删除所选产品？',
         addedToCart: '已加入购物车',
         loadingImage: '正在加载图片...',
@@ -5017,7 +5053,15 @@ Supports credit and check cards from various banks for recharging and payments.`
       guestInsightMerchantsTitle: '인기업체',
       guestInsightMerchantsMeta: '베스트 업체 Top10',
       guestInsightBestProductsTitle: '베스트상품',
-      guestInsightBestProductsMeta: '베스트 상품 Top10',
+      guestInsightBestProductsMeta: '베스트 상품',
+      guestInsightBestProductsCta: '바로가기',
+      // 인기검색순위 모달 (인기검색순위 Hot10 카드에서 진입)
+      popularRankingModal: {
+        title: '인기 검색 순위',
+        popularBadge: '인기 10',
+        upLabel: '상승',
+        itemPlaceholder: '선물 세트',
+      },
       // 베스트 상품 페지 (베스트상품 인사이트 카드에서 진입)
       bestProducts: {
         title: '베스트 상품',
@@ -5953,6 +5997,16 @@ Supports credit and check cards from various banks for recharging and payments.`
         delete: '삭제',
         loadingDone: '로딩완료',
         empty: '상품이 없습니다',
+        // 장바구니 담기 모달 (카드의 장바구니 아이콘에서 진입)
+        cartModal: {
+          title: '상품선택',
+          subtitle: '옵션을 선택해 장바구니에 담을 상품을 구성하세요',
+          optionDefault: '기본',
+          confirm: '장바구니 추가',
+          qtyRequired: '수량을 입력하시오',
+          more: '더보기',
+          collapse: '접기',
+        },
         deleteConfirm: '선택한 상품을 삭제하시겠습니까?',
         addedToCart: '장바구니에 담겼습니다',
         loadingImage: '이미지 불러오는 중...',
