@@ -1733,15 +1733,34 @@ const HomeScreen: React.FC = () => {
             image: require('../../assets/icons/cs-kakao.png'),
             url: KAKAO_CS_CHANNEL_URL,
           },
-          { title: 'home.csWechatTitle', image: require('../../assets/icons/cs-wechat.png') },
-          { title: 'home.csOneTitle', image: require('../../assets/icons/cs-one.png') },
-        ] as Array<{ bg?: string; title: string; icon?: string; image?: any; url?: string }>).map((q) => (
+          // 위챗 상담신청 카드는 사용자 요청으로 제거됨.
+          // 1:1 상담신청 — 메세지 페지의 두 번째 탭(general) 으로 내비게이션.
+          {
+            title: 'home.csOneTitle',
+            image: require('../../assets/icons/cs-one.png'),
+            navTarget: 'messageGeneral' as const,
+          },
+        ] as Array<{
+          bg?: string;
+          title: string;
+          icon?: string;
+          image?: any;
+          url?: string;
+          navTarget?: 'messageGeneral';
+        }>).map((q) => (
           <TouchableOpacity
             key={q.title}
             style={styles.csQuickCol}
             onPress={() => {
               if (q.url) {
                 openExternalUrl(q.url);
+              } else if (q.navTarget === 'messageGeneral') {
+                // Main 보텀 탭의 Message 화면을 두 번째 탭(general — 1:1) 으로
+                // 진입. 다른 화면들이 쓰는 동일한 패턴.
+                (navigation as any).navigate('Main', {
+                  screen: 'Message',
+                  params: { initialTab: 'general' },
+                });
               } else {
                 navigation.navigate('CustomerService' as never);
               }
