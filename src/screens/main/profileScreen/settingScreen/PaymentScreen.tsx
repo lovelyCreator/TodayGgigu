@@ -347,14 +347,19 @@ const PaymentScreen: React.FC = () => {
         >
           <Icon name="arrow-back" size={20} color={COLORS.black} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Order Confirmation</Text>
+        <Text style={styles.headerTitle}>{t('payment.orderConfirmation') || 'Order Confirmation'}</Text>
       </View>
       <NotificationBadge
         customIcon={<HeadsetMicIcon width={24} height={24} color={COLORS.text.primary} />}
         count={0}
         badgeColor={COLORS.red}
         onPress={() => {
-          navigation.navigate('CustomerService' as never);
+          // 메세지 페지의 두 번째 탭(general — 1:1 상담) 으로 내비게이션.
+          // HomeScreen 의 1:1 상담신청 카드와 동일한 패턴.
+          (navigation as any).navigate('Main', {
+            screen: 'Message',
+            params: { initialTab: 'general' },
+          });
         }}
       />
     </View>
@@ -456,7 +461,7 @@ const PaymentScreen: React.FC = () => {
                   {/* Return Policy */}
                   {/* <View style={styles.infoSection}>
                     <Text style={styles.infoLabel}>Return Policy:</Text>
-                    <Text style={styles.infoValue}>Official Return Policy</Text>
+                    <Text style={styles.infoValue}>{t('payment.officialReturnPolicy') || 'Official Return Policy'}</Text>
                   </View> */}
 
                   {/* Invoice */}
@@ -470,7 +475,7 @@ const PaymentScreen: React.FC = () => {
                     <Text style={styles.infoLabel}>Note:</Text>
                     <TextInput
                       style={styles.noteInput}
-                      placeholder="Add or edit note"
+                      placeholder={t('payment.addOrEditNote') || 'Add or edit note'}
                       placeholderTextColor={COLORS.gray[400]}
                       value={productNotes[item.id] || ''}
                       onChangeText={(text) => updateProductNote(item.id, text)}
@@ -486,7 +491,7 @@ const PaymentScreen: React.FC = () => {
                     onPress={() => setInputCheckServiceVisible(true)}
                   >
                     <View style={styles.serviceTitleRow}>
-                      <Text style={styles.serviceTitle}>Input Check Service</Text>
+                      <Text style={styles.serviceTitle}>{t('payment.inputCheckService') || 'Input Check Service'}</Text>
                       <TouchableOpacity onPress={() => setInputCheckServiceVisible(true)}>
                         <Icon name="chevron-forward" size={16} color={COLORS.gray[400]} />
                       </TouchableOpacity>
@@ -510,7 +515,7 @@ const PaymentScreen: React.FC = () => {
                         <>
                           <View style={styles.serviceCheck}>
                             <Icon name="checkmark-circle" size={20} color={COLORS.red} />
-                            <Text style={styles.serviceName}>Camera</Text>
+                            <Text style={styles.serviceName}>{t('payment.camera') || 'Camera'}</Text>
                           </View>
                           <Text style={styles.servicePrice}>{formatPriceKRW(0)}</Text>
                         </>
@@ -526,7 +531,7 @@ const PaymentScreen: React.FC = () => {
                     onPress={() => setOrderServiceVisible(true)}
                   >
                     <View style={styles.serviceTitleRow}>
-                      <Text style={styles.serviceTitle}>Order Service</Text>
+                      <Text style={styles.serviceTitle}>{t('payment.orderService') || 'Order Service'}</Text>
                       <TouchableOpacity onPress={() => setOrderServiceVisible(true)}>
                         <Icon name="chevron-forward" size={16} color={COLORS.gray[400]} />
                       </TouchableOpacity>
@@ -534,7 +539,7 @@ const PaymentScreen: React.FC = () => {
                     <View style={styles.serviceRow}>
                       <View style={styles.serviceCheck}>
                         <Icon name="checkmark-circle" size={20} color={COLORS.red} />
-                        <Text style={styles.serviceName}>Camera</Text>
+                        <Text style={styles.serviceName}>{t('payment.camera') || 'Camera'}</Text>
                       </View>
                       <Text style={styles.servicePrice}>{formatPriceKRW(0)}</Text>
                     </View>
@@ -544,10 +549,10 @@ const PaymentScreen: React.FC = () => {
                   {/* Order Memo for this product */}
                   {false && (
                   <View style={styles.memoSection}>
-                    <Text style={styles.sectionTitle}>Order Memo</Text>
+                    <Text style={styles.sectionTitle}>{t('payment.orderMemo') || 'Order Memo'}</Text>
                     <TextInput
                       style={styles.memoInput}
-                      placeholder="Please make memo for this order"
+                      placeholder={t('payment.makeMemo') || 'Please make memo for this order'}
                       placeholderTextColor={COLORS.gray[400]}
                       value={orderMemos[item.id] || ''}
                       onChangeText={(text) => updateOrderMemo(item.id, text)}
@@ -665,16 +670,16 @@ const PaymentScreen: React.FC = () => {
             </View>
             <View style={styles.paymentInfoRow}>
               <Text style={styles.paymentInfoLabel}>{t('payment.bankName') || '은행명'}</Text>
-              <Text style={styles.paymentInfoValue}>국민은행</Text>
+              <Text style={styles.paymentInfoValue}>{t('payment.kbBank') || '국민은행'}</Text>
               <TouchableOpacity style={styles.paymentInfoTextCopy} onPress={() => { Clipboard.setString('국민은행'); showToast(t('common.copied') || 'Copied', 'success'); }}>
-                <Text style={styles.paymentInfoValue}>copy</Text>
+                <Text style={styles.paymentInfoValue}>{t('payment.copy') || 'copy'}</Text>
               </TouchableOpacity>
             </View>
             <View style={styles.paymentInfoRow}>
               <Text style={styles.paymentInfoLabel}>{t('payment.accountNumber') || '계좌번호'}</Text>
               <Text style={styles.paymentInfoValue}>21830104406282</Text>
               <TouchableOpacity style={styles.paymentInfoTextCopy} onPress={() => { Clipboard.setString('21830104406282'); showToast(t('common.copied') || 'Copied', 'success'); }}>
-                <Text style={styles.paymentInfoValue}>copy</Text>
+                <Text style={styles.paymentInfoValue}>{t('payment.copy') || 'copy'}</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -702,7 +707,7 @@ const PaymentScreen: React.FC = () => {
             onPress={() => navigation.navigate('AddressBook')}
           >
             <Icon name="location-outline" size={24} color={COLORS.black} />
-            <Text style={styles.addressText}>Add address</Text>
+            <Text style={styles.addressText}>{t('payment.addAddress') || 'Add address'}</Text>
             <View style={styles.addressActions}>
               <Icon name="create-outline" size={20} color={COLORS.gray[600]} />
               <Icon name="chevron-forward" size={20} color={COLORS.gray[600]} />
@@ -725,7 +730,7 @@ const PaymentScreen: React.FC = () => {
             </Text>
             {!isAddressCollapsed && (
               <Text style={styles.addressPhone}>
-                {safeText(defaultAddress.name) || safeText(user?.name) || 'Unnamed'} {defaultAddress.phone || ''}
+                {safeText(defaultAddress.name) || safeText(user?.name) || t('payment.unnamed') || 'Unnamed'} {defaultAddress.phone || ''}
               </Text>
             )}
           </View>
@@ -773,7 +778,7 @@ const PaymentScreen: React.FC = () => {
             activeOpacity={0.7}
           >
             <Icon name="add-circle-outline" size={20} color={COLORS.red} />
-            <Text style={styles.addNewAddressText}>Add new address</Text>
+            <Text style={styles.addNewAddressText}>{t('payment.addNewAddress') || 'Add new address'}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -787,7 +792,7 @@ const PaymentScreen: React.FC = () => {
     ];
     return (
       <View style={styles.transportationSection}>
-        <Text style={styles.transportationTitle}>Transportation method</Text>
+        <Text style={styles.transportationTitle}>{t('payment.transportationMethod') || 'Transportation method'}</Text>
         {/* <Text style={styles.transportationSubtitle}>Shipping Method</Text> */}
         {methods.map((method) => {
           const key = method.deliveryName;
@@ -805,7 +810,13 @@ const PaymentScreen: React.FC = () => {
                   styles.transportationOptionText,
                   isSelected && styles.transportationOptionTextSelected,
                 ]}>
-                  {key.charAt(0).toUpperCase() + key.slice(1)}
+                  {/* 알려진 운송 키('ship' / 'air') 는 i18n 키로 매핑하고,
+                      그 외 백엔드가 보내는 임의 키는 capitalize 한 원문 사용. */}
+                  {key === 'ship'
+                    ? t('payment.transportShip') || 'Ship'
+                    : key === 'air'
+                      ? t('payment.transportAir') || 'Air'
+                      : key.charAt(0).toUpperCase() + key.slice(1)}
                 </Text>
                 {/* {(price != null || time) ? (
                   <Text style={{ fontSize: FONTS.sizes.xs, color: COLORS.gray[500] }}> */}
@@ -839,11 +850,11 @@ const PaymentScreen: React.FC = () => {
 
   const renderPriceBreakdown = () => (
     <View style={styles.priceSection}>
-      <Text style={styles.priceBreakdownTitle}>Price breakdown</Text>
+      <Text style={styles.priceBreakdownTitle}>{t('payment.priceBreakdown') || 'Price breakdown'}</Text>
 
       {/* Items total */}
       <View style={styles.priceRow}>
-        <Text style={styles.priceRowLabel}>Items total</Text>
+        <Text style={styles.priceRowLabel}>{t('payment.itemsTotal') || 'Items total'}</Text>
         <Text style={[styles.priceRowValue, { fontSize: FONTS.sizes.md }]}>{formatPriceKRW(subtotal)}</Text>
       </View>
 
@@ -852,7 +863,7 @@ const PaymentScreen: React.FC = () => {
         <View style={styles.couponSelectorBlock}>
           <View style={styles.couponSelectorRow}>
             <Icon name="ticket-outline" size={14} color={COLORS.red} />
-            <Text style={styles.couponSelectorLabel}>Product coupon</Text>
+            <Text style={styles.couponSelectorLabel}>{t('payment.productCoupon') || 'Product coupon'}</Text>
             {selectedProductCoupon && (
               <Text style={styles.couponDiscountText}>-{formatPriceKRW(productCouponDiscount)}</Text>
             )}
@@ -881,7 +892,7 @@ const PaymentScreen: React.FC = () => {
 
       {/* Shipping */}
       <View style={styles.priceRow}>
-        <Text style={styles.priceRowLabelGray}>Shipping</Text>
+        <Text style={styles.priceRowLabelGray}>{t('payment.shipping') || 'Shipping'}</Text>
         <Text style={styles.priceRowValue}>{formatPriceKRW(shippingTotalKRW)}</Text>
       </View>
 
@@ -890,7 +901,7 @@ const PaymentScreen: React.FC = () => {
         <View style={styles.couponSelectorBlock}>
           <View style={styles.couponSelectorRow}>
             <Icon name="ticket-outline" size={14} color={COLORS.red} />
-            <Text style={styles.couponSelectorLabel}>Shipping coupon</Text>
+            <Text style={styles.couponSelectorLabel}>{t('payment.shippingCoupon') || 'Shipping coupon'}</Text>
             {selectedShippingCoupon && (
               <Text style={styles.couponDiscountText}>-{formatPriceKRW(shippingCouponDiscount)}</Text>
             )}
@@ -922,7 +933,7 @@ const PaymentScreen: React.FC = () => {
         <View style={styles.couponSelectorBlock}>
           <View style={styles.couponSelectorRow}>
             <Icon name="star-outline" size={14} color={COLORS.red} />
-            <Text style={styles.couponSelectorLabel}>Points</Text>
+            <Text style={styles.couponSelectorLabel}>{t('payment.points') || 'Points'}</Text>
             <Text style={styles.availablePointsText}>
               {availablePointsAmount.toLocaleString()}P available (= {formatPriceKRW(maxPointsKRW)})
             </Text>
@@ -948,7 +959,7 @@ const PaymentScreen: React.FC = () => {
               style={styles.paymentUseAllButton}
               onPress={() => setPointsInput(String(availablePointsAmount))}
             >
-              <Text style={styles.paymentUseAllText}>Use all</Text>
+              <Text style={styles.paymentUseAllText}>{t('payment.useAll') || 'Use all'}</Text>
             </TouchableOpacity>
             {pointsDiscount > 0 && (
               <Text style={styles.couponDiscountText}>-{formatPriceKRW(pointsDiscount)}</Text>
@@ -960,14 +971,14 @@ const PaymentScreen: React.FC = () => {
       {/* Extra discounts */}
       {(couponDiscount + pointsDiscount) > 0 && (
         <View style={styles.priceRow}>
-          <Text style={styles.priceRowLabelGray}>Extra discounts</Text>
+          <Text style={styles.priceRowLabelGray}>{t('payment.extraDiscounts') || 'Extra discounts'}</Text>
           <Text style={styles.priceRowValueRed}>-{formatPriceKRW(couponDiscount + pointsDiscount)}</Text>
         </View>
       )}
 
       {/* Estimated total */}
       <View style={styles.estimatedTotalRow}>
-        <Text style={styles.estimatedTotalLabel}>Estimated total</Text>
+        <Text style={styles.estimatedTotalLabel}>{t('payment.estimatedTotal') || 'Estimated total'}</Text>
         <Text style={styles.estimatedTotalValue}>{formatPriceKRW(finalTotal)}</Text>
       </View>
     </View>
@@ -1134,11 +1145,11 @@ const PaymentScreen: React.FC = () => {
         <View style={styles.bottomBarContent}>
           <View style={styles.bottomBarLeft}>
             <Text style={styles.bottomBarBreakdown}>
-              <Text style={styles.bottomBarBreakdownBold}>Breakdown</Text>
-              <Text style={styles.bottomBarBreakdownLight}> {itemCount} item{itemCount > 1 ? 's' : ''} in total</Text>
+              <Text style={styles.bottomBarBreakdownBold}>{t('payment.breakdown') || 'Breakdown'}</Text>
+              <Text style={styles.bottomBarBreakdownLight}> {itemCount} {itemCount > 1 ? (t('payment.itemsInTotal') || 'items in total') : (t('payment.itemInTotal') || 'item in total')}</Text>
             </Text>
             {totalDiscount > 0 && (
-              <Text style={styles.bottomBarDiscount}>¥{totalDiscount.toFixed(0)} off in total</Text>
+              <Text style={styles.bottomBarDiscount}>¥{totalDiscount.toFixed(0)} {t('payment.offInTotal') || 'off in total'}</Text>
             )}
           </View>
           <TouchableOpacity 
@@ -1150,7 +1161,7 @@ const PaymentScreen: React.FC = () => {
               <ActivityIndicator size="small" color={COLORS.white} />
             ) : (
               <Text style={styles.confirmButtonText}>
-                Amount paid: {formatPriceKRW(finalTotal)}
+                {t('payment.amountPaid') || 'Amount paid'}: {formatPriceKRW(finalTotal)}
               </Text>
             )}
           </TouchableOpacity>
@@ -1264,65 +1275,65 @@ const PaymentScreen: React.FC = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.addressModalContent}>
             <View style={styles.addressModalHeader}>
-              <Text style={styles.addressModalTitle}>{selectedAddress && !editAddress.recipient || editAddress.recipient?.length === 0 ? 'New address' : 'Edit address'}</Text>
+              <Text style={styles.addressModalTitle}>{(selectedAddress && !editAddress.recipient) || editAddress.recipient?.length === 0 ? (t('payment.newAddress') || 'New address') : (t('payment.editAddress') || 'Edit address')}</Text>
               <TouchableOpacity onPress={() => setAddressEditModalVisible(false)}>
                 <Icon name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.addressModalLabel}>Currently delivering to:</Text>
+              <Text style={styles.addressModalLabel}>{t('payment.currentlyDeliveringTo') || 'Currently delivering to:'}</Text>
               <View style={styles.addressModalRow}>
                 <View style={styles.addressModalDropdown}>
-                  <Text style={styles.addressModalDropdownText}>한국</Text>
+                  <Text style={styles.addressModalDropdownText}>{t('payment.countryKorea') || '한국'}</Text>
                   <Icon name="chevron-down" size={20} color={COLORS.gray[600]} />
                 </View>
                 <TouchableOpacity style={styles.defaultCheckboxRow} onPress={() => setIsDefaultAddress(!isDefaultAddress)}>
-                  <Text style={styles.defaultText}>Default</Text>
+                  <Text style={styles.defaultText}>{t('payment.default') || 'Default'}</Text>
                   <View style={[styles.checkboxSquare, isDefaultAddress && styles.checkboxSquareChecked]}>
                     {isDefaultAddress && <Icon name="checkmark" size={16} color={COLORS.white} />}
                   </View>
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Address information:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('payment.addressInformation') || 'Address information:'}</Text>
               <TouchableOpacity style={styles.addressSearchBtn} onPress={() => setShowKakaoAddress(true)}>
                 <Icon name="search" size={16} color={COLORS.white} />
-                <Text style={styles.addressSearchBtnText}>Search Address (Kakao)</Text>
+                <Text style={styles.addressSearchBtnText}>{t('payment.searchAddressKakao') || 'Search Address (Kakao)'}</Text>
               </TouchableOpacity>
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Postal code:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('payment.postalCode') || 'Postal code:'}</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="e.g. 06000"
+                placeholder={t('payment.zipPlaceholder') || 'e.g. 06000'}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.zonecode}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, zonecode: v }))}
                 keyboardType="number-pad"
               />
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Detail address:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('payment.detailAddressLabel') || 'Detail address:'}</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="Search address above or enter manually"
+                placeholder={t('payment.addressSearchPlaceholder') || 'Search address above or enter manually'}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.detailAddress}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, detailAddress: v }))}
               />
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Recipient name:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('payment.recipientName') || 'Recipient name:'}</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="Up to 25 characters"
+                placeholder={t('payment.detailAddressPlaceholder') || 'Up to 25 characters'}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.recipient}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, recipient: v }))}
                 maxLength={25}
               />
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Mobile number:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('payment.mobileNumber') || 'Mobile number:'}</Text>
               <View style={styles.addressModalPhoneRow}>
                 <View style={styles.addressModalPhoneCode}>
-                  <Text style={{ fontSize: FONTS.sizes.sm, color: COLORS.text.primary }}>한국 +82</Text>
+                  <Text style={{ fontSize: FONTS.sizes.sm, color: COLORS.text.primary }}>{t('payment.countryKoreaCode') || '한국 +82'}</Text>
                   <Icon name="chevron-down" size={20} color={COLORS.gray[600]} />
                 </View>
                 <TextInput
@@ -1333,10 +1344,10 @@ const PaymentScreen: React.FC = () => {
                 />
               </View>
 
-              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>Customs clearance code:</Text>
+              <Text style={styles.addressModalLabel}><Text style={styles.addressModalRequired}>* </Text>{t('payment.customsClearanceCode') || 'Customs clearance code:'}</Text>
               <TextInput
                 style={styles.addressModalInput}
-                placeholder="Please enter the customs clearance code"
+                placeholder={t('payment.customsCodePlaceholder') || 'Please enter the customs clearance code'}
                 placeholderTextColor={COLORS.gray[400]}
                 value={editAddress.customsCode}
                 onChangeText={(v) => setEditAddress(prev => ({ ...prev, customsCode: v }))}
@@ -1347,7 +1358,7 @@ const PaymentScreen: React.FC = () => {
                 onPress={async () => {
                   const detail = (editAddress.detailAddress || editAddress.roadAddress || '').trim();
                   if (!detail || detail.length < 2) {
-                    showToast('Please enter detailed address (at least 2 characters)', 'error');
+                    showToast(t('payment.detailAddressMin2') || 'Please enter detailed address (at least 2 characters)', 'error');
                     return;
                   }
                   setIsSavingAddress(true);
@@ -1418,7 +1429,7 @@ const PaymentScreen: React.FC = () => {
                 {isSavingAddress ? (
                   <ActivityIndicator size="small" color={COLORS.white} />
                 ) : (
-                  <Text style={styles.addressModalSaveButtonText}>Save</Text>
+                  <Text style={styles.addressModalSaveButtonText}>{t('payment.save') || 'Save'}</Text>
                 )}
               </TouchableOpacity>
             </ScrollView>
@@ -1431,7 +1442,7 @@ const PaymentScreen: React.FC = () => {
         <View style={styles.kakaoModalOverlay}>
           <View style={styles.kakaoModalContent}>
             <View style={styles.kakaoModalHeader}>
-              <Text style={styles.kakaoModalTitle}>Search Address</Text>
+              <Text style={styles.kakaoModalTitle}>{t('payment.searchAddress') || 'Search Address'}</Text>
               <TouchableOpacity onPress={() => setShowKakaoAddress(false)}>
                 <Icon name="close" size={22} color={COLORS.text.primary} />
               </TouchableOpacity>
@@ -1491,8 +1502,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md * 2,
-    paddingTop: SPACING['2xl'] * 2,
+    // 상태바 인셋은 외부 SafeAreaView 의 paddingTop: insets.top 이 이미
+    // 처리하므로 헤더는 일반적인 vertical padding 만 갖는다. 기존
+    // paddingTop: SPACING['2xl'] * 2 는 인셋과 중복되어 헤더와 그 위
+    // 사이에 큰 빈 공간을 만들고 있었음.
+    paddingVertical: SPACING.sm,
     // White background — explicit on every device (mobile + tablet) so
     // the header doesn't inherit any darker gray from a parent in
     // certain RN versions.

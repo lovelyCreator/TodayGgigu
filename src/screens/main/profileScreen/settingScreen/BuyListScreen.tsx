@@ -2547,18 +2547,28 @@ const BuyListScreen = () => {
           <View style={[styles.moreMenuRow, { top: headerHeight }]}>
             <TouchableOpacity
               style={styles.moreMenuItem}
-              onPress={() => { setShowMoreMenu(false); showToast(t('home.exportOrders'), 'info'); }}
+              onPress={() => {
+                setShowMoreMenu(false);
+                showToast(t('buyList.moreMenu.exportOrders') || t('home.exportOrders') || 'Export Orders', 'info');
+              }}
             >
               <ExportOrderIcon color={COLORS.black} />
-              <Text style={styles.moreMenuItemText}>{t('home.exportOrders')}</Text>
+              <Text style={styles.moreMenuItemText}>
+                {t('buyList.moreMenu.exportOrders') || t('home.exportOrders') || 'Export Orders'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.moreMenuItem}
-              onPress={() => { setShowMoreMenu(false); showToast(t('home.print'), 'info'); }}
+              onPress={() => {
+                setShowMoreMenu(false);
+                showToast(t('buyList.moreMenu.print') || t('home.print') || 'Print', 'info');
+              }}
             >
               {/* <Icon name="print-outline" size={20} color={COLORS.text.primary} /> */}
               <PrintIcon color={COLORS.black} />
-              <Text style={styles.moreMenuItemText}>{t('home.print')}</Text>
+              <Text style={styles.moreMenuItemText}>
+                {t('buyList.moreMenu.print') || t('home.print') || 'Print'}
+              </Text>
             </TouchableOpacity>
           </View>
         </>
@@ -3233,19 +3243,19 @@ const BuyListScreen = () => {
                       </View>
                     )}
                   </View>
-                ), label: 'Message', onPress: () => navigation.navigate('Main', { screen: 'Message' }) },
-                { icon: <HomeIcon width={28} color={COLORS.text.primary} />, label: 'Main', onPress: () => navigation.navigate('Main', { screen: 'Home' }) },
-                { icon: <AccountIcon width={28} color={COLORS.text.primary} />, label: 'My Account', onPress: () => navigation.navigate('ProfileSettings') },
-                { icon: <CartIcon width={28} color={COLORS.text.primary} />, label: 'Cart', onPress: () => navigation.navigate('Main', { screen: 'Cart' }) },
-                { icon: <ReceiptIcon width={28} color={COLORS.text.primary} />, label: 'My Orders', onPress: () => setShowNavModal(false) },
-                { icon: <ViewedIcon width={28} height={28} color={COLORS.text.primary} />, label: 'Viewed Products', onPress: () => navigation.navigate('ViewedProducts') },
-                { icon: <HeartIcon width={28} height={28} color={COLORS.text.primary} />, label: 'WishList', onPress: () => navigation.navigate('Wishlist') },
-                { icon: <OfficialSupportIcon width={28} height={28} color={COLORS.text.primary} />, label: 'Official Support', onPress: () => navigation.navigate('CustomerService') },
-                { icon: <FeedbackIcon width={28} height={28} color={COLORS.text.primary} />, label: 'Feedback', onPress: () => navigation.navigate('Note') },
-                { icon: <CustomerSupportIcon width={28} height={28} color={COLORS.text.primary} />, label: 'After-sales', onPress: () => navigation.navigate('CustomerService') },
+                ), key: 'message', label: t('buyList.navMenuModal.message') || 'Message', onPress: () => navigation.navigate('Main', { screen: 'Message' }) },
+                { icon: <HomeIcon width={28} color={COLORS.text.primary} />, key: 'main', label: t('buyList.navMenuModal.main') || 'Main', onPress: () => navigation.navigate('Main', { screen: 'Home' }) },
+                { icon: <AccountIcon width={28} color={COLORS.text.primary} />, key: 'myAccount', label: t('buyList.navMenuModal.myAccount') || 'My Account', onPress: () => navigation.navigate('ProfileSettings') },
+                { icon: <CartIcon width={28} color={COLORS.text.primary} />, key: 'cart', label: t('buyList.navMenuModal.cart') || 'Cart', onPress: () => navigation.navigate('Main', { screen: 'Cart' }) },
+                { icon: <ReceiptIcon width={28} color={COLORS.text.primary} />, key: 'myOrders', label: t('buyList.navMenuModal.myOrders') || 'My Orders', onPress: () => setShowNavModal(false) },
+                { icon: <ViewedIcon width={28} height={28} color={COLORS.text.primary} />, key: 'viewedProducts', label: t('buyList.navMenuModal.viewedProducts') || 'Viewed Products', onPress: () => navigation.navigate('ViewedProducts') },
+                { icon: <HeartIcon width={28} height={28} color={COLORS.text.primary} />, key: 'wishList', label: t('buyList.navMenuModal.wishList') || 'WishList', onPress: () => navigation.navigate('Wishlist') },
+                { icon: <OfficialSupportIcon width={28} height={28} color={COLORS.text.primary} />, key: 'officialSupport', label: t('buyList.navMenuModal.officialSupport') || 'Official Support', onPress: () => navigation.navigate('CustomerService') },
+                { icon: <FeedbackIcon width={28} height={28} color={COLORS.text.primary} />, key: 'feedback', label: t('buyList.navMenuModal.feedback') || 'Feedback', onPress: () => navigation.navigate('Note') },
+                { icon: <CustomerSupportIcon width={28} height={28} color={COLORS.text.primary} />, key: 'afterSales', label: t('buyList.navMenuModal.afterSales') || 'After-sales', onPress: () => navigation.navigate('CustomerService') },
               ].map((item) => (
                 <TouchableOpacity
-                  key={item.label}
+                  key={item.key}
                   style={styles.navModalGridItem}
                   onPress={() => { setShowNavModal(false); item.onPress(); }}
                 >
@@ -3269,7 +3279,7 @@ const BuyListScreen = () => {
         <View style={styles.allFiltersOverlay}>
           <View style={styles.allFiltersContent}>
             <View style={styles.allFiltersHeader}>
-              <Text style={styles.allFiltersTitle}>Filters</Text>
+              <Text style={styles.allFiltersTitle}>{t('buyList.allFiltersModal.title') || 'Filters'}</Text>
               <TouchableOpacity onPress={() => setShowAllFiltersModal(false)}>
                 <Icon name="close" size={22} color={COLORS.text.primary} />
               </TouchableOpacity>
@@ -3278,15 +3288,20 @@ const BuyListScreen = () => {
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Platform */}
               <View style={styles.allFiltersSection}>
-                <Text style={styles.allFiltersSectionTitle}>Platform</Text>
+                <Text style={styles.allFiltersSectionTitle}>{t('buyList.allFiltersModal.platform') || 'Platform'}</Text>
                 <View style={styles.allFiltersChipRow}>
-                  {['All', '1688', 'Taobao'].map(p => (
+                  {[
+                    // '전체' 칩만 i18n 처리. 1688/Taobao 는 브랜드명이라 그대로.
+                    { label: t('buyList.allFiltersModal.platformAll') || 'All', value: '' },
+                    { label: '1688', value: '1688' },
+                    { label: 'Taobao', value: 'taobao' },
+                  ].map(p => (
                     <TouchableOpacity
-                      key={p}
-                      style={[styles.allFiltersChip, draftPlatform === (p === 'All' ? '' : p.toLowerCase()) && styles.allFiltersChipActive]}
-                      onPress={() => setDraftPlatform(p === 'All' ? '' : p.toLowerCase())}
+                      key={p.value || 'all'}
+                      style={[styles.allFiltersChip, draftPlatform === p.value && styles.allFiltersChipActive]}
+                      onPress={() => setDraftPlatform(p.value)}
                     >
-                      <Text style={[styles.allFiltersChipText, draftPlatform === (p === 'All' ? '' : p.toLowerCase()) && styles.allFiltersChipTextActive]}>{p}</Text>
+                      <Text style={[styles.allFiltersChipText, draftPlatform === p.value && styles.allFiltersChipTextActive]}>{p.label}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -3356,15 +3371,23 @@ const BuyListScreen = () => {
                       <TouchableOpacity onPress={() => { const d = new Date(inlineCalendarDate); d.setMonth(d.getMonth() - 1); setInlineCalendarDate(d); }}>
                         <Icon name="chevron-back" size={18} color={COLORS.text.primary} />
                       </TouchableOpacity>
-                      <Text style={styles.calendarHeaderText}>{inlineCalendarDate.getFullYear()}년 {inlineCalendarDate.getMonth() + 1}월</Text>
+                      <Text style={styles.calendarHeaderText}>{inlineCalendarDate.getFullYear()}{t('buyList.allFiltersModal.calendarYearSuffix') || '년 '}{inlineCalendarDate.getMonth() + 1}{t('buyList.allFiltersModal.calendarMonthSuffix') || '월'}</Text>
                       <TouchableOpacity onPress={() => { const d = new Date(inlineCalendarDate); d.setMonth(d.getMonth() + 1); setInlineCalendarDate(d); }}>
                         <Icon name="chevron-forward" size={18} color={COLORS.text.primary} />
                       </TouchableOpacity>
                     </View>
                     {/* Day headers */}
                     <View style={styles.calendarWeekRow}>
-                      {['일','월','화','수','목','금','토'].map(d => (
-                        <Text key={d} style={styles.calendarDayHeader}>{d}</Text>
+                      {[
+                        t('buyList.allFiltersModal.weekdayShort0') || '일',
+                        t('buyList.allFiltersModal.weekdayShort1') || '월',
+                        t('buyList.allFiltersModal.weekdayShort2') || '화',
+                        t('buyList.allFiltersModal.weekdayShort3') || '수',
+                        t('buyList.allFiltersModal.weekdayShort4') || '목',
+                        t('buyList.allFiltersModal.weekdayShort5') || '금',
+                        t('buyList.allFiltersModal.weekdayShort6') || '토',
+                      ].map((d, i) => (
+                        <Text key={i} style={styles.calendarDayHeader}>{d}</Text>
                       ))}
                     </View>
                     {/* Days grid */}
@@ -3413,11 +3436,15 @@ const BuyListScreen = () => {
                       ));
                     })()}
                     <Text style={styles.calendarHint}>
-                      {!draftStartDate ? '시작일을 선택하세요' : !draftEndDate ? '종료일을 선택하세요' : ''}
+                      {!draftStartDate
+                        ? (t('buyList.allFiltersModal.selectStartDate') || '시작일을 선택하세요')
+                        : !draftEndDate
+                          ? (t('buyList.allFiltersModal.selectEndDate') || '종료일을 선택하세요')
+                          : ''}
                     </Text>
                     {(draftStartDate || draftEndDate) && (
                       <TouchableOpacity onPress={() => { setDraftStartDate(null); setDraftEndDate(null); setShowInlineCalendar(false); }}>
-                        <Text style={{ color: COLORS.red, fontSize: FONTS.sizes.xs, textAlign: 'center', marginTop: 4 }}>초기화</Text>
+                        <Text style={{ color: COLORS.red, fontSize: FONTS.sizes.xs, textAlign: 'center', marginTop: 4 }}>{t('buyList.allFiltersModal.clearDates') || '초기화'}</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -3437,7 +3464,7 @@ const BuyListScreen = () => {
                   setDraftEndDate(null);
                 }}
               >
-                <Text style={styles.allFiltersResetText}>Reset</Text>
+                <Text style={styles.allFiltersResetText}>{t('buyList.allFiltersModal.reset') || 'Reset'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.allFiltersApplyBtn}
@@ -3451,7 +3478,7 @@ const BuyListScreen = () => {
                   setShowAllFiltersModal(false);
                 }}
               >
-                <Text style={styles.allFiltersApplyText}>Apply</Text>
+                <Text style={styles.allFiltersApplyText}>{t('buyList.allFiltersModal.apply') || 'Apply'}</Text>
               </TouchableOpacity>
             </View>
           </View>

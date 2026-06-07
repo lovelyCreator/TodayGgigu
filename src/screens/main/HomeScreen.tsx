@@ -215,6 +215,14 @@ const HomeScreen: React.FC = () => {
   // products[0].image 를 한 번만 fetch 해서 캐싱한다. fetch 실패 시 null 로
   // 두면 회색 placeholder 가 그대로 노출되어 카드 레이아웃은 깨지지 않는다.
   const [bestProductThumb, setBestProductThumb] = useState<string | null>(null);
+  // 신규등록상점 카드 우측에 표시할 첫 번째 상점 이미지.
+  // 백엔드 sellers list endpoint 가 없어 동일 /products/search 응답의
+  // products[0].image 를 첫 상점의 대표 이미지 proxy 로 사용.
+  const [newStoreThumb, setNewStoreThumb] = useState<string | null>(null);
+  // 인기업체 카드 우측에 표시할 첫 번째 인기업체 이미지.
+  // 동일 응답에서 인기 순위 기준으로 두 번째 항목(products[1]) 을 사용 —
+  // 첫 번째는 신규등록상점에서 이미 쓰고 있어서 시각적으로 중복되지 않도록.
+  const [popularMerchantThumb, setPopularMerchantThumb] = useState<string | null>(null);
   // 인기검색순위 모달 — 인사이트 카드의 '인기검색순위 Hot10' 단추에서 열림.
   const [showPopularRankingModal, setShowPopularRankingModal] = useState(false);
   const { unreadCount: socketUnreadCount, onUnreadCountUpdated } = useSocket(); // Get total unread count from socket context
@@ -284,6 +292,15 @@ const HomeScreen: React.FC = () => {
         // 10번째 상품을 우선 사용, 응답이 10개 미만이면 가능한 마지막 항목으로 fallback.
         const tenth = list[9] ?? list[list.length - 1];
         if (tenth?.image) setBestProductThumb(tenth.image);
+        // 신규등록상점 카드의 우측 이미지 — 첫 번째 상품의 이미지를
+        // 상점 대표 이미지의 proxy 로 사용 (전용 sellers endpoint 도입 전).
+        const first = list[0];
+        if (first?.image) setNewStoreThumb(first.image);
+        // 인기업체 카드의 우측 이미지 — 두 번째 상품의 이미지를 첫 번째
+        // 인기업체의 대표 이미지 proxy 로 사용. 신규등록상점과 시각적으로
+        // 중복되지 않도록 별도 인덱스. 응답이 1개면 첫 번째로 fallback.
+        const second = list[1] ?? list[0];
+        if (second?.image) setPopularMerchantThumb(second.image);
       } catch {
         // 실패 시 thumb 가 null 로 남아 회색 placeholder 가 나옴 — 별도 알림 X.
       }
@@ -558,24 +575,68 @@ const HomeScreen: React.FC = () => {
           </View>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.guestInsightCard}
+          style={[styles.guestInsightCard, styles.bestProductsCard]}
           activeOpacity={0.88}
-          onPress={() => navigation.navigate('Search' as never)}
+          onPress={() => (navigation as any).navigate('NewStores')}
         >
-          <Text style={styles.guestInsightTitle}>{t('home.guestInsightNewStoresTitle')}</Text>
-          <Text style={styles.guestInsightMeta}>{t('home.guestInsightNewStoresMeta')}</Text>
-          <View style={styles.guestInsightThumb} />
+          {/* 베스트상품 카드와 동일한 layout 패턴 — 좌상단부터 텍스트가 흐르고
+              우하단에 absolute 썸네일. 디자인 일관성 + 스타일 재사용. */}
+          <Text style={styles.guestInsightTitle}>
+            {t('home.guestInsightNewStoresTitle')}
+          </Text>
+          <Text style={styles.bestProductsSubtitle}>
+            {t('home.guestInsightNewStoresSubtitle')}
+          </Text>
+          <Text style={styles.bestProductsTop10}>
+            {t('home.guestInsightNewStoresCount')}
+          </Text>
+          <Text style={styles.bestProductsCta}>
+            {t('home.guestInsightNewStoresCta')}{' '}&gt;
+          </Text>
+          {/* 첫 번째 상점 이미지 — 카드의 우하단에 absolute 위치.
+              fetch 실패 시 회색 placeholder 로 보임. */}
+          {newStoreThumb ? (
+            <Image
+              source={{ uri: newStoreThumb }}
+              style={styles.bestProductsThumb}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={[styles.bestProductsThumb, styles.bestProductsThumbPlaceholder]} />
+          )}
         </TouchableOpacity>
       </View>
       <View style={styles.guestInsightRow}>
         <TouchableOpacity
-          style={styles.guestInsightCard}
+          style={[styles.guestInsightCard, styles.bestProductsCard]}
           activeOpacity={0.88}
-          onPress={() => navigation.navigate('Search' as never)}
+          onPress={() => (navigation as any).navigate('PopularMerchants')}
         >
-          <Text style={styles.guestInsightTitle}>{t('home.guestInsightMerchantsTitle')}</Text>
-          <Text style={styles.guestInsightMeta}>{t('home.guestInsightMerchantsMeta')}</Text>
-          <View style={styles.guestInsightThumb} />
+          {/* 베스트상품 / 신규등록상점 카드와 동일한 layout 패턴 — 좌상단부터
+              텍스트가 흐르고 우하단에 absolute 썸네일. 디자인 일관성. */}
+          <Text style={styles.guestInsightTitle}>
+            {t('home.guestInsightMerchantsTitle')}
+          </Text>
+          <Text style={styles.bestProductsSubtitle}>
+            {t('home.guestInsightMerchantsSubtitle')}
+          </Text>
+          <Text style={styles.bestProductsTop10}>
+            {t('home.guestInsightMerchantsTop10')}
+          </Text>
+          <Text style={styles.bestProductsCta}>
+            {t('home.guestInsightMerchantsCta')}{' '}&gt;
+          </Text>
+          {/* 첫 번째 인기업체 이미지 — 카드의 우하단에 absolute 위치.
+              fetch 실패 시 회색 placeholder 로 보임. */}
+          {popularMerchantThumb ? (
+            <Image
+              source={{ uri: popularMerchantThumb }}
+              style={styles.bestProductsThumb}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={[styles.bestProductsThumb, styles.bestProductsThumbPlaceholder]} />
+          )}
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.guestInsightCard, styles.bestProductsCard]}
@@ -2580,7 +2641,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.sm,
-    minHeight: 112,
+    // minHeight 112 → 90 으로 축소. 4장 카드 중 콘텐츠가 가장 적은
+    // 인기 검색 순위 카드의 하단 빈 공간을 줄여 나머지 3장(신규등록상점 /
+    // 인기업체 / 베스트상품) 의 자연 높이와 시각적으로 동일해지도록 함.
+    // 같은 row 안 카드는 default alignItems: 'stretch' 로 더 큰 쪽에 맞춰
+    // 자동 동기화되므로, 4장 모두 같은 row 들 안에서 동일 높이가 보장됨.
+    minHeight: 90,
     borderWidth: 1,
     borderColor: FIGMA_OVERLAY_05,
     ...Platform.select({
@@ -2641,9 +2707,9 @@ const styles = StyleSheet.create({
   // 4줄(타이틀 + 서브 + Top10 + 바로가기) 이 자연스럽게 들어가게 한다.
   bestProductsCard: {
     position: 'relative',
-    // 텍스트 라인과 우하단 썸네일(52px) 사이의 가로 간격을 줄임.
-    // 다른 3개 카드와 같은 너비/높이를 유지하면서 텍스트 영역만 우측으로 더 확장.
-    paddingRight: 0,
+    // 인기 검색 순위 카드(베이스 padding 만 사용) 와 외형 폭을 정확히
+    // 일치시키기 위해 paddingRight 오버라이드 제거 — 베이스 guestInsightCard
+    // 의 padding: SPACING.sm 을 그대로 상속해 4장 모두 내부/외부 폭이 동일.
   },
   bestProductsSubtitle: {
     fontSize: FONTS.sizes.xs,

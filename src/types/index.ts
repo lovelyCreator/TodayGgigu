@@ -449,6 +449,10 @@ export type RootStackParamList = {
   // 홈페지 베스트상품 카드에서 진입. tab 키를 함께 보내면 그 탭이 default
   // 활성으로 시작한다. 'overall' 이 화면 기본값.
   BestProducts: { initialTab?: 'popularSeller' | 'price' | 'overall' } | undefined;
+  // 홈페지의 신규등록상점 인사이트 카드에서 진입. 최근 등록된 상점 리스트.
+  NewStores: undefined;
+  // 홈페지의 인기업체 인사이트 카드에서 진입. 인기도 순위로 정렬된 업체 리스트.
+  PopularMerchants: undefined;
   // 상품관리 카드의 편집(✏️) 아이콘에서 진입. 카드의 현재 필드들을 그대로
   // 전달해 폼이 즉시 초기화된다. productId 만 있고 나머지는 옵션이어서
   // 호출자가 일부만 보낼 수도 있다.

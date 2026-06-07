@@ -89,6 +89,8 @@ import ProblemProductScreen from '../screens/main/profileScreen/settingScreen/Pr
 import ProductManagementScreen from '../screens/main/profileScreen/settingScreen/productManagementScreen/ProductManagementScreen';
 import OnlineProductEditScreen from '../screens/main/profileScreen/settingScreen/productManagementScreen/OnlineProductEditScreen';
 import BestProductsScreen from '../screens/main/bestProductsScreen/BestProductsScreen';
+import NewStoresScreen from '../screens/main/newStoresScreen/NewStoresScreen';
+import PopularMerchantsScreen from '../screens/main/popularMerchantsScreen/PopularMerchantsScreen';
 import UnitSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/UnitSurveyScreen';
 import OEMSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/OEMSurveyScreen';
 import MyDeliveriesScreen from '../screens/main/profileScreen/settingScreen/MyDeliveriesScreen';
@@ -931,6 +933,16 @@ const RootNavigator = () => {
           <RootStack.Screen
             name="BestProducts"
             component={BestProductsScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="NewStores"
+            component={NewStoresScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="PopularMerchants"
+            component={PopularMerchantsScreen}
             options={{ headerShown: false }}
           />
           <RootStack.Screen
