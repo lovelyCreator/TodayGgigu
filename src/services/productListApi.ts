@@ -68,6 +68,33 @@ export interface SellerProduct {
   updatedAt: string;
 }
 
+export type SellerProductLabelPayload = {
+  labelType?: 'product' | 'foodInspect';
+  labelFormat?: '50x80' | '40x60';
+  labelProductName?: string;
+  labelContent?: string;
+  labelBarcode?: string;
+  labelFileUri?: string | null;
+};
+
+export type UpdateSellerProductSkuPayload = {
+  skuId: string;
+  specId?: string;
+  unitPrice?: number;
+  userPrice?: number;
+  remark?: string;
+  labelName?: string;
+  label?: SellerProductLabelPayload;
+};
+
+export interface UpdateSellerProductPayload {
+  productName?: string;
+  categoryName?: string;
+  productUrl?: string;
+  thumbnails?: ProductThumbnail[];
+  skus?: UpdateSellerProductSkuPayload[];
+}
+
 export interface GetSellerProductsParams {
   /** Locale to request product names in. 'ko' / 'en' / 'zh'. Defaults to 'ko'. */
   lang?: string;
@@ -136,6 +163,52 @@ export const productListApi = {
         success: false,
         message: errorMessage,
         data: undefined,
+      };
+    }
+  },
+
+  /**
+   * PUT /customer/product-list/products/:productId
+   * 웹 온라인상품편집 저장 — SKU 단가·비고·라벨 설정 포함.
+   */
+  updateProduct: async (
+    productId: string,
+    payload: UpdateSellerProductPayload,
+    lang = 'ko',
+  ): Promise<ApiResponse<{ product?: SellerProduct }>> => {
+    try {
+      const token = await getStoredToken();
+      const url = `${API_BASE_URL}/customer/product-list/products/${encodeURIComponent(productId)}?lang=${lang}`;
+      const signatureHeaders = await buildSignatureHeaders('PUT', url);
+
+      const response = await axios.put(url, payload, {
+        timeout: 20000,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...signatureHeaders,
+        },
+      });
+
+      if (response.data?.status === 'success') {
+        return {
+          success: true,
+          data: response.data.data,
+          message: response.data.message || 'Product updated',
+        };
+      }
+
+      return {
+        success: false,
+        message: response.data?.message || 'Failed to update product',
+      };
+    } catch (error: any) {
+      if (__DEV__) {
+        console.warn('[productListApi.updateProduct]', error?.message, error.response?.data);
+      }
+      return {
+        success: false,
+        message: error.response?.data?.message || error.message || 'Failed to update product',
       };
     }
   },

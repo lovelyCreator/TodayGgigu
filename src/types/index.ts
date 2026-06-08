@@ -381,6 +381,9 @@ export type RootStackParamList = {
   Cart: undefined;
   FollowedStore: undefined;
   Payment: undefined;
+  OrderPayment: {
+    orderId: string;
+  };
   Settings: undefined;
   ProfileSettings: undefined;
   LanguageSettings: undefined;
@@ -471,6 +474,7 @@ export type RootStackParamList = {
     thumbnailUrl?: string;
   } | undefined;
   UnitSurvey: undefined;
+  UnitSurveyDetail: { applicationId: string; preview?: import('./tradeApplication').TradeApplication };
   OEMSurvey: undefined;
   PaymentHistory: undefined;
   PersonalInformation: undefined;

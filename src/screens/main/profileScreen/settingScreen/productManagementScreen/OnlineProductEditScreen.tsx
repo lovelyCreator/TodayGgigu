@@ -8,7 +8,7 @@
  * params 의 productId 로 productListApi.getProducts 응답에서 찾아온다.
  */
 
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -38,6 +38,18 @@ import { COLORS, FONTS, SPACING } from '../../../../../constants';
 import { RootStackParamList } from '../../../../../types';
 import { useTranslation } from '../../../../../hooks/useTranslation';
 import { productsApi } from '../../../../../services/productsApi';
+import {
+  productListApi,
+  type UpdateSellerProductPayload,
+} from '../../../../../services/productListApi';
+import { useToast } from '../../../../../context/ToastContext';
+import {
+  createEmptySkuLabel,
+  isSkuLabelConfigured,
+  loadOnlineProductEditDraft,
+  saveOnlineProductEditDraft,
+  type SkuLabelSettings,
+} from '../../../../../utils/onlineProductEditDraft';
 import {
   requestCameraPermission,
   requestPhotoLibraryPermission,
@@ -71,6 +83,7 @@ const OnlineProductEditScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteParams>();
   const { t, locale } = useTranslation();
+  const { showToast } = useToast();
 
   // route param 으로 받은 초기값 — 호출자(ProductManagementScreen)가 카드의
   // 현재 데이터를 함께 넘기면 폼이 즉시 채워진다. 없으면 빈 폼.
@@ -93,18 +106,17 @@ const OnlineProductEditScreen: React.FC = () => {
   // 채우고, 사용자가 행 안의 TextInput 으로 덮어쓸 수 있다.
   const [skuPriceMap, setSkuPriceMap] = useState<Record<string, string>>({});
   const [skuRemarkMap, setSkuRemarkMap] = useState<Record<string, string>>({});
-  // 라벨설정 모달 — SKU 행의 라벨 컬럼에서 ✏️ 아이콘 누르면 진입.
-  // 현재 편집 중인 행의 id 가 null 이 아닌 동안 모달이 떠 있음.
+  /** SKU 행별 라벨 설정 — 저장 후 해당 행 👁 아이콘 활성화. */
+  const [skuLabelMap, setSkuLabelMap] = useState<Record<string, SkuLabelSettings>>({});
   const [labelModalRowId, setLabelModalRowId] = useState<string | null>(null);
-  const [labelType, setLabelType] = useState<'product' | 'foodInspect'>('product');
-  const [labelFormat, setLabelFormat] = useState<'50x80' | '40x60'>('50x80');
-  const [labelProductName, setLabelProductName] = useState<string>('');
-  const [labelContent, setLabelContent] = useState<string>('');
-  const [labelBarcode, setLabelBarcode] = useState<string>('(01)01234567890128TEC-IT');
-  const [labelFileUri, setLabelFileUri] = useState<string | null>(null);
-  // 바코드 이미지 확인 모달 — 라벨 컬럼의 👁 아이콘에서 진입.
-  // 라벨 미리보기 카드만 단독으로 보여 주는 read-only 뷰어.
-  const [barcodeViewerOpen, setBarcodeViewerOpen] = useState<boolean>(false);
+  const [labelModalDraft, setLabelModalDraft] = useState<SkuLabelSettings>(
+    createEmptySkuLabel(),
+  );
+  const [barcodeViewerRowId, setBarcodeViewerRowId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const draftLoadedRef = useRef(false);
+  /** AsyncStorage 드래프트 — 상세 API 응답보다 우선 적용. */
+  const savedDraftRef = useRef<Awaited<ReturnType<typeof loadOnlineProductEditDraft>>>(null);
   const [thumbUrl, setThumbUrl] = useState<string>(initial.thumbnailUrl ?? '');
   // 썸네일 추가 단추 → 카메라 / 갤러리 선택 모달 노출.
   const [thumbPickerOpen, setThumbPickerOpen] = useState(false);
@@ -129,7 +141,27 @@ const OnlineProductEditScreen: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  // ─── 진입 시 한 번 상품 상세 API 호출 ──────────────────────────────
+  const applyDraftToForm = useCallback((draft: NonNullable<typeof savedDraftRef.current>) => {
+    if (draft.productName) setProductName(draft.productName);
+    if (draft.categoryName != null) setCategoryName(draft.categoryName);
+    if (draft.thumbUrl) setThumbUrl(draft.thumbUrl);
+    if (draft.optionLabel) setOptionLabel(draft.optionLabel);
+    if (draft.remark) setRemark(draft.remark);
+    if (draft.selectedOptionValues) {
+      setSelectedOptionValues(draft.selectedOptionValues);
+    }
+    if (draft.skuPriceMap) {
+      setSkuPriceMap((prev) => ({ ...prev, ...draft.skuPriceMap }));
+    }
+    if (draft.skuRemarkMap) {
+      setSkuRemarkMap((prev) => ({ ...prev, ...draft.skuRemarkMap }));
+    }
+    if (draft.skuLabelMap) {
+      setSkuLabelMap((prev) => ({ ...prev, ...draft.skuLabelMap }));
+    }
+  }, []);
+
+  // ─── 진입 시 드래프트 복원 → 상세 API + 상품리스트 API 병렬 호출 ─────
   // URL: GET /v1/products/detail?productId=<offerId>&source=1688&country=<locale>
   useEffect(() => {
     const offerId = initial.offerId || initial.productId;
@@ -137,39 +169,50 @@ const OnlineProductEditScreen: React.FC = () => {
     const source = initial.source || '1688';
     const country = locale || 'ko';
     let cancelled = false;
+    const draftFallback = setTimeout(() => {
+      if (!cancelled) draftLoadedRef.current = true;
+    }, 2000);
+
     (async () => {
       setDetailLoading(true);
       setDetailError(null);
       try {
-        const res = await productsApi.getProductDetail(offerId, source, country);
+        const draft = await loadOnlineProductEditDraft(offerId);
         if (cancelled) return;
-        if (res.success && res.data?.product) {
-          const p = res.data.product;
+        savedDraftRef.current = draft;
+        draftLoadedRef.current = true;
+        clearTimeout(draftFallback);
+        if (draft) applyDraftToForm(draft);
+
+        const [detailRes, listRes] = await Promise.all([
+          productsApi.getProductDetail(offerId, source, country),
+          productListApi.getProducts({ lang: country }),
+        ]);
+        if (cancelled) return;
+
+        if (detailRes.success && detailRes.data?.product) {
+          const p = detailRes.data.product;
           setDetail(p);
-          // 응답으로 폼을 한 번 더 보강 — route param 으로 받은 카드값 위에
-          // 더 정확한/완전한 값으로 덮어쓴다.
+          const draftNow = savedDraftRef.current;
           if (p.subjectTrans || p.subject) {
             const subj = String(p.subjectTrans || p.subject);
             setProductNameOrig(subj);
-            setProductName(subj);
+            if (!draftNow?.productName) setProductName(subj);
           }
-          // 첫 번째 SKU 의 가격으로 unitPrice 채움 (route param 이 비어 있을 때만)
           const firstSku = p.productSkuInfos?.[0];
-          if (firstSku?.fenxiaoPriceInfo?.offerPrice) {
+          if (!draftNow?.skuPriceMap && firstSku?.fenxiaoPriceInfo?.offerPrice) {
             setUnitPrice(String(firstSku.fenxiaoPriceInfo.offerPrice));
-          } else if (firstSku?.consignPrice) {
+          } else if (!draftNow?.skuPriceMap && firstSku?.consignPrice) {
             setUnitPrice(String(firstSku.consignPrice));
           }
-          // 첫 번째 SKU 의 첫 옵션 텍스트
           const firstAttr = firstSku?.skuAttributes?.[0];
-          if (firstAttr?.valueTrans || firstAttr?.value) {
+          if (!draftNow?.optionLabel && (firstAttr?.valueTrans || firstAttr?.value)) {
             setOptionLabel(String(firstAttr.valueTrans || firstAttr.value));
           }
-          // 첫 번째 상품 이미지 — productImage.images[0] 또는 그 trans 버전.
           const firstImg =
             p.productImage?.images?.[0] || p.productImageTrans?.images?.[0];
-          if (firstImg) setThumbUrl(String(firstImg));
-          // SKU 가격 / 라벨 / 비고 맵 시드 — 처음엔 단가만 채우고 비고는 빈칸.
+          if (!draftNow?.thumbUrl && firstImg) setThumbUrl(String(firstImg));
+
           const seededPrices: Record<string, string> = {};
           (p.productSkuInfos || []).forEach((sku: any) => {
             const id = String(sku.skuId || sku.specId || '');
@@ -178,18 +221,69 @@ const OnlineProductEditScreen: React.FC = () => {
               sku?.fenxiaoPriceInfo?.offerPrice ?? sku?.consignPrice ?? sku?.price ?? '';
             seededPrices[id] = String(price);
           });
-          setSkuPriceMap(seededPrices);
-          // 첫 SKU 의 옵션값들을 selectedOptionValues 초기값으로 사용 →
-          // 그리드에서 첫 카드가 자동으로 강조된 상태로 보임.
-          const seededSelected: Record<string, string> = {};
-          (firstSku?.skuAttributes || []).forEach((attr: any) => {
-            const name = String(attr.attributeNameTrans || attr.attributeName || '');
-            const val = String(attr.valueTrans || attr.value || '');
-            if (name && val) seededSelected[name] = val;
-          });
-          setSelectedOptionValues(seededSelected);
+          setSkuPriceMap((prev) => ({
+            ...seededPrices,
+            ...prev,
+            ...(draftNow?.skuPriceMap ?? {}),
+          }));
+
+          if (!draftNow?.selectedOptionValues) {
+            const seededSelected: Record<string, string> = {};
+            (firstSku?.skuAttributes || []).forEach((attr: any) => {
+              const name = String(attr.attributeNameTrans || attr.attributeName || '');
+              const val = String(attr.valueTrans || attr.value || '');
+              if (name && val) seededSelected[name] = val;
+            });
+            setSelectedOptionValues(seededSelected);
+          }
+
+          const offerKey = String(initial.offerId || '');
+          const sellerRows = (listRes.data?.products || []).filter(
+            (row) =>
+              (offerKey && String(row.offerId ?? '') === offerKey) ||
+              row._id === initial.productId,
+          );
+          if (sellerRows.length) {
+            const sellerPrices: Record<string, string> = {};
+            const seededRemarks: Record<string, string> = {};
+            const seededLabels: Record<string, SkuLabelSettings> = {};
+            const nameSeed = draftNow?.productName || initial.productName || '';
+            sellerRows.forEach((row) => {
+              const id = String(row.skuId || row.sku || '');
+              if (!id) return;
+              const price = row.userPrice ?? row.unitPrice;
+              if (price != null && !draftNow?.skuPriceMap?.[id]) {
+                sellerPrices[id] = String(price);
+              }
+              const rowLabel = (row as { label?: SkuLabelSettings }).label;
+              if (rowLabel && typeof rowLabel === 'object') {
+                seededLabels[id] = { ...createEmptySkuLabel(), ...rowLabel, configured: true };
+              } else if (row.labelName) {
+                const isFood = /식검|food/i.test(row.labelName);
+                seededLabels[id] = {
+                  ...createEmptySkuLabel(nameSeed),
+                  labelType: isFood ? 'foodInspect' : 'product',
+                  labelProductName: row.productName || nameSeed,
+                  configured: true,
+                };
+              }
+              const rowRemark = (row as { remark?: string }).remark;
+              if (rowRemark) seededRemarks[id] = rowRemark;
+            });
+            setSkuPriceMap((prev) => ({ ...prev, ...sellerPrices }));
+            setSkuRemarkMap((prev) => ({
+              ...prev,
+              ...seededRemarks,
+              ...(draftNow?.skuRemarkMap ?? {}),
+            }));
+            setSkuLabelMap((prev) => ({
+              ...prev,
+              ...seededLabels,
+              ...(draftNow?.skuLabelMap ?? {}),
+            }));
+          }
         } else {
-          setDetailError(res.message || 'Failed to load product detail');
+          setDetailError(detailRes.message || 'Failed to load product detail');
         }
       } catch (e: any) {
         if (!cancelled) setDetailError(e?.message || 'Failed to load product detail');
@@ -199,11 +293,92 @@ const OnlineProductEditScreen: React.FC = () => {
     })();
     return () => {
       cancelled = true;
+      clearTimeout(draftFallback);
     };
-    // initial 의 식별 필드만 deps — 화면이 같은 productId 로 mount 되어 있는 동안
-    // 다시 호출되지 않게 한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initial.offerId, initial.productId, initial.source, locale]);
+  }, [initial.offerId, initial.productId, initial.source, locale, applyDraftToForm]);
+
+  const offerIdKey = String(initial.offerId || initial.productId || '');
+
+  const persistDraft = useCallback(async () => {
+    if (!offerIdKey) return;
+    await saveOnlineProductEditDraft(offerIdKey, {
+      productName,
+      categoryName,
+      thumbUrl,
+      optionLabel,
+      remark,
+      selectedOptionValues,
+      skuPriceMap,
+      skuRemarkMap,
+      skuLabelMap,
+    });
+  }, [
+    offerIdKey,
+    productName,
+    categoryName,
+    thumbUrl,
+    optionLabel,
+    remark,
+    selectedOptionValues,
+    skuPriceMap,
+    skuRemarkMap,
+    skuLabelMap,
+  ]);
+
+  useEffect(() => {
+    if (!offerIdKey || !draftLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      persistDraft();
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [offerIdKey, persistDraft]);
+
+  const buildUpdatePayload = useCallback((): UpdateSellerProductPayload => {
+    const skus = (detail?.productSkuInfos || []).map((sku: any) => {
+      const id = String(sku.skuId || sku.specId || '');
+      const label = skuLabelMap[id];
+      const price = parseFloat(skuPriceMap[id] ?? '');
+      return {
+        skuId: id,
+        specId: String(sku.specId || ''),
+        unitPrice: Number.isFinite(price) ? price : undefined,
+        userPrice: Number.isFinite(price) ? price : undefined,
+        remark: skuRemarkMap[id] || '',
+        labelName: label?.configured
+          ? label.labelType === 'foodInspect'
+            ? t('cartOrder.labelModal.foodLabel')
+            : t('cartOrder.labelModal.productLabel')
+          : undefined,
+        label: label?.configured
+          ? {
+              labelType: label.labelType,
+              labelFormat: label.labelFormat,
+              labelProductName: label.labelProductName,
+              labelContent: label.labelContent,
+              labelBarcode: label.labelBarcode,
+              labelFileUri: label.labelFileUri,
+            }
+          : undefined,
+      };
+    });
+    return {
+      productName,
+      categoryName: categoryName || undefined,
+      productUrl: thumbUrl || undefined,
+      thumbnails: thumbUrl ? [{ url: thumbUrl, isThumbnail: true }] : undefined,
+      skus,
+    };
+  }, [
+    detail,
+    skuLabelMap,
+    skuPriceMap,
+    skuRemarkMap,
+    productName,
+    categoryName,
+    thumbUrl,
+    t,
+  ]);
 
   // ─── 상품스펙: 옵션 그룹 & SKU 행 가공 ─────────────────────────────
   // detail.productSkuInfos 의 skuAttributes 를 그룹별로 모아 (옵션1, 옵션2 …)
@@ -312,26 +487,40 @@ const OnlineProductEditScreen: React.FC = () => {
     });
   };
 
-  // ─── 라벨설정 모달 핸들러 ─────────────────────────────────────────
-  // 라벨 컬럼의 ✏️ 아이콘 누르면 그 행 id 를 기록 + 기본 폼 값 시드.
-  // 닫기/저장 시엔 모달만 닫고 입력값은 state 에 그대로 남김 → 다시 열면
-  // 직전 편집 내용 유지.
   const openLabelModal = (rowId: string) => {
+    const existing = skuLabelMap[rowId];
+    setLabelModalDraft(
+      existing
+        ? { ...existing }
+        : createEmptySkuLabel(productName),
+    );
     setLabelModalRowId(rowId);
-    if (!labelProductName) setLabelProductName(productName);
   };
-  // 바코드 이미지 확인 모달도 동일하게 열기 전에 상품명을 시드 — 사용자가
-  // ✏️ 를 한 번도 안 누르고 곧바로 👁 만 누른 경우 미리보기에 상품명이
-  // 비어 있던 문제 해결.
-  const openBarcodeViewer = () => {
-    if (!labelProductName) setLabelProductName(productName);
-    setBarcodeViewerOpen(true);
+
+  const openBarcodeViewer = (rowId: string) => {
+    const label = skuLabelMap[rowId];
+    if (!isSkuLabelConfigured(label)) {
+      showToast(
+        t('profile.productMgmt.onlineEdit.labelRequired') || '라벨을 먼저 설정하세요',
+        'error',
+      );
+      return;
+    }
+    setBarcodeViewerRowId(rowId);
   };
+
   const closeLabelModal = () => setLabelModalRowId(null);
-  const saveLabelModal = () => {
-    // 백엔드 update endpoint 도입 전까지는 단순히 모달만 닫음.
+
+  const saveLabelModal = async () => {
+    if (!labelModalRowId) return;
+    const saved: SkuLabelSettings = { ...labelModalDraft, configured: true };
+    setSkuLabelMap((prev) => ({ ...prev, [labelModalRowId]: saved }));
     setLabelModalRowId(null);
+    await persistDraft();
+    showToast(t('cartOrder.labelModal.save') || '저장', 'success');
   };
+
+  const viewerLabel = barcodeViewerRowId ? skuLabelMap[barcodeViewerRowId] : null;
   // 라벨 이미지 업로드 — 갤러리에서 1장 선택.
   const pickLabelFile = async () => {
     const granted = await requestPhotoLibraryPermission();
@@ -351,23 +540,78 @@ const OnlineProductEditScreen: React.FC = () => {
         return;
       }
       const uri = response.assets?.[0]?.uri;
-      if (uri) setLabelFileUri(uri);
+      if (uri) setLabelModalDraft((prev) => ({ ...prev, labelFileUri: uri }));
     });
   };
 
-  const onConfirm = () => {
-    // 백엔드 update endpoint 연결 전까지는 단순히 사용자에게 알림만.
-    Alert.alert(
-      t('profile.productMgmt.onlineEdit.title') || '온라인상품편집',
-      t('profile.productMgmt.onlineEdit.savedHint') ||
-        '저장되었습니다 (API 연결 대기 중).',
-      [
-        {
-          text: t('profile.productMgmt.onlineEdit.confirm') || '확인',
-          onPress: () => navigation.goBack(),
-        },
-      ],
+  const renderLabelActions = (rowId: string) => {
+    const labelConfigured = isSkuLabelConfigured(skuLabelMap[rowId]);
+    return (
+      <View style={[styles.optionLabelCell, { flex: 1 }]}>
+        <TouchableOpacity
+          onPress={() => openLabelModal(rowId)}
+          hitSlop={BACK_HIT_SLOP}
+          style={labelConfigured ? styles.optionLabelIconBtnActive : undefined}
+        >
+          <Icon
+            name="pencil"
+            size={14}
+            color={labelConfigured ? COLORS.red : COLORS.gray[500]}
+          />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => openBarcodeViewer(rowId)}
+          hitSlop={BACK_HIT_SLOP}
+          disabled={!labelConfigured}
+          style={labelConfigured ? styles.optionLabelIconBtnActive : undefined}
+        >
+          <Icon
+            name={labelConfigured ? 'eye' : 'eye-outline'}
+            size={14}
+            color={labelConfigured ? COLORS.red : COLORS.gray[400]}
+          />
+        </TouchableOpacity>
+      </View>
     );
+  };
+
+  const onConfirm = async () => {
+    if (!initial.productId) {
+      await persistDraft();
+      navigation.goBack();
+      return;
+    }
+    setSaving(true);
+    try {
+      await persistDraft();
+      const res = await productListApi.updateProduct(
+        initial.productId,
+        buildUpdatePayload(),
+        locale,
+      );
+      if (res.success) {
+        showToast(
+          t('profile.productMgmt.onlineEdit.saved') || '저장되었습니다',
+          'success',
+        );
+        navigation.goBack();
+        return;
+      }
+      Alert.alert(
+        t('profile.productMgmt.onlineEdit.title') || '온라인상품편집',
+        res.message ||
+          t('profile.productMgmt.onlineEdit.savedHint') ||
+          '로컬에 저장되었습니다',
+        [
+          {
+            text: t('profile.productMgmt.onlineEdit.confirm') || '확인',
+            onPress: () => navigation.goBack(),
+          },
+        ],
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -659,20 +903,7 @@ const OnlineProductEditScreen: React.FC = () => {
                   keyboardType="decimal-pad"
                 />
               </View>
-              <View style={[styles.optionLabelCell, { flex: 1 }]}>
-                <TouchableOpacity
-                  onPress={() => openLabelModal('fallback')}
-                  hitSlop={BACK_HIT_SLOP}
-                >
-                  <Icon name="pencil" size={14} color={COLORS.gray[500]} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={openBarcodeViewer}
-                  hitSlop={BACK_HIT_SLOP}
-                >
-                  <Icon name="eye-outline" size={14} color={COLORS.gray[500]} />
-                </TouchableOpacity>
-              </View>
+              {renderLabelActions('fallback')}
               <TextInput
                 style={[styles.optionCellInput, { flex: 1 }]}
                 value={remark}
@@ -700,20 +931,7 @@ const OnlineProductEditScreen: React.FC = () => {
                   keyboardType="decimal-pad"
                 />
               </View>
-              <View style={[styles.optionLabelCell, { flex: 1 }]}>
-                <TouchableOpacity
-                  onPress={() => openLabelModal(row.id)}
-                  hitSlop={BACK_HIT_SLOP}
-                >
-                  <Icon name="pencil" size={14} color={COLORS.gray[500]} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={openBarcodeViewer}
-                  hitSlop={BACK_HIT_SLOP}
-                >
-                  <Icon name="eye-outline" size={14} color={COLORS.gray[500]} />
-                </TouchableOpacity>
-              </View>
+              {renderLabelActions(row.id)}
               <TextInput
                 style={[styles.optionCellInput, { flex: 1 }]}
                 value={skuRemarkMap[row.id] ?? ''}
@@ -740,12 +958,17 @@ const OnlineProductEditScreen: React.FC = () => {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.footerBtn, styles.confirmBtn]}
+          style={[styles.footerBtn, styles.confirmBtn, saving && styles.confirmBtnDisabled]}
           onPress={onConfirm}
+          disabled={saving}
         >
-          <Text style={styles.confirmBtnText}>
-            {t('profile.productMgmt.onlineEdit.confirm') || '확인'}
-          </Text>
+          {saving ? (
+            <ActivityIndicator size="small" color={COLORS.white} />
+          ) : (
+            <Text style={styles.confirmBtnText}>
+              {t('profile.productMgmt.onlineEdit.confirm') || '확인'}
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
       </View>
@@ -918,15 +1141,17 @@ const OnlineProductEditScreen: React.FC = () => {
                     key={k}
                     style={[
                       styles.labelChip,
-                      labelType === k && styles.labelChipActive,
+                      labelModalDraft.labelType === k && styles.labelChipActive,
                     ]}
                     activeOpacity={0.7}
-                    onPress={() => setLabelType(k)}
+                    onPress={() =>
+                      setLabelModalDraft((prev) => ({ ...prev, labelType: k }))
+                    }
                   >
                     <Text
                       style={[
                         styles.labelChipText,
-                        labelType === k && styles.labelChipTextActive,
+                        labelModalDraft.labelType === k && styles.labelChipTextActive,
                       ]}
                     >
                       {k === 'product'
@@ -947,15 +1172,17 @@ const OnlineProductEditScreen: React.FC = () => {
                     key={k}
                     style={[
                       styles.labelChip,
-                      labelFormat === k && styles.labelChipActive,
+                      labelModalDraft.labelFormat === k && styles.labelChipActive,
                     ]}
                     activeOpacity={0.7}
-                    onPress={() => setLabelFormat(k)}
+                    onPress={() =>
+                      setLabelModalDraft((prev) => ({ ...prev, labelFormat: k }))
+                    }
                   >
                     <Text
                       style={[
                         styles.labelChipText,
-                        labelFormat === k && styles.labelChipTextActive,
+                        labelModalDraft.labelFormat === k && styles.labelChipTextActive,
                       ]}
                     >
                       {k === '50x80'
@@ -972,8 +1199,10 @@ const OnlineProductEditScreen: React.FC = () => {
               </Text>
               <TextInput
                 style={styles.labelInputBox}
-                value={labelProductName}
-                onChangeText={setLabelProductName}
+                value={labelModalDraft.labelProductName}
+                onChangeText={(text) =>
+                  setLabelModalDraft((prev) => ({ ...prev, labelProductName: text }))
+                }
                 placeholder={t('cartOrder.labelModal.productNamePlaceholder')}
                 placeholderTextColor={COLORS.gray[400]}
               />
@@ -984,8 +1213,10 @@ const OnlineProductEditScreen: React.FC = () => {
               </Text>
               <TextInput
                 style={styles.labelContentBox}
-                value={labelContent}
-                onChangeText={setLabelContent}
+                value={labelModalDraft.labelContent}
+                onChangeText={(text) =>
+                  setLabelModalDraft((prev) => ({ ...prev, labelContent: text }))
+                }
                 placeholder={t('cartOrder.labelModal.contentPlaceholder')}
                 placeholderTextColor={COLORS.gray[400]}
                 multiline
@@ -997,8 +1228,10 @@ const OnlineProductEditScreen: React.FC = () => {
               </Text>
               <TextInput
                 style={styles.labelInputBox}
-                value={labelBarcode}
-                onChangeText={setLabelBarcode}
+                value={labelModalDraft.labelBarcode}
+                onChangeText={(text) =>
+                  setLabelModalDraft((prev) => ({ ...prev, labelBarcode: text }))
+                }
                 placeholder={t('cartOrder.labelModal.barcodePlaceholder')}
                 placeholderTextColor={COLORS.gray[400]}
               />
@@ -1014,16 +1247,18 @@ const OnlineProductEditScreen: React.FC = () => {
                   {t('cartOrder.labelModal.labelUpload')}
                 </Text>
               </TouchableOpacity>
-              {labelFileUri ? (
+              {labelModalDraft.labelFileUri ? (
                 <View style={styles.labelFilePreviewWrap}>
                   <Image
-                    source={{ uri: labelFileUri }}
+                    source={{ uri: labelModalDraft.labelFileUri }}
                     style={styles.labelFilePreview}
                     resizeMode="cover"
                   />
                   <TouchableOpacity
                     style={styles.labelFileRemove}
-                    onPress={() => setLabelFileUri(null)}
+                    onPress={() =>
+                      setLabelModalDraft((prev) => ({ ...prev, labelFileUri: null }))
+                    }
                   >
                     <Icon name="close" size={12} color={COLORS.white} />
                   </TouchableOpacity>
@@ -1040,7 +1275,7 @@ const OnlineProductEditScreen: React.FC = () => {
                 </Text>
                 <View style={styles.previewDimBadge}>
                   <Text style={styles.previewDimBadgeText}>
-                    {labelFormat === '50x80'
+                    {labelModalDraft.labelFormat === '50x80'
                       ? t('cartOrder.labelModal.dim5080') || '50 × 80 mm'
                       : t('cartOrder.labelModal.dim4060') || '40 × 60 mm'}
                   </Text>
@@ -1050,31 +1285,39 @@ const OnlineProductEditScreen: React.FC = () => {
                 <View
                   style={[
                     styles.previewCard,
-                    labelFormat === '50x80'
+                    labelModalDraft.labelFormat === '50x80'
                       ? styles.previewCard5080
                       : styles.previewCard4060,
                   ]}
                 >
-                  {labelType === 'foodInspect' && (
+                  {labelModalDraft.labelType === 'foodInspect' && (
                     <View style={styles.foodBadge}>
-                      {/* restaurant-outline 은 Icon 레지스트리에 없어서 안드로이드
-                          에서 ? 로 렌더되던 문제 해결 — 🍴 이모지로 대체.
-                          이모지는 OS 폰트에 내장돼 별도 리소스 의존성 없음. */}
                       <Text style={styles.foodBadgeIcon}>🍴</Text>
                       <Text style={styles.foodBadgeText}>
                         {t('cartOrder.labelModal.foodBadge') || '식품용'}
                       </Text>
                     </View>
                   )}
-                  {!(labelType === 'foodInspect' && labelFormat === '40x60') && (
+                  {!(
+                    labelModalDraft.labelType === 'foodInspect' &&
+                    labelModalDraft.labelFormat === '40x60'
+                  ) && (
                     <Text style={styles.previewProductName}>
-                      {(t('cartOrder.labelModal.productName') || '상품명')}: {labelProductName}
+                      {(t('cartOrder.labelModal.productName') || '상품명')}:{' '}
+                      {labelModalDraft.labelProductName}
                     </Text>
                   )}
-                  {!(labelType === 'product' && labelFormat === '40x60') && !!labelContent && (
-                    <Text style={styles.previewContent}>{labelContent}</Text>
-                  )}
-                  {!(labelType === 'foodInspect' && labelFormat === '40x60') && (
+                  {!(
+                    labelModalDraft.labelType === 'product' &&
+                    labelModalDraft.labelFormat === '40x60'
+                  ) &&
+                    !!labelModalDraft.labelContent && (
+                      <Text style={styles.previewContent}>{labelModalDraft.labelContent}</Text>
+                    )}
+                  {!(
+                    labelModalDraft.labelType === 'foodInspect' &&
+                    labelModalDraft.labelFormat === '40x60'
+                  ) && (
                     <View style={styles.barcodePreview}>
                       <View style={styles.barcodeLines}>
                         {Array.from({ length: 28 }).map((_, i) => (
@@ -1088,7 +1331,7 @@ const OnlineProductEditScreen: React.FC = () => {
                           />
                         ))}
                       </View>
-                      <Text style={styles.barcodeText}>{labelBarcode}</Text>
+                      <Text style={styles.barcodeText}>{labelModalDraft.labelBarcode}</Text>
                     </View>
                   )}
                 </View>
@@ -1125,16 +1368,16 @@ const OnlineProductEditScreen: React.FC = () => {
           state(라벨 종류 / 양식 / 상품명 / 내용 / 바코드)를 그대로 미리보기에
           반영. 닫기 / 확인 두 단추로 종료. */}
       <Modal
-        visible={barcodeViewerOpen}
+        visible={barcodeViewerRowId !== null}
         transparent
         animationType="fade"
-        onRequestClose={() => setBarcodeViewerOpen(false)}
+        onRequestClose={() => setBarcodeViewerRowId(null)}
       >
         <View style={styles.labelModalOverlay}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
-            onPress={() => setBarcodeViewerOpen(false)}
+            onPress={() => setBarcodeViewerRowId(null)}
           />
           <View style={styles.labelModalCard}>
             {/* 헤더 — 좌측 타이틀, 우측 닫기 X */}
@@ -1143,7 +1386,7 @@ const OnlineProductEditScreen: React.FC = () => {
                 {t('cartOrder.labelModal.barcodeImageCheck') || '바코드 이미지 확인'}
               </Text>
               <TouchableOpacity
-                onPress={() => setBarcodeViewerOpen(false)}
+                onPress={() => setBarcodeViewerRowId(null)}
                 hitSlop={BACK_HIT_SLOP}
               >
                 <Icon name="close" size={20} color={COLORS.text.secondary} />
@@ -1163,7 +1406,7 @@ const OnlineProductEditScreen: React.FC = () => {
                 </Text>
                 <View style={styles.previewDimBadge}>
                   <Text style={styles.previewDimBadgeText}>
-                    {labelFormat === '50x80'
+                    {viewerLabel?.labelFormat === '50x80'
                       ? t('cartOrder.labelModal.dim5080') || '50 × 80 mm'
                       : t('cartOrder.labelModal.dim4060') || '40 × 60 mm'}
                   </Text>
@@ -1173,32 +1416,39 @@ const OnlineProductEditScreen: React.FC = () => {
                 <View
                   style={[
                     styles.previewCard,
-                    labelFormat === '50x80'
+                    viewerLabel?.labelFormat === '50x80'
                       ? styles.previewCard5080
                       : styles.previewCard4060,
                   ]}
                 >
-                  {labelType === 'foodInspect' && (
+                  {viewerLabel?.labelType === 'foodInspect' && (
                     <View style={styles.foodBadge}>
-                      <Icon
-                        name="restaurant-outline"
-                        size={10}
-                        color={COLORS.text.primary}
-                      />
+                      <Text style={styles.foodBadgeIcon}>🍴</Text>
                       <Text style={styles.foodBadgeText}>
                         {t('cartOrder.labelModal.foodBadge') || '식품용'}
                       </Text>
                     </View>
                   )}
-                  {!(labelType === 'foodInspect' && labelFormat === '40x60') && (
+                  {!(
+                    viewerLabel?.labelType === 'foodInspect' &&
+                    viewerLabel?.labelFormat === '40x60'
+                  ) && (
                     <Text style={styles.previewProductName}>
-                      {(t('cartOrder.labelModal.productName') || '상품명')}: {labelProductName}
+                      {(t('cartOrder.labelModal.productName') || '상품명')}:{' '}
+                      {viewerLabel?.labelProductName}
                     </Text>
                   )}
-                  {!(labelType === 'product' && labelFormat === '40x60') && !!labelContent && (
-                    <Text style={styles.previewContent}>{labelContent}</Text>
-                  )}
-                  {!(labelType === 'foodInspect' && labelFormat === '40x60') && (
+                  {!(
+                    viewerLabel?.labelType === 'product' &&
+                    viewerLabel?.labelFormat === '40x60'
+                  ) &&
+                    !!viewerLabel?.labelContent && (
+                      <Text style={styles.previewContent}>{viewerLabel.labelContent}</Text>
+                    )}
+                  {!(
+                    viewerLabel?.labelType === 'foodInspect' &&
+                    viewerLabel?.labelFormat === '40x60'
+                  ) && (
                     <View style={styles.barcodePreview}>
                       <View style={styles.barcodeLines}>
                         {Array.from({ length: 28 }).map((_, i) => (
@@ -1212,7 +1462,7 @@ const OnlineProductEditScreen: React.FC = () => {
                           />
                         ))}
                       </View>
-                      <Text style={styles.barcodeText}>{labelBarcode}</Text>
+                      <Text style={styles.barcodeText}>{viewerLabel?.labelBarcode}</Text>
                     </View>
                   )}
                 </View>
@@ -1224,7 +1474,7 @@ const OnlineProductEditScreen: React.FC = () => {
               <TouchableOpacity
                 style={[styles.labelModalFooterBtn, styles.labelModalCancelBtn]}
                 activeOpacity={0.7}
-                onPress={() => setBarcodeViewerOpen(false)}
+                onPress={() => setBarcodeViewerRowId(null)}
               >
                 <Text style={styles.labelModalCancelText}>
                   {t('cartOrder.labelModal.close') || '닫기'}
@@ -1233,7 +1483,7 @@ const OnlineProductEditScreen: React.FC = () => {
               <TouchableOpacity
                 style={[styles.labelModalFooterBtn, styles.labelModalSaveBtn]}
                 activeOpacity={0.7}
-                onPress={() => setBarcodeViewerOpen(false)}
+                onPress={() => setBarcodeViewerRowId(null)}
               >
                 <Text style={styles.labelModalSaveText}>
                   {t('profile.productMgmt.onlineEdit.confirm') || '확인'}
@@ -1925,6 +2175,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
+  optionLabelIconBtnActive: {
+    backgroundColor: 'rgba(255, 85, 0, 0.08)',
+    borderRadius: 4,
+    padding: 2,
+  },
 
   footer: {
     flexDirection: 'row',
@@ -1949,6 +2204,7 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: { fontSize: FONTS.sizes.sm, color: COLORS.gray[700], fontWeight: '600' },
   confirmBtn: { backgroundColor: COLORS.red },
+  confirmBtnDisabled: { opacity: 0.6 },
   confirmBtnText: { fontSize: FONTS.sizes.sm, color: COLORS.white, fontWeight: '700' },
   // GET /products/detail 진행 인디케이터 (수기입력 탭 우측)
   detailLoadingBox: {

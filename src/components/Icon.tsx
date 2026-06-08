@@ -66,6 +66,8 @@ import ThumbsDownIcon from '../assets/icons/ThumbsDownIcon';
 import ReceiptIcon from '../assets/icons/ReceiptIcon';
 import CreateIcon from '../assets/icons/CreateIcon';
 import BoatIcon from '../assets/icons/BoatIcon';
+import DeliveryIcon from '../assets/icons/DeliveryIcon';
+import PackageIcon from '../assets/icons/PackageIcon';
 import FlashIcon from '../assets/icons/FlashIcon';
 import RocketIcon from '../assets/icons/RocketIcon';
 import NotificationIcon from '../assets/icons/NotificationIcon';
@@ -146,8 +148,15 @@ const iconComponentMap: { [key: string]: React.ComponentType<any> } = {
   'chatbubbles': ChatBubbleIcon,
   'chatbubbles-outline': ChatBubbleIcon,
   'card': CardIcon,
+  'card-outline': CardIcon,
   'airplane': AirplaneIcon,
   'cube': CubeIcon,
+  'business-outline': CubeIcon,
+  'warehouse-outline': CubeIcon,
+  'package': PackageIcon,
+  'delivery': DeliveryIcon,
+  'car-outline': DeliveryIcon,
+  'truck': DeliveryIcon,
   'call': CallIcon,
   'document': DocumentIcon,
   'document-text': DocumentIcon,
@@ -162,7 +171,9 @@ const iconComponentMap: { [key: string]: React.ComponentType<any> } = {
   'mail-outline': MailIcon,
   'thumbs-up': ThumbsUpIcon,
   'thumbs-down': ThumbsDownIcon,
+  'receipt': ReceiptIcon,
   'receipt-outline': ReceiptIcon,
+  'checkmark-circle-outline': CheckIcon,
   'create-outline': CreateIcon,
   'boat': BoatIcon,
   'flash': FlashIcon,

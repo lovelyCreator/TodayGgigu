@@ -127,7 +127,8 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       // Set up event listeners (even if not connected yet, for auto-reconnect)
       setupEventListeners();
     } catch (error) {
-      console.error('[Socket] Failed to connect:', error);
+      // Warn only — socket is optional; REST API handles orders/payment without it
+      console.warn('[Socket] Failed to connect:', error);
       setIsConnecting(false);
       setIsConnected(false);
     }

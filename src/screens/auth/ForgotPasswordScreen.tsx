@@ -10,6 +10,7 @@ import {
   TextInput as RNTextInput,
   Modal,
   FlatList,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from '../../components/Icon';
@@ -158,31 +159,36 @@ const ForgotPasswordScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <LinearGradient
-        colors={[...COLORS.gradients.authBackground]}
-        style={styles.gradientBackground}
+    <View style={styles.container}>
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={COLORS.white}
+        translucent={Platform.OS === 'android'}
       />
+      <SafeAreaView style={styles.headerSafeArea} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handleBack}
+          >
+            <ArrowBackIcon width={12} height={20} color={COLORS.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('auth.accountInfo') || 'Account info'}</Text>
+          <View style={styles.placeholder} />
+        </View>
+      </SafeAreaView>
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+        <LinearGradient
+          colors={[...COLORS.gradients.authBackground]}
+          style={styles.gradientBackground}
+        />
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={handleBack}
-            >
-              <ArrowBackIcon width={12} height={20} color={COLORS.text.primary} />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>{t('auth.accountInfo') || 'Account info'}</Text>
-            <View style={styles.placeholder} />
-          </View>
-
           {/* White Card */}
           <View style={styles.card}>
             {/* Title */}
@@ -408,14 +414,17 @@ const ForgotPasswordScreen: React.FC = () => {
           </TouchableOpacity>
         </Modal>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.white,
+  },
+  headerSafeArea: {
+    backgroundColor: COLORS.white,
   },
   gradientBackground: {
     position: 'absolute',
@@ -431,7 +440,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
-    paddingTop: SPACING.lg,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

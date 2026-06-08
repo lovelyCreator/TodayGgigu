@@ -36,6 +36,7 @@ import {
   mergeOrderSourceItems,
   orderApi,
   OrdersProxyAddService,
+  resolveCheckoutLineUnitPriceKRW,
   validateOrdersProxyLineItems,
 } from '../../services/orderApi';
 import {
@@ -1551,16 +1552,25 @@ const CartScreen: React.FC = () => {
       );
 
       const ordersLang = mapLocaleToOrdersLang(locale);
-      const fallbackCards = checkedCards.map((c) => ({
-        id: c.id,
-        offerId: c.offerId,
-        productName: c.productName,
-        productImage: c.productImage,
-        source: c.source,
-        quantity: c.quantity,
-        specId: c.specId,
-        skuId: c.skuId,
-      }));
+      const fallbackCards = checkedCards.map((c) => {
+        const merged = sourceItems.find((entry) => {
+          if (!entry || typeof entry !== 'object') return false;
+          const row = entry as Record<string, unknown>;
+          return row._id === c.id || row.id === c.id;
+        }) as Record<string, unknown> | undefined;
+        return {
+          id: c.id,
+          offerId: c.offerId,
+          productName: c.productName,
+          productImage: c.productImage,
+          source: c.source,
+          quantity: c.quantity,
+          specId: c.specId,
+          skuId: c.skuId,
+          unitPriceKRW: resolveCheckoutLineUnitPriceKRW(merged, c.unitPrice),
+          unitPriceCNY: c.unitPrice,
+        };
+      });
 
       // Decide which payload shape to build:
       //   * Single-card order  → top-level addServices/negotiation
@@ -1727,6 +1737,7 @@ const CartScreen: React.FC = () => {
         purchasePayment,
         shippingPayment,
         items: proxyItems,
+        netExpectedTotalKRW: checkoutData.productTotalKRW,
       });
 
       await createOrder(proxyRequest);

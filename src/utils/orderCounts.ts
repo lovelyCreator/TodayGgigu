@@ -2,12 +2,9 @@ import type { Order as ApiOrder } from '../services/orderApi';
 import { resolveOrderProgressStatus } from '../services/orderApi';
 
 export type ProfileOrderCounts = {
-  // 견적대기 — P_QUOTE 가 그대로 남은 주문(결제대기로 자동 전환되지 않은 것).
-  // resolvePurchaseAgencyProgressStatus 가 P_QUOTE + paymentPending + hasQuoteTotal>0
-  // 인 주문을 자동으로 BUY_PAY_WAIT(결제대기) 로 옮기므로, 견적이 떨어지지 않은
-  // 또는 paymentStatus 가 pending 이 아닌 P_QUOTE 만 여기에 남는다.
+  // 구매견적 — API progressStatus 가 P_QUOTE 인 주문.
   quotePending: number;
-  // 결제대기(고객결제) — BUY_PAY_WAIT / P_PENDING / 자동 전환된 P_QUOTE.
+  // 구매결제대기 — BUY_PAY_WAIT / P_PENDING (및 progressStatus 미지정 시 추론된 결제대기).
   unpaid: number;
   to_be_shipped: number;
   shipped: number;
@@ -74,32 +71,58 @@ const EMPTY_PROFILE_COUNTS: ProfileOrderCounts = {
 
 const PROFILE_STATUS_MAP: Record<keyof ProfileOrderCounts, readonly string[]> = {
   quotePending: ['P_QUOTE'],
-  unpaid: ['BUY_PAY_WAIT', 'P_PENDING'],
+  unpaid: ['P_PENDING'],
   to_be_shipped: [
+    'P_PAY_COMPLETE',
+    'P_AU_PURCHASING',
+    'P_MA_PROBLEM',
+    'P_PUR_COMPLETE',
+    'P_FINAL_PUR_COMPLETE',
     'P_RECEIPT_APPLICATION',
-    'WH_ARRIVE_EXPECTED',
-    'WH_IN_PROGRESS',
-    'WH_IN_DONE',
-    'WH_PICK_DONE',
-    'WH_PAY_WAIT',
-    'WH_SHIPPED',
+    'IO_ARRIVE_EXPECTED',
+    'IO_PROGRESS',
+    'IO_WARE_COMPLETE',
+    'IO_FINAL_WARE_COMPLETE',
+    'IO_PAY_PENDING',
+    'IO_PAY_COMPLETE',
+    'IO_SHIP_PENDING',
+    'IO_SHIP_COMPLETE',
+    'IO_COST_PENDING',
+    'IO_COST_COMPLETE',
   ],
-  shipped: ['INTERNATIONAL_SHIPPING', 'INTERNATIONAL_SHIPPED'],
-  shipping_delay: ['DELIVERY_EXCEPTION'],
+  shipped: ['IO_DELIVERY_PROGRESS', 'IO_DELIVERY_COMPLETE'],
+  shipping_delay: ['IO_DELAY'],
   processed: ['ORDER_RECEIVED'],
-  problemProducts: ['BUYING_PROBLEM'],
-  error: ['ERR_IN', 'NO_ORDER_INFO'],
-  refunds: ['USER_REFUND_REQ', 'USER_REFUND_COMPLETED'],
+  problemProducts: ['P_MA_PROBLEM'],
+  error: ['E_ERROR', 'NO_ORDER_INFO', 'E_ORDER_CANCELLED', 'E_SHIPMENT_HOLD'],
+  refunds: [
+    'E_CUSTOMER_RETURN_REQ',
+    'E_CUSTOMER_REFUND_PROGRESS',
+    'E_CUSTOMER_REFUND_COMPLETED',
+    'E_PLATFORM_REFUND_REQ',
+    'E_PLATFORM_REFUND_PRO',
+    'E_PLATFORM_REFUND_IN_PROGRESS',
+    'E_PLATFORM_REFUND_COMPLETED',
+    'E_FINAL_REFUND_REQ',
+    'E_FINAL_REFUND_PROGRESS',
+    'E_FINAL_REFUND_COMPLETED',
+    'RETURN_REQUEST',
+    'RETURN_PAY_PENDING',
+    'RETURN_PAY_COMPLETE',
+    'RETURN_COMPLETE',
+  ],
 };
 
 export const getOrderProgressStatus = (order: {
   progressStatus?: string | null;
+  statusHistory?: Array<{ status?: string | null }>;
   paymentStatus?: string | null;
   firstTierCost?: ApiOrder['firstTierCost'];
   orderMainInfo?: ApiOrder['orderMainInfo'];
 }): string =>
   resolveOrderProgressStatus({
     progressStatus: order.progressStatus,
+    statusHistory: order.statusHistory,
     paymentStatus: order.paymentStatus,
     firstTierCost: order.firstTierCost,
     orderMainInfo: order.orderMainInfo,

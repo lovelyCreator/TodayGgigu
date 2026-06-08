@@ -12,6 +12,7 @@ import {
   Alert,
   TextInput,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import Icon from '../../../../components/Icon';
 import { ScreenSkeleton } from '../../../../components/Skeleton';
@@ -32,6 +33,12 @@ import SellerShopIcon from '../../../../assets/icons/SellerShopIcon';
 import { OrderFilterModal } from '../../../../components';
 import { useGetOrdersMutation } from '../../../../hooks/useGetOrdersMutation';
 import { Order as ApiOrder } from '../../../../services/orderApi';
+import {
+  API_PROGRESS_STATUS_META,
+  PURCHASE_DASHBOARD_STATUSES,
+  WAREHOUSE_DASHBOARD_STATUSES,
+  ERROR_DASHBOARD_STATUSES,
+} from '../../../../utils/apiProgressStatus';
 import { useToast } from '../../../../context/ToastContext';
 import { useRecommendationsMutation } from '../../../../hooks/useRecommendationsMutation';
 import { useWishlistStatus } from '../../../../hooks/useWishlistStatus';
@@ -94,11 +101,13 @@ interface OrderItem {
   sellerOpenId: string;
   offerId: string;
   itemId?: string; // MongoDB _id from API
+  itemUniqueNo?: number;
   subtotal: number;
   source?: string;
   otherSite?: string;
   specId?: string;
   skuId?: string;
+  addServices?: Array<{ id?: string; note?: string; imageUrl?: string[] }>;
   skuAttributes?: {
     attributeId?: number;
     attributeName: string;
@@ -150,7 +159,7 @@ const mapOrderStatusToTab = (order: ApiOrder): Order['status'] => {
   });
   
   // Map based on progressStatus and orderStatus from real API
-  if (order.progressStatus === 'BUY_PAY_WAIT') {
+  if (order.progressStatus === 'P_PENDING' || order.progressStatus === 'BUY_PAY_WAIT') {
     console.log('🛒 BuyListScreen: Mapped to unpaid (payment pending)');
     return 'unpaid';
   }
@@ -182,25 +191,25 @@ const STATUS_GROUPS = [
     key: 'purchase_agency',
     title: '발주관리',
     titleKey: 'pages.orders.groups.purchaseAgency',
-    statuses: ['P_QUOTE', 'BUY_PAY_WAIT', 'P_AU_PURCHASING', 'BUYING_MANUAL', 'BUYING_PROBLEM', 'BUY_FINAL_DONE'],
+    statuses: [...PURCHASE_DASHBOARD_STATUSES],
   },
   {
     key: 'warehouse',
     title: '현지입/출고',
     titleKey: 'pages.orders.groups.warehouse',
-    statuses: ['P_RECEIPT_APPLICATION', 'WH_ARRIVE_EXPECTED', 'DELIVERY_EXCEPTION', 'WH_IN_PROGRESS', 'WH_IN_DONE', 'WH_PICK_DONE', 'WH_PAY_WAIT', 'WH_SHIPPED'],
+    statuses: ['P_RECEIPT_APPLICATION', ...WAREHOUSE_DASHBOARD_STATUSES],
   },
   {
     key: 'international_shipping',
-    title: '국제운송',
     titleKey: 'pages.orders.groups.internationalShipping',
-    statuses: ['INTERNATIONAL_SHIPPING', 'INTERNATIONAL_SHIPPED', 'ORDER_RECEIVED'],
+    title: '국제운송',
+    statuses: ['IO_DELIVERY_PROGRESS', 'IO_DELIVERY_COMPLETE', 'ORDER_RECEIVED'],
   },
   {
     key: 'error',
     title: '오류',
     titleKey: 'pages.orders.groups.error',
-    statuses: ['ERR_IN', 'USER_REFUND_REQ', 'USER_REFUND_COMPLETED'],
+    statuses: [...ERROR_DASHBOARD_STATUSES],
   },
 ] as const;
 
@@ -208,37 +217,16 @@ const PROGRESS_STATUS_META: Record<string, {
   tab: Order['status'];
   group: Order['statusGroup'];
   translationKey: string;
-}> = {
-  P_QUOTE: { tab: 'category', group: 'purchase_agency', translationKey: 'pages.orders.status.quotePending' },
-  BUY_PAY_WAIT: { tab: 'unpaid', group: 'purchase_agency', translationKey: 'pages.orders.status.paymentPending' },
-  BUY_PAY_DONE: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.paymentComplete' },
-  P_AU_PURCHASING: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.purchasing' },
-  BUYING_MANUAL: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.purchasing' },
-  BUYING_FINANCIAL_SETTLEMENT: { tab: 'progressing', group: 'purchase_agency', translationKey: 'pages.orders.status.financialSettlement' },
-  BUYING_PROBLEM: { tab: 'error', group: 'purchase_agency', translationKey: 'pages.orders.status.problemProduct' },
-  BUY_FINAL_DONE: { tab: 'end', group: 'purchase_agency', translationKey: 'pages.orders.status.purchaseFinalComplete' },
-  P_RECEIPT_APPLICATION: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.receiptApplication' },
-  WH_ARRIVE_EXPECTED: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.centerArrivalExpected' },
-  DELIVERY_EXCEPTION: { tab: 'error', group: 'warehouse', translationKey: 'pages.orders.status.deliveryException' },
-  WH_IN_EXPECTED: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.expectedWarehouseIn' },
-  WH_IN_PROGRESS: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.warehouseInProgress' },
-  WH_IN_DONE: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.warehouseInComplete' },
-  WH_PICK_DONE: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.domesticWarehousePacking' },
-  WH_PAY_WAIT: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.waitingSettlement' },
-  WH_PAY_DONE: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.settlementComplete' },
-  WH_SHIPPED: { tab: 'progressing', group: 'warehouse', translationKey: 'pages.orders.status.shipmentComplete' },
-  INTERNATIONAL_SHIPPING: { tab: 'progressing', group: 'international_shipping', translationKey: 'pages.orders.status.internationalShippingInProgress' },
-  INTERNATIONAL_SHIPPED: { tab: 'end', group: 'international_shipping', translationKey: 'pages.orders.status.internationalShippingComplete' },
-  ORDER_RECEIVED: { tab: 'pending_review', group: 'international_shipping', translationKey: 'pages.orders.status.orderReceived' },
-  ERR_IN: { tab: 'error', group: 'error', translationKey: 'pages.orders.status.errorWarehouse' },
-  NO_ORDER_INFO: { tab: 'error', group: 'error', translationKey: 'pages.orders.status.noOrderInfo' },
-  USER_REFUND_REQ: { tab: 'refunds', group: 'error', translationKey: 'pages.orders.status.userRefundRequest' },
-  USER_REFUND_COMPLETED: { tab: 'refunds', group: 'error', translationKey: 'pages.orders.status.userRefundComplete' },
-};
+}> = API_PROGRESS_STATUS_META as Record<string, {
+  tab: Order['status'];
+  group: Order['statusGroup'];
+  translationKey: string;
+}>;
 
 /** Canonical progress status for list filtering (handles P_PENDING → BUY_PAY_WAIT, etc.) */
 const getCanonicalOrderProgressStatus = (order: {
   progressStatus?: string | null;
+  statusHistory?: ApiOrder['statusHistory'];
   paymentStatus?: string | null;
   firstTierCost?: ApiOrder['firstTierCost'];
   orderMainInfo?: ApiOrder['orderMainInfo'];
@@ -247,6 +235,7 @@ const getCanonicalOrderProgressStatus = (order: {
 }): string =>
   resolveOrderProgressStatus({
     progressStatus: order.progressStatus,
+    statusHistory: order.statusHistory,
     paymentStatus: order.paymentStatus,
     firstTierCost: order.firstTierCost,
     orderMainInfo: order.orderMainInfo,
@@ -310,9 +299,88 @@ const resolveOrderBusinessDomain = (order: Order): BuyListBusinessDomain => {
   return 'purchase_agency';
 };
 
+const coerceAmount = (value: unknown): number => {
+  if (value == null || value === '') return 0;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const translateOrderOptionLabel = (value: string, translate: (key: string) => string): string => {
+  if (!value) return '';
+  const key = `cartOrder.orderModal.optionLabels.${value}`;
+  const translated = translate(key);
+  return translated !== key ? translated : value;
+};
+
+const formatBuyListOrderDate = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${day} ${h}:${min}`;
+};
+
+const getBusinessDomainBadgeLabel = (
+  domain: BuyListBusinessDomain,
+  translate: (key: string) => string,
+): string => {
+  const raw =
+    domain === 'vvic_hipass'
+      ? 'VVIC'
+      : domain === 'rocket_3pl'
+        ? '로켓배송'
+        : domain === 'shipping_agency'
+          ? '배송대행'
+          : '구매대행';
+  return translateOrderOptionLabel(raw, translate);
+};
+
+const buildOrderLogisticsSummary = (order: Order, translate: (key: string) => string): string => {
+  const info: any = order.orderMainInfo || {};
+  const parts = [
+    info.logisticsCenter,
+    info.shippingMethod || info.transferMethod,
+    (order as any).applicationCategory,
+    info.businessType || info.recipientType || info.customsType,
+  ]
+    .map((value) => (value ? translateOrderOptionLabel(String(value), translate) : ''))
+    .filter(Boolean);
+  return parts.join(' / ');
+};
+
+const resolveOrderProductTotalKRW = (order: Order): number => {
+  const tier = order.firstTierCost;
+  return (
+    coerceAmount(tier?.productTotalKRW) ||
+    coerceAmount(tier?.realProductTotalKRW) ||
+    order.items.reduce((sum, item) => sum + (item.subtotal || item.price * item.quantity), 0)
+  );
+};
+
+const resolveOrderShippingKRW = (order: Order): number =>
+  coerceAmount(order.firstTierCost?.chinaShippingKRW) ||
+  coerceAmount(order.firstTierCost?.baseInternationalShippingKRW);
+
+const formatSkuAttributeLines = (skuAttributes?: OrderItem['skuAttributes']): string[] => {
+  if (!skuAttributes?.length) return [];
+  return skuAttributes
+    .map((attr) => {
+      const name = attr.attributeNameTrans || attr.attributeName || '';
+      const value = attr.valueTrans || attr.value || '';
+      if (name && value) return `${name}: ${value}`;
+      return value || name;
+    })
+    .filter(Boolean);
+};
+
 const mapOrderStatusMeta = (order: ApiOrder): Pick<Order, 'status' | 'statusGroup' | 'statusTranslationKey' | 'progressStatus'> => {
   const progressStatus = resolveOrderProgressStatus({
     progressStatus: order.progressStatus,
+    statusHistory: order.statusHistory,
     paymentStatus: order.paymentStatus,
     firstTierCost: order.firstTierCost,
     orderMainInfo: order.orderMainInfo,
@@ -386,6 +454,42 @@ const mapOrderStatusMeta = (order: ApiOrder): Pick<Order, 'status' | 'statusGrou
       status: 'progressing',
       statusGroup: 'purchase_agency',
       statusTranslationKey: 'pages.orders.status.purchasing',
+      progressStatus: fallbackNormalized,
+    };
+  }
+
+  if (/^IO_/.test(fallbackNormalized)) {
+    return {
+      status: 'progressing',
+      statusGroup: 'warehouse',
+      statusTranslationKey: 'pages.orders.status.warehouseProcessing',
+      progressStatus: fallbackNormalized,
+    };
+  }
+
+  if (/^E_/.test(fallbackNormalized) || /^RETURN_/.test(fallbackNormalized)) {
+    const refundMeta = PROGRESS_STATUS_META[fallbackNormalized];
+    if (refundMeta) {
+      return {
+        status: refundMeta.tab,
+        statusGroup: refundMeta.group,
+        statusTranslationKey: refundMeta.translationKey,
+        progressStatus: fallbackNormalized,
+      };
+    }
+    return {
+      status: 'refunds',
+      statusGroup: 'error',
+      statusTranslationKey: 'pages.orders.status.userRefundRequest',
+      progressStatus: fallbackNormalized,
+    };
+  }
+
+  if (fallbackNormalized === 'P_TEMPSAVE') {
+    return {
+      status: 'category',
+      statusGroup: 'purchase_agency',
+      statusTranslationKey: 'pages.orders.status.tempSave',
       progressStatus: fallbackNormalized,
     };
   }
@@ -528,6 +632,8 @@ const BuyListScreen = () => {
   const [showTransportDropdown, setShowTransportDropdown] = useState(false);
   const [selectAll, setSelectAll] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(new Set());
+  const [ordersRefreshing, setOrdersRefreshing] = useState(false);
   const [orderSearchText, setOrderSearchText] = useState('');
   const [showDateModal, setShowDateModal] = useState(false);
   const [calendarDate, setCalendarDate] = useState(new Date());
@@ -1157,8 +1263,10 @@ const BuyListScreen = () => {
             sellerOpenId: item.sellerOpenId || '',
             offerId: String(item.offerId ?? ''),
             itemId: item._id || item.id || '',
+            itemUniqueNo: item.itemUniqueNo,
             subtotal: item.subtotal ?? unitPrice * quantity,
             skuAttributes: item.skuAttributes || [],
+            addServices: item.addServices || [],
             source:
               item.source ||
               (String(item.otherSite ?? '').includes('taobao') ? 'taobao' : '1688'),
@@ -1246,7 +1354,7 @@ const BuyListScreen = () => {
 
     const searchQuery = (filters.orderNumber || orderSearchText || '').trim();
 
-    getOrdersRef.current({
+    return getOrdersRef.current({
       page: 1,
       pageSize: 50,
       lang: mapLocaleToOrdersLang(locale),
@@ -1289,6 +1397,7 @@ const BuyListScreen = () => {
           response.data.orders.map((order) => ({
             progressStatus: resolveOrderProgressStatus({
               progressStatus: order.progressStatus,
+              statusHistory: order.statusHistory,
               paymentStatus: order.paymentStatus,
               firstTierCost: order.firstTierCost,
               orderMainInfo: order.orderMainInfo,
@@ -1311,6 +1420,19 @@ const BuyListScreen = () => {
 
   const fetchOrderCountsRef = useRef(fetchOrderCounts);
   fetchOrderCountsRef.current = fetchOrderCounts;
+
+  const onOrdersRefresh = useCallback(async () => {
+    if (isGuest || !user) return;
+    setOrdersRefreshing(true);
+    try {
+      await fetchOrdersRef.current();
+      await fetchOrderCountsRef.current();
+    } catch {
+      // onError handler already surfaces failures
+    } finally {
+      setOrdersRefreshing(false);
+    }
+  }, [isGuest, user]);
 
   const progressStatusCounts = useMemo(
     () => computeProgressStatusCounts(countOrders),
@@ -1658,44 +1780,108 @@ const BuyListScreen = () => {
     </View>
   );
 
-  // Render individual product item
-  const renderProductItem = (item: OrderItem, uniqueKey: string) => {
-    const formatSkuAttributes = (skuAttributes: OrderItem['skuAttributes']) => {
-      if (!skuAttributes || skuAttributes.length === 0) return '';
-      return skuAttributes
-        .map(attr => attr.valueTrans || attr.value || '')
-        .filter(Boolean)
-        .join('/');
-    };
-    const specsText = formatSkuAttributes(item.skuAttributes);
+  const copyOrderNumber = (orderNumber: string) => {
+    Clipboard.setString(orderNumber);
+    showToast(t('common.copied') || 'Copied', 'success');
+  };
+
+  const openOrderDetail = (order: Order) => {
+    (navigation as any).navigate('OrderDetail', { orderId: order.id, order });
+  };
+
+  const renderOrderProductRow = (
+    order: Order,
+    item: OrderItem,
+    uniqueKey: string,
+  ) => {
+    const specLines = formatSkuAttributeLines(item.skuAttributes);
+    const addServiceCount = item.addServices?.length ?? 0;
+    const lineSubtotal = item.subtotal || item.price * item.quantity;
+    const productTotalKRW = resolveOrderProductTotalKRW(order);
+    const shippingKRW = resolveOrderShippingKRW(order);
 
     return (
       <View key={uniqueKey} style={styles.productItem}>
-        <Image source={{ uri: item.image }} style={styles.productImage} resizeMode="cover" />
-        <View style={styles.productInfo}>
-          <Text style={styles.productTitle} numberOfLines={2}>{item.productName}</Text>
-          {!!specsText && (
-            <Text style={styles.productSpecs} numberOfLines={1}>{specsText}</Text>
-          )}
+        <View style={styles.productMainCol}>
+          <Image source={{ uri: item.image }} style={styles.productImage} resizeMode="cover" />
+          <View style={styles.productInfo}>
+            <Text style={styles.productTitle} numberOfLines={2}>{item.productName}</Text>
+            {specLines.map((line, index) => (
+              <Text key={`${uniqueKey}-spec-${index}`} style={styles.productSpecs} numberOfLines={1}>
+                {line}
+              </Text>
+            ))}
+            <View style={styles.addServicesRow}>
+              <Text style={styles.addServicesLabel}>
+                {t('cartOrder.extraServiceBar.title')}:
+              </Text>
+              {addServiceCount > 0 ? (
+                <View style={styles.addServicesIcons}>
+                  {item.addServices!.slice(0, 6).map((service, index) => (
+                    <View key={`${uniqueKey}-svc-${index}`} style={styles.addServiceIcon} />
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.addServicesNone}>{t('buyList.additionalServicesNone')}</Text>
+              )}
+            </View>
+          </View>
         </View>
-        <View style={styles.productPriceCol}>
-          <Text style={styles.currentPrice}>{formatPriceKRW(item.price)}</Text>
-          <Text style={styles.quantity}>x{item.quantity}</Text>
+
+        <View style={styles.productUnitPriceCol}>
+          <Text style={styles.unitPriceText}>
+            {formatPriceKRW(item.price)} x {item.quantity}
+          </Text>
+          <Text style={styles.lineSubtotalText}>{formatPriceKRW(lineSubtotal)}</Text>
+        </View>
+
+        <View style={styles.productPaymentCol}>
+          <Text style={styles.paymentColLabel}>{t('profile.unitSurvey.paymentAmount')}</Text>
+          <Text style={styles.paymentColValue}>{formatPriceKRW(order.totalAmount)}</Text>
+          <Text style={styles.paymentBreakdownText}>
+            {t('profile.productTotal') || '상품 총액'} {formatPriceKRW(productTotalKRW)}
+          </Text>
+          <Text style={styles.paymentBreakdownText}>
+            {(t('buyList.shippingIncluded') || '배송비 포함')} {formatPriceKRW(shippingKRW)}
+          </Text>
         </View>
       </View>
     );
+  };
+
+  const toggleOrderItemsExpanded = (orderId: string) => {
+    setExpandedOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
+  const getCollapsedStoreGroups = (storeGroups: StoreGroup[]): StoreGroup[] => {
+    if (!storeGroups.length) return [];
+    const firstGroup = storeGroups[0];
+    if (!firstGroup.items.length) return [];
+    return [{ ...firstGroup, items: [firstGroup.items[0]] }];
   };
 
   // Render order with store grouping
   const renderOrderWithStoreGrouping = (order: Order, showStatusInfo: boolean = false) => {
     const storeGroups = groupOrderItemsByStore(order.items);
     const statusLabel = t(order.statusTranslationKey) || order.progressStatus;
+    const domainBadge = getBusinessDomainBadgeLabel(resolveOrderBusinessDomain(order), t);
+    const canonicalStatus = getCanonicalOrderProgressStatus(order);
+    const logisticsSummary = buildOrderLogisticsSummary(order, t);
+    const itemKindCount = order.items.length;
+    const hasMultipleItems = itemKindCount > 1;
+    const isExpanded = expandedOrderIds.has(order.id);
+    const visibleStoreGroups =
+      hasMultipleItems && !isExpanded ? getCollapsedStoreGroups(storeGroups) : storeGroups;
 
     return (
       <View key={`order-${order.id}`} style={styles.orderContainer}>
-        {/* Status row */}
-        <View style={styles.orderStatusRow}>
-          <View style={styles.orderStatusLeft}>
+        <View style={styles.orderHeaderRow}>
+          <View style={styles.orderHeaderMain}>
             <TouchableOpacity
               style={[styles.orderCheckbox, selectedOrderIds.has(order.id) && styles.orderCheckboxChecked]}
               onPress={() => {
@@ -1710,58 +1896,106 @@ const BuyListScreen = () => {
                 <Icon name="checkmark" size={12} color={COLORS.white} />
               )}
             </TouchableOpacity>
-            {/* <View style={styles.orderStatusDot} /> */}
             <Text style={styles.orderStatusText}>{statusLabel}</Text>
+            <Text style={styles.orderHeaderDate} numberOfLines={1}>
+              {t('profile.unitSurvey.orderDate')} {formatBuyListOrderDate(order.createdAt)}
+            </Text>
           </View>
-          <TouchableOpacity style={styles.orderHelpButton} onPress={() => handleOrderInquiry(order)}>
-            <Icon name="help-circle-outline" size={20} color={COLORS.text.secondary} />
-            {order.unreadCount != null && order.unreadCount > 0 && (
-              <View style={styles.inquiryUnreadBadge}>
-                <Text style={styles.inquiryUnreadBadgeText}>{order.unreadCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <View style={styles.orderHeaderMeta}>
+            <View style={styles.domainBadge}>
+              <Text style={styles.domainBadgeText}>{domainBadge}</Text>
+            </View>
+            <Text style={styles.orderHeaderNumber}>{order.orderNumber}</Text>
+            <TouchableOpacity onPress={() => copyOrderNumber(order.orderNumber)}>
+              <Text style={styles.orderCopyText}>{t('buyList.copy')}</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.orderHeaderActions}>
+            <TouchableOpacity style={styles.orderDetailLink} onPress={() => openOrderDetail(order)}>
+              <Icon name="help-circle-outline" size={16} color={COLORS.text.secondary} />
+              <Text style={styles.orderDetailLinkText}>{t('profile.unitSurvey.orderDetails')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.orderInquiryButton} onPress={() => handleOrderInquiry(order)}>
+              <Icon name="chatbubble-outline" size={14} color={COLORS.red} />
+              <Text style={styles.orderInquiryButtonText}>{t('chat.orderInquiry')}</Text>
+              {order.unreadCount != null && order.unreadCount > 0 && (
+                <View style={styles.inquiryUnreadBadge}>
+                  <Text style={styles.inquiryUnreadBadgeText}>{order.unreadCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Order number + copy */}
-        <View style={styles.orderIdRow}>
-          <Text style={styles.orderIdText}>{t('buyList.orderId')}: {order.orderNumber}</Text>
-          <TouchableOpacity onPress={() => {
-            const Clipboard = require('@react-native-clipboard/clipboard').default;
-            Clipboard.setString(order.orderNumber);
-            showToast(t('common.copied') || 'Copied', 'success');
-          }}>
-            <Text style={styles.orderCopyText}>{t('buyList.copy')}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Store groups */}
-        {storeGroups.map((storeGroup, storeIndex) => (
-          <TouchableOpacity
-            key={`order-${order.id}-store-${storeIndex}`}
-            onPress={() => (navigation as any).navigate('OrderDetail', { orderId: order.id, order: order })}
-            activeOpacity={0.7}
-          >
-            {/* Store header */}
-            <View style={styles.storeHeader}>
-              <Text style={styles.storeName}>
+        {visibleStoreGroups.map((storeGroup, storeIndex) => (
+          <View key={`order-${order.id}-store-${storeIndex}`}>
+            <TouchableOpacity
+              style={styles.storeHeader}
+              onPress={() => openOrderDetail(order)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.storeName} numberOfLines={1}>
                 {resolveStoreName(storeGroup.companyName, storeGroup.items[0])} {'>'}
               </Text>
-            </View>
-            {/* Items */}
+            </TouchableOpacity>
             {storeGroup.items.map((item, itemIndex) =>
-              renderProductItem(item, `order-${order.id}-store-${storeIndex}-item-${itemIndex}`)
+              renderOrderProductRow(
+                order,
+                item,
+                `order-${order.id}-store-${storeIndex}-item-${itemIndex}`,
+              ),
             )}
-          </TouchableOpacity>
+          </View>
         ))}
 
-        {/* Total row */}
-        <View style={styles.orderTotalRow}>
-          <Text style={styles.orderTotalLabel}>{t('buyList.paymentAmount')}:</Text>
-          <Text style={styles.orderTotalValue}>{formatPriceKRW(order.totalAmount)}</Text>
+        <View style={styles.orderSummaryFooter}>
+          <View style={styles.orderSummaryLeftWrap}>
+            <Text style={styles.orderSummaryLeft}>
+              {hasMultipleItems && !isExpanded ? (
+                <>
+                  {(t('buyList.totalProductKindsWithMore') ||
+                    '총합 {count} 가지 제품, 그리고 {more} 상품 더 있어요')
+                    .replace('{count}', String(itemKindCount))
+                    .replace('{more}', String(itemKindCount - 1))}
+                  {' '}
+                  <Text
+                    style={styles.seeMoreLink}
+                    onPress={() => toggleOrderItemsExpanded(order.id)}
+                  >
+                    {t('buyList.seeMore') || '더보기'}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  {(t('buyList.totalProductKinds') || '총합 {count} 가지 제품').replace(
+                    '{count}',
+                    String(itemKindCount),
+                  )}
+                  {hasMultipleItems && isExpanded ? (
+                    <>
+                      {' '}
+                      <Text
+                        style={styles.seeMoreLink}
+                        onPress={() => toggleOrderItemsExpanded(order.id)}
+                      >
+                        {t('buyList.seeLess') || '접기'}
+                      </Text>
+                    </>
+                  ) : null}
+                </>
+              )}
+            </Text>
+          </View>
+          <Text style={styles.orderSummaryCenter}>
+            {(t('buyList.orderSum') || '주문 합계')} {formatPriceKRW(order.totalAmount)}
+          </Text>
+          {!!logisticsSummary && (
+            <Text style={styles.orderSummaryRight} numberOfLines={2}>
+              {logisticsSummary}
+            </Text>
+          )}
         </View>
 
-        {/* Action buttons — horizontal scroll */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -1824,14 +2058,16 @@ const BuyListScreen = () => {
           </TouchableOpacity>
 
           {/* Primary button: Pay for unpaid/waiting settlement, Confirm receipt for shipped */}
-          {(order.status === 'unpaid' || order.progressStatus === 'WH_PAY_WAIT') ? (
+          {(canonicalStatus === 'P_PENDING' || canonicalStatus === 'IO_PAY_PENDING') ? (
             <TouchableOpacity
               style={styles.primaryButton}
-              onPress={() => navigation.navigate('Payment' as never)}
+              onPress={() =>
+                (navigation as any).navigate('OrderPayment', { orderId: order.id })
+              }
             >
               <Text style={styles.primaryButtonText}>{t('cart.pay') || 'Pay Now'}</Text>
             </TouchableOpacity>
-          ) : (order.progressStatus === 'INTERNATIONAL_SHIPPED' || order.progressStatus === 'ORDER_RECEIVED') ? (
+          ) : (canonicalStatus === 'INTERNATIONAL_SHIPPED' || canonicalStatus === 'ORDER_RECEIVED') ? (
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={() => handleConfirmReceived(order.id)}
@@ -1904,7 +2140,18 @@ const BuyListScreen = () => {
             result = result.filter(order => orderBelongsToStatusGroup(order, activeTab));
           }
         } else if (isKnownStatus) {
-          result = result.filter(order => order.status === activeTab);
+          // ProfileScreen 구매대행 셀 — 견적대기/고객결제는 진행상태 코드로 좁힌다.
+          if (activeTab === 'category') {
+            result = result.filter(
+              (order) => getCanonicalOrderProgressStatus(order) === 'P_QUOTE',
+            );
+          } else if (activeTab === 'unpaid') {
+            result = result.filter(
+              (order) => getCanonicalOrderProgressStatus(order) === 'P_PENDING',
+            );
+          } else {
+            result = result.filter((order) => order.status === activeTab);
+          }
         }
       }
       // Further filter by selected progress status (canonical codes)
@@ -2577,9 +2824,17 @@ const BuyListScreen = () => {
       {/* Filter rows — outside ScrollView so modals work */}
       {renderCategoryStatusFilters()}
 
-      <ScrollView 
-        style={styles.scrollView} 
+      <ScrollView
+        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={ordersRefreshing}
+            onRefresh={onOrdersRefresh}
+            colors={[COLORS.red]}
+            tintColor={COLORS.red}
+          />
+        }
         onScroll={(event) => {
           const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
           const distanceFromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height;
@@ -4224,6 +4479,122 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray[100],
   },
+  productMainCol: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    minWidth: 0,
+  },
+  addServicesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexWrap: 'wrap',
+    marginTop: 2,
+  },
+  addServicesLabel: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  addServicesIcons: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  addServiceIcon: {
+    width: 18,
+    height: 18,
+    borderRadius: 3,
+    backgroundColor: COLORS.red,
+  },
+  addServicesNone: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  productUnitPriceCol: {
+    alignItems: 'flex-end',
+    minWidth: 72,
+    gap: 2,
+  },
+  unitPriceText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  lineSubtotalText: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.red,
+  },
+  productPaymentCol: {
+    width: 108,
+    alignItems: 'flex-end',
+    borderLeftWidth: 1,
+    borderLeftColor: COLORS.gray[200],
+    paddingLeft: SPACING.xs,
+    gap: 2,
+  },
+  paymentColLabel: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  paymentColValue: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  paymentBreakdownText: {
+    fontSize: 10,
+    color: COLORS.text.secondary,
+    textAlign: 'right',
+  },
+  orderSummaryFooter: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    backgroundColor: COLORS.gray[50],
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
+    flexWrap: 'wrap',
+  },
+  orderSummaryLeftWrap: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 'auto',
+    minWidth: 0,
+    maxWidth: '100%',
+  },
+  orderSummaryLeft: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    lineHeight: 18,
+    flexShrink: 1,
+  },
+  seeMoreLink: {
+    fontSize: FONTS.sizes.xs,
+    color: '#2563EB',
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  orderSummaryCenter: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    flexShrink: 0,
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingTop: 1,
+  },
+  orderSummaryRight: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    flexShrink: 0,
+    textAlign: 'right',
+    lineHeight: 18,
+    paddingTop: 1,
+    minWidth: 120,
+  },
   productImageContainer: {
     position: 'relative',
   },
@@ -4440,6 +4811,78 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.gray[200],
     overflow: 'hidden',
+  },
+  orderHeaderRow: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[100],
+    gap: SPACING.xs,
+  },
+  orderHeaderMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    flexWrap: 'wrap',
+  },
+  orderHeaderDate: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    flexShrink: 1,
+  },
+  orderHeaderMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    flexWrap: 'wrap',
+  },
+  orderHeaderNumber: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  orderHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING.sm,
+    flexWrap: 'wrap',
+  },
+  domainBadge: {
+    borderWidth: 1,
+    borderColor: COLORS.red,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  domainBadgeText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.red,
+    fontWeight: '600',
+  },
+  orderDetailLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  orderDetailLinkText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+  },
+  orderInquiryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: COLORS.red,
+    borderRadius: 6,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+  },
+  orderInquiryButtonText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.red,
+    fontWeight: '600',
   },
   orderStatusRow: {
     flexDirection: 'row',

@@ -62,6 +62,7 @@ import WishlistScreen from '../screens/lazy/WishlistScreen.lazy';
 import ProfileSettingsScreen from '../screens/main/profileScreen/myPageScreen/ProfileSettingsScreen';
 import LanguageSettingsScreen from '../screens/main/profileScreen/LanguageSettingsScreen';
 import PaymentScreen from '../screens/main/profileScreen/settingScreen/PaymentScreen';
+import OrderPaymentScreen from '../screens/main/profileScreen/settingScreen/OrderPaymentScreen';
 import PaymentHistoryScreen from '../screens/main/profileScreen/settingScreen/PaymentHistoryScreen';
 import PersonalInformationScreen from '../screens/main/profileScreen/settingScreen/PersonalInformationScreen';
 import ProgressNotificationScreen from '../screens/main/profileScreen/settingScreen/ProgressNotificationScreen';
@@ -92,6 +93,7 @@ import BestProductsScreen from '../screens/main/bestProductsScreen/BestProductsS
 import NewStoresScreen from '../screens/main/newStoresScreen/NewStoresScreen';
 import PopularMerchantsScreen from '../screens/main/popularMerchantsScreen/PopularMerchantsScreen';
 import UnitSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/UnitSurveyScreen';
+import UnitSurveyDetailScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/UnitSurveyDetailScreen';
 import OEMSurveyScreen from '../screens/main/profileScreen/settingScreen/marketSurveyScreen/OEMSurveyScreen';
 import MyDeliveriesScreen from '../screens/main/profileScreen/settingScreen/MyDeliveriesScreen';
 import DeliveryDetailScreen from '../screens/main/profileScreen/settingScreen/DeliveryDetailScreen';
@@ -574,6 +576,14 @@ const RootNavigator = () => {
               },
             }}
           />
+          <RootStack.Screen
+            name="OrderPayment"
+            component={OrderPaymentScreen}
+            options={{
+              headerShown: false,
+              title: 'Order Payment',
+            }}
+          />
           <RootStack.Screen 
             name="OrderConfirmation" 
             component={OrderConfirmationScreen}
@@ -948,6 +958,11 @@ const RootNavigator = () => {
           <RootStack.Screen
             name="UnitSurvey"
             component={UnitSurveyScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="UnitSurveyDetail"
+            component={UnitSurveyDetailScreen}
             options={{ headerShown: false }}
           />
           <RootStack.Screen

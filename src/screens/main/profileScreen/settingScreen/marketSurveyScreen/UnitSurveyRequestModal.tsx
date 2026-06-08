@@ -7,10 +7,23 @@ import {
   TextInput,
   TouchableOpacity,
   Modal,
+  Alert,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
+import {
+  launchImageLibrary,
+  ImageLibraryOptions,
+  ImagePickerResponse,
+  MediaType,
+} from 'react-native-image-picker';
 import Icon from '../../../../../components/Icon';
 import { COLORS, FONTS, SPACING } from '../../../../../constants';
 import { useTranslation } from '../../../../../hooks/useTranslation';
+import { requestPhotoLibraryPermission } from '../../../../../utils/permissions';
+import { tradeApplicationsApi } from '../../../../../services/tradeApplicationsApi';
+import { PickedLocalFile, TradeApplicationType } from '../../../../../types/tradeApplication';
+import { useToast } from '../../../../../context/ToastContext';
 
 interface UnitSurveyRequestModalProps {
   visible: boolean;
@@ -18,21 +31,40 @@ interface UnitSurveyRequestModalProps {
   onSubmit?: () => void;
   /** Modal title. Defaults to the unit-price-survey request form title. */
   title?: string;
+  applicationType?: TradeApplicationType;
 }
 
 type RadioValue = 'required' | 'notRequired';
 
-/** 단가조사요청서 - UI-only request form modal. */
+const INITIAL_REFERENCE_LINKS = [''];
+const INITIAL_FILES: Array<PickedLocalFile | null> = [null];
+
+const toPickedFile = (asset: NonNullable<ImagePickerResponse['assets']>[number]): PickedLocalFile | null => {
+  const uri = asset.uri?.trim();
+  if (!uri) return null;
+  return {
+    uri,
+    fileName: asset.fileName,
+    type: asset.type,
+  };
+};
+
 const UnitSurveyRequestModal: React.FC<UnitSurveyRequestModalProps> = ({
   visible,
   onClose,
   onSubmit,
   title,
+  applicationType = 'PRICE_SURVEY',
 }) => {
   const { t } = useTranslation();
+  const { showToast } = useToast();
   const modalTitle = title ?? t('profile.unitSurvey.requestForm');
+  const [submitting, setSubmitting] = useState(false);
 
   // 상품정보
+  // 상품 이미지 — 첫 화면의 "이미지 업로드" 단추로 갤러리에서 1장 선택.
+  // null = 아직 미업로드 상태(+ 아이콘 + 안내문 노출), uri = 미리보기 표시.
+  const [productImage, setProductImage] = useState<PickedLocalFile | null>(null);
   const [referenceLinks, setReferenceLinks] = useState<string[]>(['']);
   const [productName, setProductName] = useState('');
   const [productOption, setProductOption] = useState('');
@@ -44,7 +76,7 @@ const UnitSurveyRequestModal: React.FC<UnitSurveyRequestModalProps> = ({
   const [barcode, setBarcode] = useState<RadioValue>('notRequired');
   const [packaging, setPackaging] = useState('');
   const [memo, setMemo] = useState('');
-  const [files, setFiles] = useState<string[]>(['']);
+  const [files, setFiles] = useState<Array<PickedLocalFile | null>>(INITIAL_FILES);
 
   // 연락방식
   const [contactNumber, setContactNumber] = useState('');
@@ -55,14 +87,157 @@ const UnitSurveyRequestModal: React.FC<UnitSurveyRequestModalProps> = ({
   };
   const addReferenceLink = () => setReferenceLinks((prev) => [...prev, '']);
 
-  const addFile = () => setFiles((prev) => [...prev, '']);
+  const addFile = () => setFiles((prev) => [...prev, null]);
   const removeFile = (index: number) => {
-    setFiles((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : ['']));
+    setFiles((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : [null]));
   };
 
-  const handleConfirm = () => {
-    onSubmit?.();
-    onClose();
+  // 상품 이미지 선택 — 갤러리에서 1장 고르면 productImage.uri 에 로컬 경로 저장.
+  // 권한 거절 / 사용자 취소 / 응답 오류는 모두 Alert 로 처리. 이미 업로드된
+  // 상태에서 다시 누르면 새 이미지로 교체.
+  const handleUploadProductImage = async () => {
+    const granted = await requestPhotoLibraryPermission();
+    if (!granted) {
+      Alert.alert(
+        t('common.error') || 'Error',
+        t('profile.photoLibraryPermissionRequired') ||
+          'Photo library permission is required',
+      );
+      return;
+    }
+    const options: ImageLibraryOptions = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.7,
+      selectionLimit: 1,
+    };
+    launchImageLibrary(options, (response: ImagePickerResponse) => {
+      if (response.didCancel) return;
+      if (response.errorCode) {
+        Alert.alert(
+          t('common.error') || 'Error',
+          response.errorMessage ||
+            t('profile.failedToPickImage') ||
+            'Failed to pick image',
+        );
+        return;
+      }
+      const picked = response.assets?.[0] ? toPickedFile(response.assets[0]) : null;
+      if (picked) setProductImage(picked);
+    });
+  };
+
+  // 슬롯별 이미지 업로드 — 갤러리에서 1장 선택해 그 슬롯의 files[index] 에 저장.
+  // 권한 거절 / 사용자 취소 / 응답 오류는 모두 Alert 로 처리.
+  const handleUploadFile = async (index: number) => {
+    const granted = await requestPhotoLibraryPermission();
+    if (!granted) {
+      Alert.alert(
+        t('common.error') || 'Error',
+        t('profile.photoLibraryPermissionRequired') ||
+          'Photo library permission is required',
+      );
+      return;
+    }
+    const options: ImageLibraryOptions = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.7,
+      selectionLimit: 1,
+    };
+    launchImageLibrary(options, (response: ImagePickerResponse) => {
+      if (response.didCancel) return;
+      if (response.errorCode) {
+        Alert.alert(
+          t('common.error') || 'Error',
+          response.errorMessage ||
+            t('profile.failedToPickImage') ||
+            'Failed to pick image',
+        );
+        return;
+      }
+      const picked = response.assets?.[0] ? toPickedFile(response.assets[0]) : null;
+      if (!picked) return;
+      setFiles((prev) => prev.map((v, i) => (i === index ? picked : v)));
+    });
+  };
+
+  const resetForm = () => {
+    setProductImage(null);
+    setReferenceLinks(INITIAL_REFERENCE_LINKS);
+    setProductName('');
+    setProductOption('');
+    setProductQty('');
+    setExpectedPrice('');
+    setLogo('notRequired');
+    setBarcode('notRequired');
+    setPackaging('');
+    setMemo('');
+    setFiles(INITIAL_FILES);
+    setContactNumber('');
+    setEmail('');
+  };
+
+  const handleConfirm = async () => {
+    if (submitting) return;
+
+    if (!productImage?.uri) {
+      Alert.alert(t('common.error') || 'Error', t('profile.unitSurvey.validationProductImage'));
+      return;
+    }
+    if (!productName.trim()) {
+      Alert.alert(t('common.error') || 'Error', t('profile.unitSurvey.validationProductName'));
+      return;
+    }
+    if (!productOption.trim()) {
+      Alert.alert(t('common.error') || 'Error', t('profile.unitSurvey.validationProductOption'));
+      return;
+    }
+    const quantity = Number(productQty);
+    if (!productQty.trim() || Number.isNaN(quantity) || quantity <= 0) {
+      Alert.alert(t('common.error') || 'Error', t('profile.unitSurvey.validationProductQty'));
+      return;
+    }
+    const expectedUnitPriceCNY = Number(expectedPrice);
+    if (!expectedPrice.trim() || Number.isNaN(expectedUnitPriceCNY) || expectedUnitPriceCNY < 0) {
+      Alert.alert(t('common.error') || 'Error', t('profile.unitSurvey.validationExpectedPrice'));
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await tradeApplicationsApi.submitApplication({
+        type: applicationType,
+        productImage: {
+          uri: productImage.uri,
+          fileName: productImage.fileName,
+          type: productImage.type,
+        },
+        referenceLinks,
+        productName: productName.trim(),
+        productOption: productOption.trim(),
+        quantity,
+        expectedUnitPriceCNY,
+        logoRequired: logo === 'required',
+        barcodeRequired: barcode === 'required',
+        packagingMethod: packaging,
+        memo,
+        attachmentFiles: files.filter((file): file is PickedLocalFile => Boolean(file?.uri)),
+        phone: contactNumber,
+        email,
+      });
+
+      if (res.success) {
+        showToast(t('profile.unitSurvey.submitSuccess'), 'success');
+        resetForm();
+        onSubmit?.();
+        onClose();
+      } else {
+        showToast(res.error || t('profile.unitSurvey.submitFailed'), 'error');
+      }
+    } catch {
+      showToast(t('profile.unitSurvey.submitFailed'), 'error');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const renderSectionHeading = (label: string) => (
@@ -139,13 +314,38 @@ const UnitSurveyRequestModal: React.FC<UnitSurveyRequestModalProps> = ({
             {renderSectionHeading(t('profile.unitSurvey.productInfo'))}
 
             {renderLabel(t('profile.unitSurvey.productImage'))}
-            <TouchableOpacity style={styles.imageUploadBox} activeOpacity={0.7}>
-              <View style={styles.imageUploadPlus}>
-                <Icon name="add" size={20} color={COLORS.primary} />
-              </View>
-              <Text style={styles.imageUploadText}>
-                {t('profile.unitSurvey.imageUpload')}
-              </Text>
+            <TouchableOpacity
+              style={styles.imageUploadBox}
+              activeOpacity={0.7}
+              onPress={handleUploadProductImage}
+            >
+              {productImage?.uri ? (
+                <>
+                  {/* 업로드된 이미지 미리보기. 다시 탭하면 새 이미지로 교체.
+                      우상단 작은 ✕ 단추로 제거. */}
+                  <Image
+                    source={{ uri: productImage.uri }}
+                    style={styles.imageUploadPreview}
+                    resizeMode="cover"
+                  />
+                  <TouchableOpacity
+                    style={styles.imageUploadRemove}
+                    onPress={() => setProductImage(null)}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  >
+                    <Icon name="close" size={12} color={COLORS.white} />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <View style={styles.imageUploadPlus}>
+                    <Icon name="add" size={20} color={COLORS.primary} />
+                  </View>
+                  <Text style={styles.imageUploadText}>
+                    {t('profile.unitSurvey.imageUpload')}
+                  </Text>
+                </>
+              )}
             </TouchableOpacity>
 
             {renderLabel(t('profile.unitSurvey.referenceLink'))}
@@ -240,27 +440,44 @@ const UnitSurveyRequestModal: React.FC<UnitSurveyRequestModalProps> = ({
                 </Text>
               </TouchableOpacity>
             </View>
-            {files.map((_, index) => (
-              <View key={`file-${index}`} style={styles.fileRow}>
-                <TouchableOpacity style={styles.uploadButton} activeOpacity={0.7}>
-                  <Text style={styles.uploadButtonText}>
-                    {t('profile.unitSurvey.upload')}
+            {files.map((file, index) => {
+              // 업로드된 파일의 표시명 — fileName 우선, 없으면 uri 경로 사용.
+              const fileName = file?.uri
+                ? file.fileName ||
+                  decodeURIComponent(file.uri.split('/').pop() || file.uri)
+                : t('profile.unitSurvey.selectFile');
+              return (
+                <View key={`file-${index}`} style={styles.fileRow}>
+                  <TouchableOpacity
+                    style={styles.uploadButton}
+                    activeOpacity={0.7}
+                    onPress={() => handleUploadFile(index)}
+                  >
+                    <Text style={styles.uploadButtonText}>
+                      {t('profile.unitSurvey.upload')}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.fileNameText,
+                      file?.uri && { color: COLORS.text.primary },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {fileName}
                   </Text>
-                </TouchableOpacity>
-                <Text style={styles.fileNameText} numberOfLines={1}>
-                  {t('profile.unitSurvey.selectFile')}
-                </Text>
-                <TouchableOpacity
-                  style={styles.fileDeleteButton}
-                  activeOpacity={0.7}
-                  onPress={() => removeFile(index)}
-                >
-                  <Text style={styles.fileDeleteText}>
-                    {t('profile.unitSurvey.deleteLabel')}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ))}
+                  <TouchableOpacity
+                    style={styles.fileDeleteButton}
+                    activeOpacity={0.7}
+                    onPress={() => removeFile(index)}
+                  >
+                    <Text style={styles.fileDeleteText}>
+                      {t('profile.unitSurvey.deleteLabel')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
             <Text style={styles.fileLimitNote}>
               {t('profile.unitSurvey.fileLimit')}
             </Text>
@@ -300,13 +517,18 @@ const UnitSurveyRequestModal: React.FC<UnitSurveyRequestModalProps> = ({
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.confirmButton}
+              style={[styles.confirmButton, submitting && styles.confirmButtonDisabled]}
               activeOpacity={0.85}
               onPress={handleConfirm}
+              disabled={submitting}
             >
-              <Text style={styles.confirmButtonText}>
-                {t('profile.unitSurvey.confirm')}
-              </Text>
+              {submitting ? (
+                <ActivityIndicator size="small" color={COLORS.white} />
+              ) : (
+                <Text style={styles.confirmButtonText}>
+                  {t('profile.unitSurvey.confirm')}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -416,6 +638,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    // 미리보기 이미지가 박스 가장자리를 침범하지 않도록.
+    overflow: 'hidden',
   },
   imageUploadPlus: {
     width: 32,
@@ -429,6 +653,23 @@ const styles = StyleSheet.create({
   imageUploadText: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.gray[500],
+  },
+  // 업로드된 상품 이미지 미리보기 — 박스 전체를 채움.
+  imageUploadPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  // 우상단 작은 ✕ 단추 — 업로드된 이미지를 제거.
+  imageUploadRemove: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // Reference link
   linkRow: {
@@ -587,6 +828,9 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.white,
     fontWeight: '700',
+  },
+  confirmButtonDisabled: {
+    opacity: 0.7,
   },
 });
 

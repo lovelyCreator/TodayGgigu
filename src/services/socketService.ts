@@ -62,10 +62,10 @@ class SocketService {
   private socket: Socket | null = null;
   private isConnecting: boolean = false;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 5;
+  private maxReconnectAttempts: number = 10;
   private connectionFailed: boolean = false;
   private lastFailTime: number = 0;
-  private readonly RETRY_COOLDOWN = 30000; // 30s cooldown after max retries
+  private readonly RETRY_COOLDOWN = 60000; // 60s cooldown after max retries
 
   /**
    * Connect to Socket.IO server
@@ -114,10 +114,11 @@ class SocketService {
           extraHeaders: {
             Authorization: `Bearer ${authToken}`,
           },
-          transports: ['polling'],
+          transports: ['websocket', 'polling'],
+          upgrade: true,
           reconnection: true,
           reconnectionDelay: 2000,
-          reconnectionDelayMax: 10000,
+          reconnectionDelayMax: 15000,
           reconnectionAttempts: this.maxReconnectAttempts,
         });
 

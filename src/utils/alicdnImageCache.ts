@@ -1,3 +1,4 @@
+import axios from 'axios';
 import RNFS from 'react-native-fs';
 import { normalizeProductImageUrl } from './productImageUrl';
 
@@ -33,6 +34,30 @@ const fileExtension = (url: string): string => {
 
 const toFileUri = (path: string) => (path.startsWith('file://') ? path : `file://${path}`);
 
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  if (typeof globalThis.btoa === 'function') {
+    return globalThis.btoa(binary);
+  }
+  const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let output = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i];
+    const b = bytes[i + 1] ?? 0;
+    const c = bytes[i + 2] ?? 0;
+    const triplet = (a << 16) | (b << 8) | c;
+    output += CHARS[(triplet >> 18) & 63];
+    output += CHARS[(triplet >> 12) & 63];
+    output += i + 1 < bytes.length ? CHARS[(triplet >> 6) & 63] : '=';
+    output += i + 2 < bytes.length ? CHARS[triplet & 63] : '=';
+  }
+  return output;
+};
+
 let cacheDirReady: Promise<void> | null = null;
 
 const ensureCacheDir = async () => {
@@ -46,6 +71,10 @@ const ensureCacheDir = async () => {
   await cacheDirReady;
 };
 
+/**
+ * Download via axios + RNFS.writeFile instead of RNFS.downloadFile.
+ * RNFS.downloadFile rejects with a null code on some Android failures and crashes the app.
+ */
 const downloadToCache = async (normalized: string): Promise<string> => {
   await ensureCacheDir();
 
@@ -57,21 +86,24 @@ const downloadToCache = async (normalized: string): Promise<string> => {
     return fileUri;
   }
 
-  const result = await RNFS.downloadFile({
-    fromUrl: normalized,
-    toFile: localPath,
-    headers: DOWNLOAD_HEADERS,
-  }).promise;
+  try {
+    const response = await axios.get<ArrayBuffer>(normalized, {
+      responseType: 'arraybuffer',
+      headers: DOWNLOAD_HEADERS,
+      timeout: 20000,
+      validateStatus: (status) => status >= 200 && status < 400,
+    });
 
-  const status = result.statusCode ?? 200;
-  if (status >= 400) {
+    const base64 = arrayBufferToBase64(response.data);
+    await RNFS.writeFile(localPath, base64, 'base64');
+
+    const fileUri = toFileUri(localPath);
+    memoryCache.set(normalized, fileUri);
+    return fileUri;
+  } catch {
     await RNFS.unlink(localPath).catch(() => undefined);
-    throw new Error(`AliCDN download failed (${status})`);
+    return normalized;
   }
-
-  const fileUri = toFileUri(localPath);
-  memoryCache.set(normalized, fileUri);
-  return fileUri;
 };
 
 /**
@@ -98,9 +130,11 @@ export async function resolveProductImageUri(image?: string | null): Promise<str
     return existing;
   }
 
-  const task = downloadToCache(normalized).finally(() => {
-    inflight.delete(normalized);
-  });
+  const task = downloadToCache(normalized)
+    .catch(() => normalized)
+    .finally(() => {
+      inflight.delete(normalized);
+    });
 
   inflight.set(normalized, task);
   return task;

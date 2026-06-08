@@ -963,25 +963,22 @@ const ProfileScreen: React.FC = () => {
                           key={cellIdx}
                           style={styles.myOrderCell}
                           onPress={() => {
-                            // 셀별 initialTab 키('category', 'unpaid' 등)는 실제
-                            // Order.status 값과 정확히 매칭되지 않아 본문이 빈 상태로
-                            // 보이는 문제가 있었다. 발주관리 드롭다운에서 도메인을 직접
-                            // 누른 것과 동일한 결과를 보장하기 위해 다음과 같이 보낸다:
-                            //  • 전체주문(accent) 셀 → initialTab: 'all' (모든 그룹)
-                            //  • 그 외 셀 → initialTab: <도메인 그룹 키> ('purchase_agency'
-                            //    / 'warehouse' / 'international_shipping' / 'error')
-                            // BuyListScreen 의 STATUS_GROUPS 키와 정렬되어 본문이
-                            // 그 도메인의 주문 카드 리스트를 즉시 표시한다.
                             const domain = tabDomain[activeOrderTab];
-                            // 구매대행 도메인: 발주관리 드롭다운의 '구매대행' 클릭과
-                            //   동일 — activeTab='purchase_agency' (그룹 전체 표시).
-                            // 비-구매대행 도메인: 본문이 placeholder 로 렌더되므로
-                            //   필터링이 의미 없음 — activeTab='all' 로 보냄.
-                            const groupTab =
-                              domain === 'purchase_agency' ? 'purchase_agency' : 'all';
+                            // 구매대행 탭 셀:
+                            //  • 견적대기 → initialTab 'category' (구매견적 P_QUOTE)
+                            //  • 고객결제 → initialTab 'unpaid' (결제대기 BUY_PAY_WAIT)
+                            //  • 전체주문 → initialTab 'all'
+                            // 비-구매대행 탭: 본문이 도메인별 placeholder 이므로 'all'.
+                            const initialTab = cell.accent
+                              ? 'all'
+                              : domain === 'purchase_agency' && cell.initialTab
+                                ? cell.initialTab
+                                : domain === 'purchase_agency'
+                                  ? 'purchase_agency'
+                                  : 'all';
                             (navigation as any).navigate('BuyList', {
                               domain,
-                              initialTab: cell.accent ? 'all' : groupTab,
+                              initialTab,
                             });
                           }}
                         >

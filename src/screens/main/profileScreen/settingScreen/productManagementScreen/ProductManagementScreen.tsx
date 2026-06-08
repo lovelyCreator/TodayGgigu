@@ -21,6 +21,11 @@ import { COLORS, FONTS, SPACING } from '../../../../../constants';
 import { RootStackParamList } from '../../../../../types';
 import { useTranslation } from '../../../../../hooks/useTranslation';
 import { productListApi, SellerProduct } from '../../../../../services/productListApi';
+import {
+  groupSellerProductsByOffer,
+  type GroupedSellerProduct,
+  resolveSellerProductGroupKey,
+} from '../../../../../utils/groupSellerProducts';
 import { productsApi } from '../../../../../services/productsApi';
 import { useAddToCartMutation } from '../../../../../hooks/useAddToCartMutation';
 import { useToast } from '../../../../../context/ToastContext';
@@ -270,7 +275,7 @@ const ProductManagementScreen: React.FC = () => {
   // 모달이 열릴 때 productsApi.getProductDetail 로 SKU 목록을 받아오고,
   // 각 SKU 마다 옵션/가격/수량 행을 렌더한다. 수량이 0 이상인 SKU 만 실제로
   // 장바구니에 담긴다. SKU 가 많으면 기본 3 개만 노출하고 '더보기' 로 펼침.
-  const [cartModalProduct, setCartModalProduct] = useState<SellerProduct | null>(null);
+  const [cartModalProduct, setCartModalProduct] = useState<GroupedSellerProduct | null>(null);
   const [cartModalSkus, setCartModalSkus] = useState<CartModalSku[]>([]);
   const [cartModalQtyMap, setCartModalQtyMap] = useState<Record<string, number>>({});
   const [cartModalExpanded, setCartModalExpanded] = useState<boolean>(false);
@@ -402,21 +407,33 @@ const ProductManagementScreen: React.FC = () => {
       const vb = sortValue(b);
       return sortDir === 'asc' ? va - vb : vb - va;
     });
-    return filtered;
+
+    // 동일 offerId(SKU 변형) 는 한 카드로 합친다 — products/detail 과 동일한 상품 단위.
+    const grouped = groupSellerProductsByOffer(filtered);
+
+    if (!searchText.trim()) return grouped;
+
+    const q = searchText.trim().toLowerCase();
+    return grouped.filter((p) => {
+      const name = String(p.productName ?? '').toLowerCase();
+      const offer = String(p.offerId ?? '').toLowerCase();
+      const company = String(p.company ?? '').toLowerCase();
+      return name.includes(q) || offer.includes(q) || company.includes(q);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products, startDate, endDate, startTime, endTime, priceMin, priceMax, activeSort, sortDir]);
+  }, [products, startDate, endDate, startTime, endTime, priceMin, priceMax, activeSort, sortDir, searchText]);
 
   // 시간 필터로 가려진 항목은 선택 대상에서 빼야 하므로 visibleProducts 기준으로 판정.
   const allSelected =
     visibleProducts.length > 0 && selectedIds.length === visibleProducts.length;
 
   const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? [] : visibleProducts.map((p) => p._id));
+    setSelectedIds(allSelected ? [] : visibleProducts.map((p) => p.groupKey));
   };
 
-  const toggleSelectOne = (id: string) => {
+  const toggleSelectOne = (groupKey: string) => {
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+      prev.includes(groupKey) ? prev.filter((x) => x !== groupKey) : [...prev, groupKey],
     );
   };
 
@@ -430,7 +447,9 @@ const ProductManagementScreen: React.FC = () => {
           style: 'destructive',
           onPress: () => {
             // Optimistic local removal; wire to a delete endpoint when available.
-            setProducts((prev) => prev.filter((p) => !selectedIds.includes(p._id)));
+            setProducts((prev) =>
+              prev.filter((p) => !selectedIds.includes(resolveSellerProductGroupKey(p))),
+            );
             setSelectedIds([]);
           },
         },
@@ -726,7 +745,7 @@ const ProductManagementScreen: React.FC = () => {
 
   // 카드의 장바구니 아이콘 — 곧바로 담지 않고 SKU 옵션 선택 모달을 연다.
   // productsApi.getProductDetail 로 실제 SKU 리스트를 받아와 옵션 행을 채운다.
-  const handleCardAddToCart = async (item: SellerProduct) => {
+  const handleCardAddToCart = async (item: GroupedSellerProduct) => {
     setCartModalProduct(item);
     setCartModalSkus([]);
     setCartModalQtyMap({});
@@ -921,7 +940,7 @@ const ProductManagementScreen: React.FC = () => {
     }
   };
 
-  const handleCardEdit = (item: SellerProduct) => {
+  const handleCardEdit = (item: GroupedSellerProduct) => {
     navigation.navigate('OnlineProductEdit', {
       productId: item._id,
       // offerId + source 로 GET /products/detail 호출 가능. SellerProduct.offerId
@@ -939,8 +958,8 @@ const ProductManagementScreen: React.FC = () => {
   };
 
   // --- Product item ---
-  const renderProductItem = ({ item }: { item: SellerProduct }) => {
-    const checked = selectedIds.includes(item._id);
+  const renderProductItem = ({ item }: { item: GroupedSellerProduct }) => {
+    const checked = selectedIds.includes(item.groupKey);
     const thumb = thumbOf(item);
     return (
       <TouchableOpacity
@@ -952,7 +971,7 @@ const ProductManagementScreen: React.FC = () => {
           checked && styles.productCardSelected,
         ]}
         activeOpacity={0.8}
-        onPress={() => toggleSelectOne(item._id)}
+        onPress={() => toggleSelectOne(item.groupKey)}
       >
         {/* 좌상단 체크박스 — 선택 시 붉은 채움 + 흰색 체크마크.
             크기를 22 로 키우고 zIndex 를 명시해 이미지/액션 아이콘 위에 항상 노출. */}
@@ -1016,7 +1035,14 @@ const ProductManagementScreen: React.FC = () => {
           <Text style={styles.productName} numberOfLines={2}>
             {item.productName}
           </Text>
-          {!!item.sku && <Text style={styles.productMeta}>SKU: {item.sku}</Text>}
+          {!!item.offerId && (
+            <Text style={styles.productMeta}>ID: {item.offerId}</Text>
+          )}
+          {item.variantCount > 1 && (
+            <Text style={styles.productMeta}>
+              {t('profile.productMgmt.skuOptions', { count: String(item.variantCount) })}
+            </Text>
+          )}
           {!!item.labelName && (
             <View style={styles.labelBadge}>
               <Text style={styles.labelBadgeText}>{item.labelName}</Text>
@@ -1053,7 +1079,7 @@ const ProductManagementScreen: React.FC = () => {
       <FlatList
         key={viewMode}
         data={visibleProducts}
-        keyExtractor={(item) => item._id}
+        keyExtractor={(item) => item.groupKey}
         renderItem={renderProductItem}
         numColumns={viewMode === 'grid' ? 2 : 1}
         columnWrapperStyle={viewMode === 'grid' ? styles.gridRow : undefined}

@@ -1,4 +1,5 @@
 import { getStoredToken, refreshAccessToken } from './authApi';
+import { axiosWithAuth } from './authenticatedHttp';
 
 import { API_BASE_URL, CATEGORIES_BASE_URL } from '../constants';
 import {
@@ -6,6 +7,7 @@ import {
   resolveOrdersProxyOrderType,
 } from '../utils/centerManageMeta';
 import {
+  convertToKRW,
   resolveLocalizedValue,
   resolveOrderItemCompanyName,
   type AppLocale,
@@ -14,6 +16,10 @@ import {
 /** Orders list/create proxy (same host as categories-proxy) */
 const ORDERS_PROXY_BASE_URL = CATEGORIES_BASE_URL;
 import { buildSignatureHeaders } from './signature';
+import {
+  API_PROGRESS_STATUS_ALIASES,
+  isApiProgressStatusRecognized,
+} from '../utils/apiProgressStatus';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -21,6 +27,12 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
 }
+
+const coerceOrderAmount = (value: unknown): number => {
+  if (value == null || value === '') return 0;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
 
 export interface DesignatedShootingItem {
   note: string;
@@ -118,6 +130,8 @@ export interface OrdersProxyCreateRequest {
   dispatchmethod: string;
   dispatchmethodship: string;
   items: OrdersProxyLineItem[];
+  /** Checkout total in KRW — helps orders-proxy persist firstTierCost like web. */
+  netExpectedTotalKRW?: number;
   orderMainInfo: {
     requestType: string;
     logisticsCenter: string;
@@ -233,7 +247,11 @@ export const mergeOrderSourceItems = (
       list.find((entry) => {
         if (!entry || typeof entry !== 'object') return false;
         const row = entry as Record<string, unknown>;
-        return row._id === cartItemId || row.id === cartItemId;
+        return (
+          row._id === cartItemId ||
+          row.id === cartItemId ||
+          row.cartItemId === cartItemId
+        );
       }) as Record<string, unknown> | undefined;
 
     const fromCart = findById(cartItems);
@@ -245,6 +263,12 @@ export const mergeOrderSourceItems = (
         ...fromCart,
         skuInfo: fromCart.skuInfo ?? fromCheckout.skuInfo,
         quantity: fromCheckout.quantity ?? fromCart.quantity,
+        // Checkout KRW prices must survive cart row spread (web sends these; Android needs them for orders-proxy).
+        previewFinalUnitPriceKRW:
+          fromCheckout.previewFinalUnitPriceKRW ?? fromCart.previewFinalUnitPriceKRW,
+        userPrice: fromCheckout.userPrice ?? fromCart.userPrice,
+        unitPriceKRW: fromCheckout.unitPriceKRW ?? fromCart.unitPriceKRW,
+        priceKRW: fromCheckout.priceKRW ?? fromCart.priceKRW,
       };
     }
     return fromCart ?? fromCheckout ?? { _id: cartItemId };
@@ -262,6 +286,46 @@ export const validateOrdersProxyLineItems = (items: OrdersProxyLineItem[]): stri
     }
   }
   return null;
+};
+
+const resolveSkuInfoUnitPriceCNY = (
+  skuInfo: Record<string, unknown> | undefined,
+): number => {
+  if (!skuInfo || typeof skuInfo !== 'object') return 0;
+  const fenxiao = skuInfo.fenxiaoPriceInfo as { offerPrice?: unknown } | undefined;
+  for (const candidate of [
+    fenxiao?.offerPrice,
+    skuInfo.price,
+    skuInfo.consignPrice,
+  ]) {
+    const n = coerceOrderAmount(candidate);
+    if (n > 0) return n;
+  }
+  return 0;
+};
+
+/** KRW unit price from POST /cart/checkout `selectedItems` (or merged cart row). */
+export const resolveCheckoutLineUnitPriceKRW = (
+  row: Record<string, unknown> | undefined,
+  fallbackUnitPriceCNY?: number,
+): number => {
+  if (row) {
+    for (const key of [
+      'previewFinalUnitPriceKRW',
+      'userPrice',
+      'unitPriceKRW',
+      'priceKRW',
+    ] as const) {
+      const n = coerceOrderAmount(row[key]);
+      if (n > 0) return n;
+    }
+    const fromSku = convertToKRW(
+      resolveSkuInfoUnitPriceCNY(row.skuInfo as Record<string, unknown> | undefined),
+    );
+    if (fromSku > 0) return fromSku;
+  }
+  const fallback = convertToKRW(coerceOrderAmount(fallbackUnitPriceCNY));
+  return fallback > 0 ? fallback : 0;
 };
 
 /** Build web-shaped `items` for orders-proxy from checkout/cart rows. */
@@ -294,7 +358,11 @@ export const buildOrdersProxyLineItems = (
     const raw = sourceItems.find((entry) => {
       if (!entry || typeof entry !== 'object') return false;
       const row = entry as Record<string, unknown>;
-      return row._id === cartItemId || row.id === cartItemId;
+      return (
+        row._id === cartItemId ||
+        row.id === cartItemId ||
+        row.cartItemId === cartItemId
+      );
     }) as Record<string, unknown> | undefined;
 
     const card = fallbackCards.find((c) => c.id === cartItemId);
@@ -316,6 +384,10 @@ export const buildOrdersProxyLineItems = (
     const specIdRaw = skuInfo?.specId ?? raw?.specId ?? card?.specId;
     const specId = specIdRaw != null && String(specIdRaw).trim() ? String(specIdRaw) : undefined;
     const otherSite = toOtherSite(source);
+    const unitPriceKRW =
+      resolveCheckoutLineUnitPriceKRW(raw, card?.unitPriceCNY) ||
+      coerceOrderAmount(card?.unitPriceKRW);
+    const subtotalKRW = unitPriceKRW > 0 ? unitPriceKRW * qty : undefined;
 
     return {
       otherSite,
@@ -334,6 +406,14 @@ export const buildOrdersProxyLineItems = (
       skuAttributes: skuInfo?.skuAttributes as unknown[] | undefined,
       companyName: raw?.companyName as string | Record<string, string> | undefined,
       categoryId: raw?.categoryId as number | string | undefined,
+      ...(unitPriceKRW > 0
+        ? {
+            userPrice: unitPriceKRW,
+            price: unitPriceKRW,
+            previewFinalUnitPriceKRW: unitPriceKRW,
+            subtotal: subtotalKRW,
+          }
+        : {}),
       ...(itemServices && itemServices.length > 0
         ? { addServices: itemServices }
         : {}),
@@ -357,6 +437,7 @@ export type BuildOrdersProxyCreateParams = {
   purchasePayment: 'manual' | 'auto';
   shippingPayment: 'manual' | 'auto';
   items: OrdersProxyLineItem[];
+  netExpectedTotalKRW?: number;
 };
 
 export const buildOrdersProxyCreateRequest = (
@@ -375,6 +456,9 @@ export const buildOrdersProxyCreateRequest = (
     dispatchmethod: mapPurchasePaymentToDispatchMethod(params.purchasePayment),
     dispatchmethodship: mapShippingPaymentToDispatchMethodShip(params.shippingPayment),
     items: params.items,
+    ...(params.netExpectedTotalKRW != null && params.netExpectedTotalKRW > 0
+      ? { netExpectedTotalKRW: params.netExpectedTotalKRW }
+      : {}),
     orderMainInfo: {
       requestType,
       logisticsCenter: params.logisticsCenter,
@@ -423,6 +507,7 @@ export const convertLegacyCreateOrderToProxy = (
     dispatchmethod,
     dispatchmethodship,
     items,
+    ...(req.netExpectedTotalKRW > 0 ? { netExpectedTotalKRW: req.netExpectedTotalKRW } : {}),
     orderMainInfo: {
       requestType: req.orderMainInfo?.requestType ?? req.orderType,
       logisticsCenter: req.orderMainInfo?.logisticsCenter ?? 'Weihai',
@@ -455,6 +540,10 @@ export type CreateOrderCardFallback = {
   quantity?: number;
   specId?: string;
   skuId?: string | number;
+  /** KRW unit price from checkout — used when merged row lacks previewFinalUnitPriceKRW. */
+  unitPriceKRW?: number;
+  /** Cart UI unit price in CNY — last-resort when checkout omits KRW fields. */
+  unitPriceCNY?: number;
 };
 
 /** Build `items` array for POST /orders-proxy from checkout rows or cart UI cards. */
@@ -469,7 +558,11 @@ export const buildCreateOrderLineItems = (
     const raw = sourceItems.find((entry) => {
       if (!entry || typeof entry !== 'object') return false;
       const row = entry as Record<string, unknown>;
-      return row._id === cartItemId || row.id === cartItemId;
+      return (
+        row._id === cartItemId ||
+        row.id === cartItemId ||
+        row.cartItemId === cartItemId
+      );
     }) as Record<string, unknown> | undefined;
 
     const card = fallbackCards.find((c) => c.id === cartItemId);
@@ -482,6 +575,11 @@ export const buildCreateOrderLineItems = (
       (typeof raw?.quantity === 'number' ? raw.quantity : undefined) ??
       card?.quantity ??
       1;
+
+    const unitPriceKRW =
+      resolveCheckoutLineUnitPriceKRW(raw, card?.unitPriceCNY) ||
+      coerceOrderAmount(card?.unitPriceKRW);
+    const subtotalKRW = unitPriceKRW > 0 ? unitPriceKRW * qty : undefined;
 
     return {
       cartItemId,
@@ -499,6 +597,14 @@ export const buildCreateOrderLineItems = (
       skuInfo: raw?.skuInfo,
       companyName: raw?.companyName as string | Record<string, string> | undefined,
       sellerOpenId: raw?.sellerOpenId != null ? String(raw.sellerOpenId) : undefined,
+      ...(unitPriceKRW > 0
+        ? {
+            userPrice: unitPriceKRW,
+            price: unitPriceKRW,
+            previewFinalUnitPriceKRW: unitPriceKRW,
+            subtotal: subtotalKRW,
+          }
+        : {}),
     };
   });
 };
@@ -575,6 +681,7 @@ export interface OrderItemSkuAttribute {
 
 export interface OrderItem {
   id: string;
+  _id?: string;
   itemUniqueNo?: number;
   offerId: string;
   specId: string;
@@ -599,6 +706,13 @@ export interface OrderItem {
   externalOrderId?: string;
   source?: string;
   otherSite?: string;
+  addServices?: unknown[];
+  incomeImgUrl?: string[];
+  issueImgUrl?: string[];
+  productStatus?: string;
+  itemAmount?: number;
+  sellerShippingFee?: number;
+  productOrderNumber?: string;
 }
 
 export interface FirstTierCost {
@@ -615,29 +729,47 @@ export interface FirstTierCost {
   _id?: string;
 }
 
-const coerceOrderAmount = (value: unknown): number => {
-  if (value == null || value === '') return 0;
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : 0;
-};
-
 /** Unit price for order line display (handles userPrice, subtotal/qty, numeric strings). */
 export const resolveOrderItemUnitPrice = (item: {
   userPrice?: unknown;
   price?: unknown;
   unitPrice?: unknown;
+  previewFinalUnitPriceKRW?: unknown;
+  unitPriceKRW?: unknown;
+  priceKRW?: unknown;
   subtotal?: unknown;
   quantity?: unknown;
+  skuInfo?: {
+    userPrice?: unknown;
+    price?: unknown;
+    consignPrice?: unknown;
+    fenxiaoPriceInfo?: { offerPrice?: unknown };
+  } | null;
 }): number => {
   const qty = coerceOrderAmount(item.quantity) || 1;
   const userPrice = coerceOrderAmount(item.userPrice);
   const price = coerceOrderAmount(item.price);
   const unitPrice = coerceOrderAmount(item.unitPrice);
+  const previewKRW = coerceOrderAmount(item.previewFinalUnitPriceKRW);
+  const unitPriceKRW = coerceOrderAmount(item.unitPriceKRW);
+  const priceKRW = coerceOrderAmount(item.priceKRW);
   if (userPrice > 0) return userPrice;
   if (price > 0) return price;
   if (unitPrice > 0) return unitPrice;
+  if (previewKRW > 0) return previewKRW;
+  if (unitPriceKRW > 0) return unitPriceKRW;
+  if (priceKRW > 0) return priceKRW;
   const subtotal = coerceOrderAmount(item.subtotal);
   if (subtotal > 0 && qty > 0) return subtotal / qty;
+  const sku = item.skuInfo;
+  if (sku && typeof sku === 'object') {
+    const skuUserPrice = coerceOrderAmount(sku.userPrice);
+    if (skuUserPrice > 0) return skuUserPrice;
+    const fromSkuCny = convertToKRW(
+      resolveSkuInfoUnitPriceCNY(sku as Record<string, unknown>),
+    );
+    if (fromSkuCny > 0) return fromSkuCny;
+  }
   return 0;
 };
 
@@ -676,6 +808,27 @@ export const resolveOrderTotalKRW = (order: {
         : resolveOrderItemUnitPrice(item) * (coerceOrderAmount(item.quantity) || 1);
     return sum + line;
   }, 0);
+};
+
+/** Pending payment amount from GET /orders/:id `orderPayments`. */
+export const resolvePendingOrderPayment = (
+  order: { orderPayments?: OrderPayment[]; progressStatus?: string },
+): { tier: 'first' | 'second'; amountKRW: number } | null => {
+  const payments = order.orderPayments ?? [];
+  const progress = normalizeProgressStatus(order.progressStatus);
+  const preferredTier = progress === 'WH_PAY_WAIT' ? 'second' : 'first';
+  const pending = payments.find(
+    (p) => p.status === 'pending' && p.tier === preferredTier,
+  );
+  if (pending && coerceOrderAmount(pending.amountKRW) > 0) {
+    return { tier: preferredTier, amountKRW: coerceOrderAmount(pending.amountKRW) };
+  }
+  const anyPending = payments.find((p) => p.status === 'pending');
+  if (anyPending && coerceOrderAmount(anyPending.amountKRW) > 0) {
+    const tier = anyPending.tier === 'second' ? 'second' : 'first';
+    return { tier, amountKRW: coerceOrderAmount(anyPending.amountKRW) };
+  }
+  return null;
 };
 
 export interface OrderPayment {
@@ -775,27 +928,74 @@ const deriveSourceFromOtherSite = (otherSite?: string): string => {
   return '1688';
 };
 
+const LOCALIZED_PROGRESS_STATUS_ALIASES: Record<string, string> = {
+  임시저장: 'P_TEMPSAVE',
+  구매견적: 'P_QUOTE',
+  구매결제대기: 'P_PENDING',
+  구매결제완료: 'P_PAY_COMPLETE',
+  구매중: 'P_AU_PURCHASING',
+  문제상품: 'P_MA_PROBLEM',
+  구매완료: 'P_PUR_COMPLETE',
+  구매최종완료: 'P_FINAL_PUR_COMPLETE',
+  센터도착예정: 'IO_ARRIVE_EXPECTED',
+  현지배송지연: 'IO_DELAY',
+  입고처리중: 'IO_PROGRESS',
+  입고완료: 'IO_WARE_COMPLETE',
+  최종입고완료: 'IO_FINAL_WARE_COMPLETE',
+  출고결제대기: 'IO_PAY_PENDING',
+  출고결제완료: 'IO_PAY_COMPLETE',
+  출고대기: 'IO_SHIP_PENDING',
+  출고완료: 'IO_SHIP_COMPLETE',
+  추가비용결제대기: 'IO_COST_PENDING',
+  추가비용결제완료: 'IO_COST_COMPLETE',
+  오류입고: 'E_ERROR',
+  사용자환불신청: 'E_CUSTOMER_RETURN_REQ',
+  사용자환불신청중: 'E_CUSTOMER_REFUND_PROGRESS',
+  사용자환불완료: 'E_CUSTOMER_REFUND_COMPLETED',
+  플랫폼환불신청: 'E_PLATFORM_REFUND_REQ',
+  플랫폼환불신청중: 'E_PLATFORM_REFUND_IN_PROGRESS',
+  플랫폼환불신청완료: 'E_PLATFORM_REFUND_COMPLETED',
+  최종환불신청: 'E_FINAL_REFUND_REQ',
+  최종환불신청중: 'E_FINAL_REFUND_PROGRESS',
+  최종환불신청완료: 'E_FINAL_REFUND_COMPLETED',
+  주문폐기: 'E_ORDER_CANCELLED',
+  출고보류: 'E_SHIPMENT_HOLD',
+  '采购完成': 'P_PUR_COMPLETE',
+  采购付款完成: 'P_PAY_COMPLETE',
+  问题商品: 'P_MA_PROBLEM',
+  中心到达预定: 'IO_ARRIVE_EXPECTED',
+};
+
+export const isRecognizedProgressStatus = isApiProgressStatusRecognized;
+
 /** Canonical progressStatus codes used by Order Management tabs */
 export const normalizeProgressStatus = (raw?: string | null): string => {
-  const upper = String(raw ?? '').trim().toUpperCase();
-  if (!upper) return '';
+  const trimmed = String(raw ?? '').trim();
+  if (!trimmed) return '';
+  if (LOCALIZED_PROGRESS_STATUS_ALIASES[trimmed]) {
+    return LOCALIZED_PROGRESS_STATUS_ALIASES[trimmed];
+  }
+  const upper = trimmed.toUpperCase();
   const aliases: Record<string, string> = {
-    QUOTE: 'P_QUOTE',
-    QUOTE_PENDING: 'P_QUOTE',
-    PENDING_QUOTE: 'P_QUOTE',
-    PAY_WAIT: 'BUY_PAY_WAIT',
-    PAYMENT_PENDING: 'BUY_PAY_WAIT',
-    PENDING_PAYMENT: 'BUY_PAY_WAIT',
-    BUY_PAY_PENDING: 'BUY_PAY_WAIT',
-    /** API progress code for purchase payment pending */
-    P_PENDING: 'BUY_PAY_WAIT',
-    /** Purchase agency — auto procurement in progress (orders-proxy create) */
-    PURCHASING: 'P_AU_PURCHASING',
-    AU_PURCHASING: 'P_AU_PURCHASING',
-    RECEIPT_APPLICATION: 'P_RECEIPT_APPLICATION',
-    P_RECEIPT: 'P_RECEIPT_APPLICATION',
+    ...API_PROGRESS_STATUS_ALIASES,
+    P_AU_COMPLETE: 'P_PUR_COMPLETE',
+    P_AU_PURCHASE_COMPLETE: 'P_PUR_COMPLETE',
+    P_AU_PURCHASED: 'P_PUR_COMPLETE',
+    P_AU_DONE: 'P_PUR_COMPLETE',
   };
   return aliases[upper] ?? upper;
+};
+
+const resolveProgressStatusFromHistory = (
+  statusHistory?: Array<{ status?: string | null }>,
+): string => {
+  if (!statusHistory?.length) return '';
+  for (let i = statusHistory.length - 1; i >= 0; i--) {
+    const code = normalizeProgressStatus(statusHistory[i]?.status);
+    if (!code || code === 'NO_ORDER_INFO') continue;
+    return code;
+  }
+  return '';
 };
 
 /**
@@ -808,15 +1008,32 @@ export const resolvePurchaseAgencyProgressStatus = (order: {
   firstTierCost?: { totalKRW?: number; totalCNY?: number; total?: number } | null;
 }): string => {
   const normalized = normalizeProgressStatus(order.progressStatus);
-  if (normalized === 'BUY_PAY_WAIT') return 'BUY_PAY_WAIT';
-  const tier = order.firstTierCost;
-  const hasQuoteTotal =
-    (tier?.totalKRW ?? 0) > 0 ||
-    (tier?.totalCNY ?? 0) > 0 ||
-    (tier?.total ?? 0) > 0;
-  const paymentPending = String(order.paymentStatus ?? 'pending').toLowerCase() === 'pending';
-  if (paymentPending && hasQuoteTotal && (normalized === 'P_QUOTE' || normalized === '')) {
-    return 'BUY_PAY_WAIT';
+  const paymentPaid = String(order.paymentStatus ?? '').toLowerCase() === 'paid';
+  if (normalized === 'P_PAY_COMPLETE') {
+    return 'P_PAY_COMPLETE';
+  }
+  // 결제 API 성공 직후 progressStatus 가 아직 P_PENDING 인 경우 paymentStatus 로 보정.
+  if (paymentPaid && normalized === 'P_PENDING') {
+    return 'P_PAY_COMPLETE';
+  }
+  if (normalized === 'P_PENDING') {
+    return 'P_PENDING';
+  }
+  // P_QUOTE 는 API 가 명시한 구매견적 상태 — 견적금액·paymentStatus 와 무관하게 유지.
+  if (normalized === 'P_QUOTE') {
+    return 'P_QUOTE';
+  }
+  // progressStatus 가 비어 있을 때만 견적금액 기준으로 결제대기 추론.
+  if (!normalized) {
+    const tier = order.firstTierCost;
+    const hasQuoteTotal =
+      (tier?.totalKRW ?? 0) > 0 ||
+      (tier?.totalCNY ?? 0) > 0 ||
+      (tier?.total ?? 0) > 0;
+    const paymentPending = String(order.paymentStatus ?? 'pending').toLowerCase() === 'pending';
+    if (paymentPending && hasQuoteTotal) {
+      return 'P_PENDING';
+    }
   }
   return normalized;
 };
@@ -861,6 +1078,7 @@ export const isShippingAgencyOrder = (order: {
  */
 export const resolveOrderProgressStatus = (order: {
   progressStatus?: string | null;
+  statusHistory?: Array<{ status?: string | null }>;
   paymentStatus?: string | null;
   firstTierCost?: { totalKRW?: number; totalCNY?: number; total?: number } | null;
   orderMainInfo?: { requestType?: string; businessType?: string } | null;
@@ -869,9 +1087,22 @@ export const resolveOrderProgressStatus = (order: {
   orderType?: string;
   orderNumber?: string;
 }): string => {
-  const status = resolvePurchaseAgencyProgressStatus(order);
+  let status = resolvePurchaseAgencyProgressStatus(order);
+
+  const shouldPreferHistory =
+    !status || status === 'NO_ORDER_INFO' || !isRecognizedProgressStatus(status);
+  if (shouldPreferHistory) {
+    const fromHistory = resolveProgressStatusFromHistory(order.statusHistory);
+    if (fromHistory) {
+      status = resolvePurchaseAgencyProgressStatus({
+        ...order,
+        progressStatus: fromHistory,
+      });
+    }
+  }
+
   if (status === 'NO_ORDER_INFO' && isShippingAgencyOrder(order)) {
-    return 'WH_ARRIVE_EXPECTED';
+    return 'IO_ARRIVE_EXPECTED';
   }
   return status;
 };
@@ -892,6 +1123,8 @@ const normalizeProxyOrderItem = (item: any, locale: AppLocale = 'ko'): OrderItem
   const companyName = resolveOrderItemCompanyName(item, locale);
   return {
     id: String(item._id ?? item.id ?? ''),
+    _id: item._id,
+    itemUniqueNo: item.itemUniqueNo,
     offerId: String(item.offerId ?? ''),
     specId: String(item.specId ?? ''),
     skuId: String(item.skuId ?? ''),
@@ -915,6 +1148,13 @@ const normalizeProxyOrderItem = (item: any, locale: AppLocale = 'ko'): OrderItem
     sellerOpenId: item.sellerOpenId ?? '',
     source,
     otherSite: item.otherSite,
+    addServices: item.addServices,
+    incomeImgUrl: item.incomeImgUrl ?? item.incomeimgurl ?? [],
+    issueImgUrl: item.issueImgUrl ?? item.issueimgurl ?? [],
+    productStatus: item.productStatus,
+    itemAmount: coerceOrderAmount(item.itemAmount),
+    sellerShippingFee: coerceOrderAmount(item.sellerShippingFee),
+    productOrderNumber: item.productOrderNumber,
   };
 };
 
@@ -932,6 +1172,7 @@ export const normalizeProxyOrder = (raw: any, locale: AppLocale = 'ko'): Order =
     orderType: raw.orderType ?? 'General',
     progressStatus: resolveOrderProgressStatus({
       progressStatus: raw.progressStatus,
+      statusHistory: raw.statusHistory,
       paymentStatus: raw.paymentStatus,
       firstTierCost: raw.firstTierCost,
       orderMainInfo: raw.orderMainInfo,
@@ -1261,11 +1502,15 @@ export const orderApi = {
     }
   },
 
-  getOrderById: async (orderId: string): Promise<ApiResponse<any>> => {
+  getOrderById: async (
+    orderId: string,
+    lang?: string,
+  ): Promise<ApiResponse<{ order: Order & { userInfo?: Record<string, unknown> } }>> => {
     try {
       const token = await getStoredToken();
       if (!token) return { success: false, error: 'No authentication token found.' };
-      const url = `${API_BASE_URL}/orders/${encodeURIComponent(orderId)}`;
+      const langParam = mapLocaleToOrdersLang(lang);
+      const url = `${API_BASE_URL}/orders/${encodeURIComponent(orderId)}?lang=${encodeURIComponent(langParam)}`;
       const signatureHeaders = await buildSignatureHeaders('GET', url);
       const response = await fetch(url, {
         method: 'GET',
@@ -1283,7 +1528,17 @@ export const orderApi = {
       }
       if (!response.ok) return { success: false, error: responseData?.message || `Status ${response.status}` };
       if (responseData.status !== 'success') return { success: false, error: responseData?.message || 'Failed to get order' };
-      return { success: true, data: responseData.data };
+      const rawOrder = responseData.data?.order ?? responseData.data;
+      const normalized = normalizeProxyOrder(rawOrder, langParam);
+      return {
+        success: true,
+        data: {
+          order: {
+            ...normalized,
+            userInfo: rawOrder?.userInfo,
+          },
+        },
+      };
     } catch (error: any) {
       return { success: false, error: error.message || 'An unexpected error occurred.' };
     }
@@ -1534,6 +1789,66 @@ export const orderApi = {
       return {
         success: false,
         error: errorMessage,
+      };
+    }
+  },
+
+  /**
+   * Purchase order payment — matches web POST /v1/orders/checkout?lang=ko
+   * Body: { orderId, paymentMethod, amount [, memberName] }
+   */
+  payOrder: async (
+    orderId: string,
+    payload: {
+      paymentMethod: 'bank' | 'credit_card' | 'deposit';
+      amountKRW: number;
+      memberName?: string;
+      lang?: string;
+    },
+  ): Promise<ApiResponse<{ order?: any; amountPaid?: number; newStatus?: string }>> => {
+    try {
+      const paymentMethodMap = {
+        bank: 'bank',
+        credit_card: 'card',
+        deposit: 'deposit',
+      } as const;
+
+      const body: Record<string, unknown> = {
+        orderId,
+        paymentMethod: paymentMethodMap[payload.paymentMethod],
+        amount: Math.round(payload.amountKRW),
+      };
+      if (payload.memberName?.trim()) {
+        body.memberName = payload.memberName.trim();
+      }
+
+      const lang = mapLocaleToOrdersLang(payload.lang);
+      const url = `${API_BASE_URL}/orders/checkout?lang=${encodeURIComponent(lang)}`;
+      const response = await axiosWithAuth('POST', url, { data: body });
+      const responseData = response.data;
+
+      if (!responseData) {
+        return { success: false, error: 'Invalid response from server. Please try again.' };
+      }
+      if (responseData.status && responseData.status !== 'success') {
+        return {
+          success: false,
+          error: responseData?.message || responseData?.error || 'Failed to process payment',
+        };
+      }
+      return {
+        success: true,
+        message: responseData.message || 'Payment submitted successfully',
+        data: responseData.data,
+      };
+    } catch (error: any) {
+      const serverMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message;
+      return {
+        success: false,
+        error: serverMessage || 'An unexpected error occurred. Please try again.',
       };
     }
   },
