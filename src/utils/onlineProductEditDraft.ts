@@ -14,7 +14,9 @@ export type SkuLabelSettings = {
 export type OnlineProductEditDraft = {
   productName: string;
   categoryName: string;
-  thumbUrl: string;
+  thumbUrls: string[];
+  /** 구버전 드래프트 호환 */
+  thumbUrl?: string;
   optionLabel: string;
   remark: string;
   selectedOptionValues: Record<string, string>;
@@ -39,13 +41,22 @@ export const createEmptySkuLabel = (productName = ''): SkuLabelSettings => ({
 export const isSkuLabelConfigured = (label?: SkuLabelSettings | null): boolean =>
   !!label?.configured;
 
+const normalizeDraft = (parsed: OnlineProductEditDraft): OnlineProductEditDraft => {
+  if (Array.isArray(parsed.thumbUrls)) return parsed;
+  const legacy = parsed.thumbUrl?.trim();
+  return {
+    ...parsed,
+    thumbUrls: legacy ? [legacy] : [],
+  };
+};
+
 export const loadOnlineProductEditDraft = async (
   offerId: string,
 ): Promise<OnlineProductEditDraft | null> => {
   try {
     const raw = await AsyncStorage.getItem(draftKey(offerId));
     if (!raw) return null;
-    return JSON.parse(raw) as OnlineProductEditDraft;
+    return normalizeDraft(JSON.parse(raw) as OnlineProductEditDraft);
   } catch {
     return null;
   }

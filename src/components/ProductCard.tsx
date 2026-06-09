@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import Icon from './Icon';
 
@@ -15,9 +15,8 @@ import FamilyStarIcon from '../assets/icons/FamilyStarIcon';
 import { formatPriceKRW } from '../utils/i18nHelpers';
 import { normalizeProductImageUrl } from '../utils/productImageUrl';
 import ProductImage from './ProductImage';
-
-const { width } = Dimensions.get('window');
-const GRID_CARD_WIDTH = (width - SPACING.sm * 2 - SPACING.sm) / 2;
+import { useResponsive } from '../hooks/useResponsive';
+import { getGridItemWidth } from '../utils/responsiveLayout';
 
 const getPlatformBadgeLabel = (product: Product) =>
   String((product as any).source || (product as any).platform || '').toUpperCase();
@@ -73,6 +72,22 @@ const ProductCard: React.FC<ProductCardProps> = ({
   cardWidth,
   onAddToCart,
 }) => {
+  const { width: windowWidth } = useWindowDimensions();
+  const responsive = useResponsive();
+  const defaultGridCardWidth = useMemo(() => {
+    const containerW = responsive.isTablet
+      ? responsive.contentMaxWidth
+      : windowWidth;
+    const horizontalPad = responsive.isTablet
+      ? responsive.gutter * 2
+      : SPACING.sm * 2 + SPACING.sm;
+    return getGridItemWidth(
+      containerW - horizontalPad,
+      responsive.cols,
+      SPACING.sm,
+    );
+  }, [windowWidth, responsive]);
+
   const handleLikePress = (e: any) => {
     e.stopPropagation();
     
@@ -94,7 +109,14 @@ const ProductCard: React.FC<ProductCardProps> = ({
   if (variant === 'newIn') {
     // Calculate width for 3 items per line: (width - padding - gaps) / 3
     // Default calculation if cardWidth not provided
-    const defaultCardW = cardWidth || Math.floor((width - SPACING.sm * 2 - SPACING.sm ) / 3);
+    const defaultCardW =
+      cardWidth ||
+      getGridItemWidth(
+        (responsive.isTablet ? responsive.contentMaxWidth : windowWidth) -
+          SPACING.sm * 3,
+        Math.max(3, responsive.cols),
+        SPACING.sm,
+      );
     const cardW = cardWidth || defaultCardW;
     const cardH = Math.floor(cardW * 1.55);
     
@@ -156,9 +178,9 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   // Grid variant - flexible layout (can be 2 columns or full width)
   if (variant === 'grid') {
-    const cardW = GRID_CARD_WIDTH;
+    const cardW = cardWidth || defaultGridCardWidth;
     // For full-width cards, use a different aspect ratio
-    const isFullWidth = cardW > GRID_CARD_WIDTH * 1.5;
+    const isFullWidth = cardW > defaultGridCardWidth * 1.5;
     const imageW = cardW;
     const imageH = isFullWidth ? 180 : cardW * 1.0;
     
@@ -209,7 +231,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   // Horizontal variant - for trending products
   if (variant === 'horizontal') {
-    const cardW = GRID_CARD_WIDTH;
+    const cardW = cardWidth || defaultGridCardWidth;
     const imageH = cardW * 1.0;
     
     return (
@@ -259,7 +281,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   // More to Love variant - shows full info with reviews and sold
   if (variant === 'moreToLove') {
-    const cardW = cardWidth || GRID_CARD_WIDTH;
+    const cardW = cardWidth || defaultGridCardWidth;
     const imageH = cardW * 1.0;
     // console.log('More to Love Product:', product);
     return (
@@ -337,19 +359,19 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   // Simple variant - for category page (image, name, price only)
   if (variant === 'simple') {
-    const cardW = cardWidth || GRID_CARD_WIDTH;
+    const cardW = cardWidth || defaultGridCardWidth;
     const imageH = cardW; // Square image (height = width)
     
     return (
       <TouchableOpacity
-        style={[styles.simpleCard, { width: GRID_CARD_WIDTH }, style]}
+        style={[styles.simpleCard, { width: cardW }, style]}
         onPress={onPress}
         activeOpacity={0.9}
       >
         <View style={{ position: 'relative', width: cardW, height: imageH }}>
           <ProductImageWithBadge
             uri={imageUri}
-            style={[styles.simpleImage, { width: GRID_CARD_WIDTH, height: GRID_CARD_WIDTH }, imageStyle]}
+            style={[styles.simpleImage, { width: cardW, height: cardW }, imageStyle]}
             badgeLabel={platformBadgeLabel}
           />
         </View>

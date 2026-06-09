@@ -71,8 +71,14 @@ const Toggle: React.FC<{ value: boolean; onChange: (v: boolean) => void }> = ({
   );
 };
 
+type PersonalInformationScreenProps = {
+  embedded?: boolean;
+};
+
 /** 개인 정보 - Personal Information (Account Data tab). */
-const PersonalInformationScreen: React.FC = () => {
+const PersonalInformationScreen: React.FC<PersonalInformationScreenProps> = ({
+  embedded = false,
+}) => {
   const navigation = useNavigation<Nav>();
   const { t } = useTranslation();
   const { user, logout, updateUser } = useAuth();
@@ -708,26 +714,23 @@ const PersonalInformationScreen: React.FC = () => {
     );
   };
 
-  return (
-    // 헤더 웃부분(=상단 status-bar 인셋) 색을 흰색으로 통일.
-    // SafeAreaView 자체에 흰색 배경을 주면 인셋 영역까지 흰색으로 칠해진다.
-    // body 의 회색 배경은 그 안쪽 View(styles.bodyArea) 에서 별도로 처리.
-    <SafeAreaView style={styles.safeTop} edges={['top']}>
-      <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          hitSlop={BACK_HIT_SLOP}
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {t('profile.personalInfoScreen.title')}
-        </Text>
-        <View style={styles.backButton} />
-      </View>
+  const body = (
+    <View style={[styles.container, embedded && styles.embeddedContainer]}>
+      {!embedded && (
+        <View style={styles.header}>
+          <TouchableOpacity
+            hitSlop={BACK_HIT_SLOP}
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>
+            {t('profile.personalInfoScreen.title')}
+          </Text>
+          <View style={styles.backButton} />
+        </View>
+      )}
 
       {/* Tabs */}
       <View style={styles.tabBar}>
@@ -839,7 +842,16 @@ const PersonalInformationScreen: React.FC = () => {
           </View>
         </TouchableOpacity>
       </Modal>
-      </View>
+    </View>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <SafeAreaView style={styles.safeTop} edges={['top']}>
+      {body}
     </SafeAreaView>
   );
 };
@@ -854,6 +866,9 @@ const styles = StyleSheet.create({
   // 본문 컨테이너 — 인셋 아래 부분은 기존처럼 회색 배경 유지.
   container: {
     flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  embeddedContainer: {
     backgroundColor: COLORS.background,
   },
   // Header

@@ -54,11 +54,14 @@ import {
   requestCameraPermission,
   requestPhotoLibraryPermission,
 } from '../../../../../utils/permissions';
+import { TabletContent } from '../../../../../components/TabletContent';
+import { useResponsive } from '../../../../../hooks/useResponsive';
 
 type Nav = StackNavigationProp<RootStackParamList, 'OnlineProductEdit'>;
 type RouteParams = RouteProp<RootStackParamList, 'OnlineProductEdit'>;
 
 const BACK_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
+const MAX_THUMB_COUNT = 9;
 
 // 카테고리 드롭다운에서 사용 가능한 옵션들.
 // 'uncategorized' 만 별도 처리(저장 시 빈 문자열) 하고 나머지는 라벨을
@@ -84,6 +87,7 @@ const OnlineProductEditScreen: React.FC = () => {
   const route = useRoute<RouteParams>();
   const { t, locale } = useTranslation();
   const { showToast } = useToast();
+  const responsive = useResponsive();
 
   // route param 으로 받은 초기값 — 호출자(ProductManagementScreen)가 카드의
   // 현재 데이터를 함께 넘기면 폼이 즉시 채워진다. 없으면 빈 폼.
@@ -117,7 +121,9 @@ const OnlineProductEditScreen: React.FC = () => {
   const draftLoadedRef = useRef(false);
   /** AsyncStorage 드래프트 — 상세 API 응답보다 우선 적용. */
   const savedDraftRef = useRef<Awaited<ReturnType<typeof loadOnlineProductEditDraft>>>(null);
-  const [thumbUrl, setThumbUrl] = useState<string>(initial.thumbnailUrl ?? '');
+  const [thumbUrls, setThumbUrls] = useState<string[]>(
+    initial.thumbnailUrl ? [initial.thumbnailUrl] : [],
+  );
   // 썸네일 추가 단추 → 카메라 / 갤러리 선택 모달 노출.
   const [thumbPickerOpen, setThumbPickerOpen] = useState(false);
   // 카테고리 드롭다운 — 카테고리 행 바로 아래 anchored 팝오버.
@@ -144,7 +150,7 @@ const OnlineProductEditScreen: React.FC = () => {
   const applyDraftToForm = useCallback((draft: NonNullable<typeof savedDraftRef.current>) => {
     if (draft.productName) setProductName(draft.productName);
     if (draft.categoryName != null) setCategoryName(draft.categoryName);
-    if (draft.thumbUrl) setThumbUrl(draft.thumbUrl);
+    if (draft.thumbUrls?.length) setThumbUrls(draft.thumbUrls);
     if (draft.optionLabel) setOptionLabel(draft.optionLabel);
     if (draft.remark) setRemark(draft.remark);
     if (draft.selectedOptionValues) {
@@ -209,9 +215,16 @@ const OnlineProductEditScreen: React.FC = () => {
           if (!draftNow?.optionLabel && (firstAttr?.valueTrans || firstAttr?.value)) {
             setOptionLabel(String(firstAttr.valueTrans || firstAttr.value));
           }
-          const firstImg =
-            p.productImage?.images?.[0] || p.productImageTrans?.images?.[0];
-          if (!draftNow?.thumbUrl && firstImg) setThumbUrl(String(firstImg));
+          const detailImgs = [
+            ...(p.productImage?.images || []),
+            ...(p.productImageTrans?.images || []),
+          ]
+            .map((img: string) => String(img).trim())
+            .filter(Boolean);
+          const uniqueDetailImgs = [...new Set(detailImgs)].slice(0, MAX_THUMB_COUNT);
+          if (!draftNow?.thumbUrls?.length && uniqueDetailImgs.length) {
+            setThumbUrls(uniqueDetailImgs);
+          }
 
           const seededPrices: Record<string, string> = {};
           (p.productSkuInfos || []).forEach((sku: any) => {
@@ -281,6 +294,14 @@ const OnlineProductEditScreen: React.FC = () => {
               ...seededLabels,
               ...(draftNow?.skuLabelMap ?? {}),
             }));
+            const savedThumbs = sellerRows
+              .flatMap((row) => row.thumbnails?.map((th) => th.url) || [])
+              .map((url) => String(url).trim())
+              .filter(Boolean);
+            const uniqueSavedThumbs = [...new Set(savedThumbs)].slice(0, MAX_THUMB_COUNT);
+            if (!draftNow?.thumbUrls?.length && uniqueSavedThumbs.length) {
+              setThumbUrls(uniqueSavedThumbs);
+            }
           }
         } else {
           setDetailError(detailRes.message || 'Failed to load product detail');
@@ -305,7 +326,7 @@ const OnlineProductEditScreen: React.FC = () => {
     await saveOnlineProductEditDraft(offerIdKey, {
       productName,
       categoryName,
-      thumbUrl,
+      thumbUrls,
       optionLabel,
       remark,
       selectedOptionValues,
@@ -317,7 +338,7 @@ const OnlineProductEditScreen: React.FC = () => {
     offerIdKey,
     productName,
     categoryName,
-    thumbUrl,
+    thumbUrls,
     optionLabel,
     remark,
     selectedOptionValues,
@@ -365,8 +386,13 @@ const OnlineProductEditScreen: React.FC = () => {
     return {
       productName,
       categoryName: categoryName || undefined,
-      productUrl: thumbUrl || undefined,
-      thumbnails: thumbUrl ? [{ url: thumbUrl, isThumbnail: true }] : undefined,
+      productUrl: thumbUrls[0] || undefined,
+      thumbnails: thumbUrls.length
+        ? thumbUrls.map((url, index) => ({
+            url,
+            isThumbnail: index === 0,
+          }))
+        : undefined,
       skus,
     };
   }, [
@@ -376,7 +402,7 @@ const OnlineProductEditScreen: React.FC = () => {
     skuRemarkMap,
     productName,
     categoryName,
-    thumbUrl,
+    thumbUrls,
     t,
   ]);
 
@@ -430,6 +456,28 @@ const OnlineProductEditScreen: React.FC = () => {
     return rows;
   }, [detail]);
 
+  const appendThumbUri = useCallback(
+    (uri: string) => {
+      setThumbUrls((prev) => {
+        if (prev.length >= MAX_THUMB_COUNT) return prev;
+        return [...prev, uri];
+      });
+    },
+    [],
+  );
+
+  const openThumbPicker = () => {
+    if (thumbUrls.length >= MAX_THUMB_COUNT) {
+      showToast(
+        t('profile.productMgmt.onlineEdit.thumbnailMax') ||
+          `최대 ${MAX_THUMB_COUNT}장까지 업로드할 수 있습니다`,
+        'error',
+      );
+      return;
+    }
+    setThumbPickerOpen(true);
+  };
+
   // ─── 썸네일 추가 단추 → 카메라 / 갤러리 선택 ────────────────────────
   // PersonalInformationScreen 의 아바타 픽커와 동일한 패턴.
   // 권한 거절 / 사용자 취소 / 응답 오류는 모두 picker 닫기로 일관 처리.
@@ -456,7 +504,7 @@ const OnlineProductEditScreen: React.FC = () => {
         return;
       }
       const uri = response.assets?.[0]?.uri;
-      if (uri) setThumbUrl(uri);
+      if (uri) appendThumbUri(uri);
     });
   };
 
@@ -483,7 +531,7 @@ const OnlineProductEditScreen: React.FC = () => {
         return;
       }
       const uri = response.assets?.[0]?.uri;
-      if (uri) setThumbUrl(uri);
+      if (uri) appendThumbUri(uri);
     });
   };
 
@@ -641,7 +689,7 @@ const OnlineProductEditScreen: React.FC = () => {
       {/* 본문 컨테이너 — 회색 배경(원래 container 가 갖던 색)을 여기로 옮김.
           기존 ScrollView 가 styles.body 를 이미 쓰고 있어 충돌을 피하려고
           여기는 styles.bodyWrap 로 둠. */}
-      <View style={styles.bodyWrap}>
+      <TabletContent style={styles.bodyWrap}>
 
       {/* 수기입력 tab */}
       <View style={styles.tabBar}>
@@ -730,25 +778,30 @@ const OnlineProductEditScreen: React.FC = () => {
               <Text style={styles.requiredMark}>*</Text>{' '}
               {t('profile.productMgmt.onlineEdit.thumbnail') || '썸네일'}
             </Text>
-            <View style={styles.thumbnailGroup}>
-              {thumbUrl ? (
-                <Image source={{ uri: thumbUrl }} style={styles.thumbnailImage} />
-              ) : (
-                <View style={[styles.thumbnailImage, styles.thumbnailPlaceholder]}>
-                  <Icon name="image-outline" size={20} color={COLORS.gray[400]} />
-                </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.thumbnailScroll}
+              contentContainerStyle={styles.thumbnailGroup}
+            >
+              {thumbUrls.map((url, index) => (
+                <Image
+                  key={`${url}-${index}`}
+                  source={{ uri: url }}
+                  style={styles.thumbnailImage}
+                />
+              ))}
+              {thumbUrls.length < MAX_THUMB_COUNT && (
+                <TouchableOpacity
+                  style={styles.thumbnailAddBox}
+                  activeOpacity={0.7}
+                  onPress={openThumbPicker}
+                  hitSlop={BACK_HIT_SLOP}
+                >
+                  <Icon name="add" size={18} color={COLORS.red} />
+                </TouchableOpacity>
               )}
-              {/* 추가(+) 단추 — 탭하면 카메라/갤러리 선택 모달이 열림.
-                  기존엔 <View> 라 onPress 가 없어 동작하지 않던 문제 해결. */}
-              <TouchableOpacity
-                style={styles.thumbnailAddBox}
-                activeOpacity={0.7}
-                onPress={() => setThumbPickerOpen(true)}
-                hitSlop={BACK_HIT_SLOP}
-              >
-                <Icon name="add" size={18} color={COLORS.red} />
-              </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
 
           <Text style={styles.thumbnailHint}>
@@ -971,7 +1024,7 @@ const OnlineProductEditScreen: React.FC = () => {
           )}
         </TouchableOpacity>
       </View>
-      </View>
+      </TabletContent>
 
       {/* 썸네일 추가 시 노출되는 카메라/갤러리 선택 모달 —
           PersonalInformationScreen 의 아바타 픽커 스타일을 따른다. */}
@@ -1108,7 +1161,12 @@ const OnlineProductEditScreen: React.FC = () => {
             activeOpacity={1}
             onPress={closeLabelModal}
           />
-          <View style={styles.labelModalCard}>
+          <View
+            style={[
+              styles.labelModalCard,
+              responsive.isTablet && { maxWidth: responsive.modalMaxWidth },
+            ]}
+          >
             {/* 헤더 — 좌측 타이틀, 우측 닫기 X */}
             <View style={styles.labelModalHeader}>
               <View style={{ flex: 1 }}>
@@ -1379,7 +1437,12 @@ const OnlineProductEditScreen: React.FC = () => {
             activeOpacity={1}
             onPress={() => setBarcodeViewerRowId(null)}
           />
-          <View style={styles.labelModalCard}>
+          <View
+            style={[
+              styles.labelModalCard,
+              responsive.isTablet && { maxWidth: responsive.modalMaxWidth },
+            ]}
+          >
             {/* 헤더 — 좌측 타이틀, 우측 닫기 X */}
             <View style={styles.barcodeViewerHeader}>
               <Text style={styles.labelModalTitle}>
@@ -1609,7 +1672,13 @@ const styles = StyleSheet.create({
     color: COLORS.text.primary,
   },
 
-  thumbnailGroup: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, flex: 1 },
+  thumbnailScroll: { flex: 1 },
+  thumbnailGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingRight: SPACING.xs,
+  },
   thumbnailImage: {
     width: 56,
     height: 56,

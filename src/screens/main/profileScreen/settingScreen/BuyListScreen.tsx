@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -40,6 +40,10 @@ import {
   ERROR_DASHBOARD_STATUSES,
 } from '../../../../utils/apiProgressStatus';
 import { useToast } from '../../../../context/ToastContext';
+import {
+  buildEmbedNavigateHelper,
+  useProfileTabletEmbed,
+} from '../ProfileTabletEmbedContext';
 import { useRecommendationsMutation } from '../../../../hooks/useRecommendationsMutation';
 import { useWishlistStatus } from '../../../../hooks/useWishlistStatus';
 import { useAddToWishlistMutation } from '../../../../hooks/useAddToWishlistMutation';
@@ -54,9 +58,11 @@ import {
   resolveOrderItemCompanyName,
 } from '../../../../utils/i18nHelpers';
 import { productsApi } from '../../../../services/productsApi';
+import { fetchAdditionalServices } from '../../../../services/additionalServicesApi';
 import { translations } from '../../../../i18n/translations';
 import { useCancelOrderMutation } from '../../../../hooks/useCancelOrderMutation';
 import { useAddToCartMutation } from '../../../../hooks/useAddToCartMutation';
+import { cartApi } from '../../../../services/cartApi';
 import { useProductDetailMutation } from '../../../../hooks/useProductDetailMutation';
 import type { ViewFilterType } from '../../../../services/orderApi';
 import { inquiryApi } from '../../../../services/inquiryApi';
@@ -87,9 +93,24 @@ import {
   computeProgressStatusCounts,
   computeStatusGroupCounts,
 } from '../../../../utils/orderCounts';
+import {
+  buildAddToCartRequestFromDetail,
+  buildOrderItemCartFallback,
+} from '../../../../utils/buildAddToCartRequest';
 
 type BuyListScreenNavigationProp = StackNavigationProp<RootStackParamList, 'BuyList'>;
 type BuyListScreenRouteProp = RouteProp<RootStackParamList, 'BuyList'>;
+
+const resolveOrderAddServiceIconUri = (
+  service: { id?: string; imageUrl?: string[] },
+  catalogById: Record<string, string>,
+): string | undefined => {
+  if (service.id && catalogById[service.id]) {
+    return catalogById[service.id];
+  }
+  const uploaded = service.imageUrl?.find((url) => typeof url === 'string' && url.trim());
+  return uploaded?.trim() || undefined;
+};
 
 interface OrderItem {
   productName: string;
@@ -518,9 +539,27 @@ const mapOrderStatusMeta = (order: ApiOrder): Pick<Order, 'status' | 'statusGrou
   };
 };
 
-const BuyListScreen = () => {
+type BuyListScreenProps = {
+  embedded?: boolean;
+  embeddedDomain?: BuyListBusinessDomain | 'error_management' | 'refund_management';
+  embeddedInitialTab?: string;
+};
+
+const BuyListScreen: React.FC<BuyListScreenProps> = ({
+  embedded = false,
+  embeddedDomain,
+  embeddedInitialTab,
+}) => {
   const navigation = useNavigation<BuyListScreenNavigationProp>();
   const route = useRoute<BuyListScreenRouteProp>();
+  const profileEmbed = useProfileTabletEmbed();
+  const embedNavigate = useMemo(
+    () =>
+      buildEmbedNavigateHelper(profileEmbed, embedded, (target, params) => {
+        (navigation as any).navigate(target, params);
+      }),
+    [profileEmbed, embedded, navigation],
+  );
   const { showToast } = useToast();
   const { user, isGuest } = useAuth();
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
@@ -529,8 +568,10 @@ const BuyListScreen = () => {
   const { onMessageReceived, isConnected, connect, unreadCount: socketUnreadCount, generalInquiryUnreadCount } = useSocket();
   const totalMessageUnread = socketUnreadCount + generalInquiryUnreadCount;
   
-  // Get initial tab from route params, default to 'all' (purchase_agency group)
-  const initialTab = (route.params?.initialTab as Order['status']) || 'purchase_agency';
+  const initialTab =
+    (embedded && embeddedInitialTab
+      ? embeddedInitialTab
+      : route.params?.initialTab) as Order['status'] || 'purchase_agency';
   const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [selectedStatusGroup, setSelectedStatusGroup] = useState<Order['statusGroup'] | null>(null);
   const [expandedStatusGroup, setExpandedStatusGroup] = useState<Order['statusGroup'] | null>(null);
@@ -540,13 +581,13 @@ const BuyListScreen = () => {
   // 이 그대로 표시된다. 나머지 4개 도메인은 BuyListScreen 안에서 별도의
   // placeholder 대시보드를 렌더한다 (페지 이동 없이 본문만 교체).
   type BusinessDomain =
-    | 'purchase_agency'
-    | 'rocket_3pl'
-    | 'vvic_hipass'
-    | 'shipping_agency'
+    | BuyListBusinessDomain
     | 'error_management'
     | 'refund_management';
-  const initialDomain = (route.params?.domain as BusinessDomain | undefined) ?? 'purchase_agency';
+  const initialDomain =
+    (embedded && embeddedDomain
+      ? embeddedDomain
+      : route.params?.domain as BusinessDomain | undefined) ?? 'purchase_agency';
   const [activeBusinessDomain, setActiveBusinessDomain] = useState<BusinessDomain>(initialDomain);
   // 발주관리 칩의 화면상 좌표 — 드롭다운을 칩 바로 밑에 띄우기 위해 측정.
   // 화면 회전/스크롤로 위치가 바뀔 수 있으므로 클릭할 때마다 다시 측정한다.
@@ -586,12 +627,43 @@ const BuyListScreen = () => {
   // 'all' 일 때는 현지 그룹 전체, 'in' 은 입고 관련 진행상태, 'out' 은 출고 관련.
   const [warehouseFilter, setWarehouseFilter] = useState<'all' | 'in' | 'out'>('all');
   
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetchAdditionalServices();
+      if (cancelled || !res.success || !res.data) return;
+      const iconMap: Record<string, string> = {};
+      for (const svc of res.data) {
+        const iconUri = svc.icon || svc.imageUrl;
+        if (iconUri) iconMap[svc.id] = iconUri;
+      }
+      setAdditionalServiceIconById(iconMap);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Update active tab when route params change
   useEffect(() => {
     if (route.params?.initialTab) {
       setActiveTab(route.params.initialTab as string);
     }
   }, [route.params?.initialTab]);
+
+  useEffect(() => {
+    if (!embedded) return;
+    if (embeddedInitialTab) {
+      setActiveTab(embeddedInitialTab);
+    }
+  }, [embedded, embeddedInitialTab]);
+
+  useEffect(() => {
+    if (!embedded || !embeddedDomain) return;
+    setActiveBusinessDomain(embeddedDomain);
+    setExpandedStatusGroup(null);
+    setSelectedProgressStatus(null);
+  }, [embedded, embeddedDomain]);
 
   // 외부(ProfileScreen 내주문 카드 등)에서 BuyList 라우트에 domain 으로 진입할 때
   // 발주관리 드롭다운에서 그 항목을 직접 '클릭'한 것과 같은 상태가 되도록 부수효과를
@@ -647,6 +719,11 @@ const BuyListScreen = () => {
   const [addToCartQuantity, setAddToCartQuantity] = useState(1);
   const [addToCartSelectedSku, setAddToCartSelectedSku] = useState<any>(null);
   const [addToCartSelectedAttrs, setAddToCartSelectedAttrs] = useState<Record<string, string>>({});
+  const [isRepurchasing, setIsRepurchasing] = useState(false);
+  const [isConfirmingAddToCart, setIsConfirmingAddToCart] = useState(false);
+  const [additionalServiceIconById, setAdditionalServiceIconById] = useState<
+    Record<string, string>
+  >({});
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(56);
@@ -844,101 +921,61 @@ const BuyListScreen = () => {
     },
   });
 
-  // OrderItem 의 companyName 은 string 한 개지만 cartApi.AddToCartRequest 는
-  // MultiLang({en?, ko?, zh?}) 객체를 요구한다. 문자열의 글자 셋(중국어 한자/
-  // 한글/그 외)을 보고 해당 언어 슬롯에만 채워 백엔드가 zh 슬롯에서 한글을
-  // 만나 500 을 내는 케이스를 막는다. (ProductDetailScreen 의 동일 패턴 재사용)
-  const buildCompanyMultiLang = (raw: unknown): { en?: string; ko?: string; zh?: string } => {
-    // 이미 객체 형태로 들어오면 그대로 (필요 시 백엔드 정규화에 맡김).
-    if (raw && typeof raw === 'object') {
-      return raw as { en?: string; ko?: string; zh?: string };
-    }
-    if (typeof raw !== 'string' || !raw.trim()) {
-      return {};
-    }
-    const s = raw.trim();
-    const containsChinese = /[一-鿿]/.test(s);
-    const containsHangul = /[가-힯ᄀ-ᇿ㄰-㆏]/.test(s);
-    if (containsChinese) return { zh: s };
-    if (containsHangul) return { ko: s };
-    return { en: s };
-  };
+  const handleRepurchase = async (order: Order) => {
+    if (isRepurchasing) return;
+    setIsRepurchasing(true);
+    let successCount = 0;
+    let failCount = 0;
 
-  const handleRepurchase = (order: Order) => {
-    // 1688 CDN 썸네일에 붙어 있는 _NNNxNNN.jpg 사이즈 접미사 제거.
-    // 백엔드는 원본 URL 로 다시 fetch 하는데 그 사이즈 변형 URL 은 1688에
-    // 존재하지 않아 500 의 원인이 된다 — ProductDetailScreen 과 같은 처리.
-    const stripAlicdnSizeSuffix = (url: string): string =>
-      url ? url.replace(/_\d+x\d+\.(jpg|jpeg|png|webp)$/i, '') : url;
+    try {
+      for (const item of order.items) {
+        const source = item.source || '1688';
+        const detailRes = await productsApi.getProductDetail(item.offerId, source, locale);
+        if (!detailRes.success || !detailRes.data) {
+          failCount += 1;
+          continue;
+        }
 
-    order.items.forEach((item) => {
-      const skuAttrs = (item.skuAttributes || []).map((attr: any) => ({
-        // 원본이 string("404") / number(404) 어느 쪽이든 파싱.
-        attributeId:
-          typeof attr.attributeId === 'number'
-            ? attr.attributeId
-            : parseInt(String(attr.attributeId ?? attr.propId ?? '0'), 10) || 0,
-        attributeName: attr.attributeName ?? '',
-        attributeNameTrans: attr.attributeNameTrans ?? attr.attributeName ?? '',
-        value: attr.value ?? '',
-        valueTrans: attr.valueTrans ?? attr.value ?? '',
-        skuImageUrl: stripAlicdnSizeSuffix(attr.skuImageUrl || ''),
-      }));
-      const repurchasePrice = String(item.price);
-      // 다국어 상품명 — companyNameMultiLang 처럼 글자셋에 맞춰 슬롯 채움.
-      // 백엔드의 locale 별 validator(zh 슬롯에 한글이 들어가면 500) 회피.
-      const subjectRaw = String(item.productName || '');
-      const subjectMultiLang: { en?: string; ko?: string; zh?: string } = {};
-      if (subjectRaw) {
-        const hasChinese = /[一-鿿]/.test(subjectRaw);
-        const hasHangul = /[가-힯ᄀ-ᇿ㄰-㆏]/.test(subjectRaw);
-        if (hasChinese) subjectMultiLang.zh = subjectRaw;
-        else if (hasHangul) subjectMultiLang.ko = subjectRaw;
-        else subjectMultiLang.en = subjectRaw;
-      }
-      const source = item.source || '1688';
-      // ProductDetailScreen 패턴과 동일하게: 두 번째 인자로 현재 locale 을 보내
-      // 백엔드가 그 언어 기준으로 응답을 정렬·검증하도록 한다 (default 'en'
-      // 으로 빠지면 한국어 productName 이 영문 validator 에 걸려 500 발생).
-      addToCart(
-        {
-          offerId: parseInt(item.offerId, 10) || 0,
-          // 카테고리 정보는 재구매 시 OrderItem 에 없음 — 빈 문자열로 보내면
-          // 백엔드가 offerId 로부터 알아서 채운다 (cartApi 의 string | MultiLang 허용).
-          categoryName: '',
-          // subject / subjectTrans 모두 사용자가 인지하는 번역 텍스트로 통일
-          // (raw Chinese 가 subject 로 가면 ko-locale validator 에서 500).
-          subject: subjectRaw,
-          subjectTrans: subjectRaw,
-          subjectMultiLang,
-          imageUrl: stripAlicdnSizeSuffix(item.image || ''),
-          source,
-          // originalSource — 백엔드가 SKU 조회 시 marketplace 식별에 사용.
-          originalSource: source,
-          skuInfo: {
-            skuId: parseInt(item.skuId || '0', 10) || 0,
-            specId: item.specId || String(item.offerId),
-            price: repurchasePrice,
-            amountOnSale: 999999,
-            consignPrice: repurchasePrice,
-            cargoNumber: '',
-            skuAttributes: skuAttrs,
-            // 백엔드는 onePiecePrice 와 offerPrice 둘 다 요구.
-            fenxiaoPriceInfo: { onePiecePrice: repurchasePrice, offerPrice: repurchasePrice },
-          },
-          companyName: buildCompanyMultiLang(item.companyName),
-          sellerOpenId: item.sellerOpenId || '',
+        const request = buildAddToCartRequestFromDetail({
+          productDetail: detailRes.data,
           quantity: item.quantity,
-          minOrderQuantity: 1,
-        },
-        locale,
-      );
-    });
+          locale,
+          preferredSkuId: item.skuId,
+          preferredSpecId: item.specId,
+          orderItemFallback: buildOrderItemCartFallback(item),
+        });
+
+        if (!request) {
+          failCount += 1;
+          continue;
+        }
+
+        const response = await cartApi.addToCart(request, locale);
+        if (response.success) {
+          successCount += 1;
+        } else {
+          failCount += 1;
+        }
+      }
+
+      if (successCount > 0 && failCount === 0) {
+        showToast(t('product.addedToCart') || 'Added to cart', 'success');
+      } else if (successCount > 0) {
+        showToast(
+          t('buyList.addToCartPartialSuccess') || 'Some items were added to cart',
+          'warning',
+        );
+      } else {
+        showToast(t('product.failedToAdd') || 'Failed to add to cart', 'error');
+      }
+    } finally {
+      setIsRepurchasing(false);
+    }
   };
 
   const handleOrderInquiry = (order: Order) => {
     // Always go to Chat — if no inquiry exists, sending a message will create one
-    (navigation as any).navigate('Chat', {
+    embedNavigate('Chat', {
       inquiryId: order.inquiryId || undefined,
       orderId: order.orderId,
       orderNumber: order.orderNumber,
@@ -968,41 +1005,47 @@ const BuyListScreen = () => {
     fetchProductDetail(item.offerId, item.source || '1688', locale);
   };
 
-  const handleConfirmAddToCart = () => {
-    if (!addToCartItem) return;
-    const selectedSku = addToCartSelectedSku;
-    const skuAttrs = selectedSku?.skuAttributes || (addToCartItem.skuAttributes || []).map((attr: any) => ({
-      attributeId: attr.attributeId ?? 0,
-      attributeName: attr.attributeName ?? '',
-      attributeNameTrans: attr.attributeNameTrans ?? attr.attributeName ?? '',
-      value: attr.value ?? '',
-      valueTrans: attr.valueTrans ?? attr.value ?? '',
-      skuImageUrl: attr.skuImageUrl,
-    }));
-    const skuPriceStr = String(selectedSku?.price || addToCartItem.price);
-    addToCart({
-      offerId: parseInt(addToCartItem.offerId, 10) || 0,
-      categoryName: '',
-      subject: addToCartItem.productName,
-      subjectTrans: addToCartItem.productName,
-      imageUrl: addToCartItem.image,
-      skuInfo: {
-        skuId: selectedSku?.skuId ? parseInt(String(selectedSku.skuId), 10) : (parseInt(addToCartItem.skuId || '0', 10) || 0),
-        specId: selectedSku?.specId || addToCartItem.specId || String(addToCartItem.offerId),
-        price: skuPriceStr,
-        amountOnSale: selectedSku?.amountOnSale || 999999,
-        consignPrice: String(selectedSku?.consignPrice || addToCartItem.price),
-        skuAttributes: skuAttrs,
-        // 백엔드는 onePiecePrice 와 offerPrice 둘 다 요구.
-        fenxiaoPriceInfo: { onePiecePrice: skuPriceStr, offerPrice: skuPriceStr },
-      },
-      companyName: buildCompanyMultiLang(addToCartItem.companyName),
-      sellerOpenId: addToCartItem.sellerOpenId,
-      source: addToCartItem.source || '1688',
-      quantity: addToCartQuantity,
-      minOrderQuantity: 1,
-    });
-    setAddToCartModalVisible(false);
+  const handleConfirmAddToCart = async () => {
+    if (!addToCartItem || isConfirmingAddToCart) return;
+    setIsConfirmingAddToCart(true);
+
+    try {
+      let productDetail = addToCartProductDetail;
+      if (!productDetail) {
+        const source = addToCartItem.source || '1688';
+        const detailRes = await productsApi.getProductDetail(
+          addToCartItem.offerId,
+          source,
+          locale,
+        );
+        if (!detailRes.success || !detailRes.data) {
+          showToast(t('product.failedToAdd') || 'Failed to add to cart', 'error');
+          return;
+        }
+        productDetail = detailRes.data;
+      }
+
+      const request = buildAddToCartRequestFromDetail({
+        productDetail,
+        quantity: addToCartQuantity,
+        locale,
+        selectedSku: addToCartSelectedSku,
+        selectedVariations: addToCartSelectedAttrs,
+        preferredSkuId: addToCartItem.skuId,
+        preferredSpecId: addToCartItem.specId,
+        orderItemFallback: buildOrderItemCartFallback(addToCartItem),
+      });
+
+      if (!request) {
+        showToast(t('product.invalidProductId') || 'Invalid product', 'error');
+        return;
+      }
+
+      await addToCart(request, locale);
+      setAddToCartModalVisible(false);
+    } finally {
+      setIsConfirmingAddToCart(false);
+    }
   };
 
   // Delete from wishlist mutation
@@ -1061,7 +1104,7 @@ const BuyListScreen = () => {
     source: string = selectedPlatform,
     country: string = locale
   ) => {
-    navigation.navigate('ProductDetail', {
+    embedNavigate('ProductDetail', {
       productId: productId.toString(),
       source: source,
       country: country,
@@ -1786,7 +1829,7 @@ const BuyListScreen = () => {
   };
 
   const openOrderDetail = (order: Order) => {
-    (navigation as any).navigate('OrderDetail', { orderId: order.id, order });
+    embedNavigate('OrderDetail', { orderId: order.id, order });
   };
 
   const renderOrderProductRow = (
@@ -1817,9 +1860,25 @@ const BuyListScreen = () => {
               </Text>
               {addServiceCount > 0 ? (
                 <View style={styles.addServicesIcons}>
-                  {item.addServices!.slice(0, 6).map((service, index) => (
-                    <View key={`${uniqueKey}-svc-${index}`} style={styles.addServiceIcon} />
-                  ))}
+                  {item.addServices!.slice(0, 6).map((service, index) => {
+                    const iconUri = resolveOrderAddServiceIconUri(
+                      service,
+                      additionalServiceIconById,
+                    );
+                    return (
+                      <View key={`${uniqueKey}-svc-${index}`} style={styles.addServiceIcon}>
+                        {iconUri ? (
+                          <Image
+                            source={{ uri: iconUri }}
+                            style={styles.addServiceIconImage}
+                            resizeMode="contain"
+                          />
+                        ) : (
+                          <Icon name="cube-outline" size={12} color={COLORS.red} />
+                        )}
+                      </View>
+                    );
+                  })}
                 </View>
               ) : (
                 <Text style={styles.addServicesNone}>{t('buyList.additionalServicesNone')}</Text>
@@ -2016,8 +2075,16 @@ const BuyListScreen = () => {
               <Text style={styles.secondaryButtonText}>{t('cart.cancelOrder') || 'Cancel order'}</Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={styles.secondaryButton} onPress={() => handleRepurchase(order)}>
-              <Text style={styles.secondaryButtonText}>{t('profile.repurchase') || 'Repurchase'}</Text>
+            <TouchableOpacity
+              style={[styles.secondaryButton, isRepurchasing && styles.secondaryButtonDisabled]}
+              onPress={() => handleRepurchase(order)}
+              disabled={isRepurchasing}
+            >
+              {isRepurchasing ? (
+                <ActivityIndicator size="small" color={COLORS.text.secondary} />
+              ) : (
+                <Text style={styles.secondaryButtonText}>{t('profile.repurchase') || 'Repurchase'}</Text>
+              )}
             </TouchableOpacity>
           )}
 
@@ -2062,7 +2129,7 @@ const BuyListScreen = () => {
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={() =>
-                (navigation as any).navigate('OrderPayment', { orderId: order.id })
+                embedNavigate('OrderPayment', { orderId: order.id })
               }
             >
               <Text style={styles.primaryButtonText}>{t('cart.pay') || 'Pay Now'}</Text>
@@ -2716,25 +2783,30 @@ const BuyListScreen = () => {
 </body>
 </html>`;
 
-  return (
-    <SafeAreaView style={styles.container}>
+  const screenBody = (
+    <>
       {/* Header */}
-      <View style={styles.header} onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => {
-            if (navigation.canGoBack()) {
-              navigation.goBack();
-            } else {
-              navigation.navigate('Main' as never);
-            }
-          }}
-        >
-          <Icon name="chevron-back" size={24} color={COLORS.text.primary} />
-        </TouchableOpacity>
-        
+      <View
+        style={[styles.header, embedded && styles.embeddedHeader]}
+        onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
+      >
+        {!embedded && (
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              if (navigation.canGoBack()) {
+                navigation.goBack();
+              } else {
+                navigation.navigate('Main' as never);
+              }
+            }}
+          >
+            <Icon name="chevron-back" size={24} color={COLORS.text.primary} />
+          </TouchableOpacity>
+        )}
+
         {/* Order number search input */}
-        <View style={styles.headerCenter}>
+        <View style={[styles.headerCenter, embedded && styles.embeddedHeaderCenter]}>
           <View style={styles.orderSearchBar}>
             <TextInput
               style={styles.orderSearchInput}
@@ -2875,8 +2947,8 @@ const BuyListScreen = () => {
               {filteredOrders.length === 0 && groupedOrdersForCategory.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Icon name="basket-outline" size={80} color="#CCC" />
-                  <Text style={styles.emptyTitle}>No orders</Text>
-                  <Text style={styles.emptySubtitle}>You don't have any orders in this category</Text>
+                  <Text style={styles.emptyTitle}>{t('buyList.noOrders')}</Text>
+                  <Text style={styles.emptySubtitle}>{t('buyList.noOrdersInCategory')}</Text>
                 </View>
               ) : (
                 <View style={styles.ordersContainer}>
@@ -3267,8 +3339,16 @@ const BuyListScreen = () => {
             )}
 
             {/* Add to cart button */}
-            <TouchableOpacity style={styles.atcConfirmButton} onPress={handleConfirmAddToCart}>
-              <Text style={styles.atcConfirmButtonText}>{t('buyList.addToCartModal.confirm')}</Text>
+            <TouchableOpacity
+              style={[styles.atcConfirmButton, isConfirmingAddToCart && styles.atcConfirmButtonDisabled]}
+              onPress={handleConfirmAddToCart}
+              disabled={isConfirmingAddToCart}
+            >
+              {isConfirmingAddToCart ? (
+                <ActivityIndicator size="small" color={COLORS.white} />
+              ) : (
+                <Text style={styles.atcConfirmButtonText}>{t('buyList.addToCartModal.confirm')}</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -3386,7 +3466,7 @@ const BuyListScreen = () => {
                     }));
                     const res = await orderApi.getRefundAmount(refundModalOrder.id, refundItems);
                     setRefundModalOrder(null);
-                    navigation.navigate('RefundRequest', {
+                    embedNavigate('RefundRequest', {
                       orderId: refundModalOrder.id,
                       orderNumber: refundModalOrder.orderNumber,
                       items: allItems.map(({ item }) => item),
@@ -3498,16 +3578,16 @@ const BuyListScreen = () => {
                       </View>
                     )}
                   </View>
-                ), key: 'message', label: t('buyList.navMenuModal.message') || 'Message', onPress: () => navigation.navigate('Main', { screen: 'Message' }) },
+                ), key: 'message', label: t('buyList.navMenuModal.message') || 'Message', onPress: () => embedNavigate('Main', { screen: 'Message' }) },
                 { icon: <HomeIcon width={28} color={COLORS.text.primary} />, key: 'main', label: t('buyList.navMenuModal.main') || 'Main', onPress: () => navigation.navigate('Main', { screen: 'Home' }) },
-                { icon: <AccountIcon width={28} color={COLORS.text.primary} />, key: 'myAccount', label: t('buyList.navMenuModal.myAccount') || 'My Account', onPress: () => navigation.navigate('ProfileSettings') },
-                { icon: <CartIcon width={28} color={COLORS.text.primary} />, key: 'cart', label: t('buyList.navMenuModal.cart') || 'Cart', onPress: () => navigation.navigate('Main', { screen: 'Cart' }) },
-                { icon: <ReceiptIcon width={28} color={COLORS.text.primary} />, key: 'myOrders', label: t('buyList.navMenuModal.myOrders') || 'My Orders', onPress: () => setShowNavModal(false) },
-                { icon: <ViewedIcon width={28} height={28} color={COLORS.text.primary} />, key: 'viewedProducts', label: t('buyList.navMenuModal.viewedProducts') || 'Viewed Products', onPress: () => navigation.navigate('ViewedProducts') },
-                { icon: <HeartIcon width={28} height={28} color={COLORS.text.primary} />, key: 'wishList', label: t('buyList.navMenuModal.wishList') || 'WishList', onPress: () => navigation.navigate('Wishlist') },
-                { icon: <OfficialSupportIcon width={28} height={28} color={COLORS.text.primary} />, key: 'officialSupport', label: t('buyList.navMenuModal.officialSupport') || 'Official Support', onPress: () => navigation.navigate('CustomerService') },
-                { icon: <FeedbackIcon width={28} height={28} color={COLORS.text.primary} />, key: 'feedback', label: t('buyList.navMenuModal.feedback') || 'Feedback', onPress: () => navigation.navigate('Note') },
-                { icon: <CustomerSupportIcon width={28} height={28} color={COLORS.text.primary} />, key: 'afterSales', label: t('buyList.navMenuModal.afterSales') || 'After-sales', onPress: () => navigation.navigate('CustomerService') },
+                { icon: <AccountIcon width={28} color={COLORS.text.primary} />, key: 'myAccount', label: t('buyList.navMenuModal.myAccount') || 'My Account', onPress: () => embedNavigate('ProfileSettings') },
+                { icon: <CartIcon width={28} color={COLORS.text.primary} />, key: 'cart', label: t('buyList.navMenuModal.cart') || 'Cart', onPress: () => embedNavigate('Main', { screen: 'Cart' }) },
+                { icon: <ReceiptIcon width={28} color={COLORS.text.primary} />, key: 'myOrders', label: t('buyList.navMenuModal.myOrders') || 'My Orders', onPress: () => profileEmbed?.openSidebarPanel('myOrders') },
+                { icon: <ViewedIcon width={28} height={28} color={COLORS.text.primary} />, key: 'viewedProducts', label: t('buyList.navMenuModal.viewedProducts') || 'Viewed Products', onPress: () => embedNavigate('ViewedProducts') },
+                { icon: <HeartIcon width={28} height={28} color={COLORS.text.primary} />, key: 'wishList', label: t('buyList.navMenuModal.wishList') || 'WishList', onPress: () => embedNavigate('Wishlist') },
+                { icon: <OfficialSupportIcon width={28} height={28} color={COLORS.text.primary} />, key: 'officialSupport', label: t('buyList.navMenuModal.officialSupport') || 'Official Support', onPress: () => embedNavigate('CustomerService') },
+                { icon: <FeedbackIcon width={28} height={28} color={COLORS.text.primary} />, key: 'feedback', label: t('buyList.navMenuModal.feedback') || 'Feedback', onPress: () => embedNavigate('Note') },
+                { icon: <CustomerSupportIcon width={28} height={28} color={COLORS.text.primary} />, key: 'afterSales', label: t('buyList.navMenuModal.afterSales') || 'After-sales', onPress: () => embedNavigate('CustomerService') },
               ].map((item) => (
                 <TouchableOpacity
                   key={item.key}
@@ -3939,14 +4019,33 @@ const BuyListScreen = () => {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </>
   );
+
+  if (embedded) {
+    return (
+      <View style={[styles.container, styles.embeddedContainer]}>{screenBody}</View>
+    );
+  }
+
+  return <SafeAreaView style={styles.container}>{screenBody}</SafeAreaView>;
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  embeddedContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  embeddedHeader: {
+    paddingTop: SPACING.sm,
+  },
+  embeddedHeaderCenter: {
+    flex: 1,
+    marginLeft: 0,
   },
   header: {
     flexDirection: 'row',
@@ -4504,7 +4603,16 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 3,
-    backgroundColor: COLORS.red,
+    backgroundColor: COLORS.white,
+    borderWidth: 1.5,
+    borderColor: COLORS.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  addServiceIconImage: {
+    width: 14,
+    height: 14,
   },
   addServicesNone: {
     fontSize: FONTS.sizes.xs,
@@ -4712,6 +4820,9 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
     // borderTopWidth: 1,
     // borderTopColor: COLORS.border,
+  },
+  secondaryButtonDisabled: {
+    opacity: 0.55,
   },
   secondaryButton: {
     paddingVertical: SPACING.xs,
@@ -5592,6 +5703,9 @@ const styles = StyleSheet.create({
     color: COLORS.text.primary,
     minWidth: 30,
     textAlign: 'center',
+  },
+  atcConfirmButtonDisabled: {
+    opacity: 0.7,
   },
   atcConfirmButton: {
     backgroundColor: COLORS.red,

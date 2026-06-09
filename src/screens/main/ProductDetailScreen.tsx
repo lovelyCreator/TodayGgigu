@@ -138,17 +138,43 @@ const pickVariantRowImage = (sku: any, galleryFirst: string): string => {
   );
 };
 
-const ProductDetailScreen: React.FC = () => {
+type ProductDetailScreenProps = {
+  embedded?: boolean;
+  embeddedProductId?: string;
+  embeddedSource?: string;
+  embeddedCountry?: string;
+  onEmbeddedBack?: () => void;
+};
+
+const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
+  embedded = false,
+  embeddedProductId,
+  embeddedSource,
+  embeddedCountry,
+  onEmbeddedBack,
+}) => {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
+  const routeParams = route.params || {};
   const {
-    productId,
+    productId: routeProductId,
     offerId,
     productData: initialProductData,
-    source: routeSource,
-    country: routeCountry,
+    source: paramSource,
+    country: paramCountry,
     thumbnailUrl: routeThumbnailUrl,
-  } = route.params || {};
+  } = routeParams;
+  const productId = embedded ? embeddedProductId : routeProductId;
+  const routeSource = embedded ? embeddedSource : paramSource;
+  const routeCountry = embedded ? embeddedCountry : paramCountry;
+
+  const handleBack = () => {
+    if (embedded && onEmbeddedBack) {
+      onEmbeddedBack();
+      return;
+    }
+    navigation.goBack();
+  };
   // console.log("[ProductDetailScreen] routeSource:", routeSource);
   
   // ALL HOOKS MUST BE CALLED BEFORE ANY CONDITIONAL RETURNS OR HOOKS THAT USE THEM
@@ -1843,7 +1869,7 @@ const ProductDetailScreen: React.FC = () => {
         >
           <View style={{ flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 8 }}>
             <TouchableOpacity
-              onPress={() => navigation.goBack()}
+              onPress={handleBack}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
@@ -2535,7 +2561,7 @@ const ProductDetailScreen: React.FC = () => {
   const renderHeader = () => {
     return (
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.headerButton} onPress={handleBack}>
           <ArrowBackIcon width={12} height={20} color={COLORS.text.primary} />
         </TouchableOpacity>
 

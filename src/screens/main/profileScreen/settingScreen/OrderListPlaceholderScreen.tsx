@@ -41,12 +41,13 @@ export interface OrderListPlaceholderProps<TKey extends string = string> {
   titleKey: string;
   tabs: OrderListPlaceholderTab<TKey>[];
   initialTab?: TKey | 'all';
+  embedded?: boolean;
 }
 
 export default function OrderListPlaceholderScreen<TKey extends string>(
   props: OrderListPlaceholderProps<TKey>,
 ) {
-  const { titleKey, tabs, initialTab } = props;
+  const { titleKey, tabs, initialTab, embedded = false } = props;
   const navigation = useNavigation<any>();
   const { t } = useTranslation();
 
@@ -107,25 +108,26 @@ export default function OrderListPlaceholderScreen<TKey extends string>(
     [t],
   );
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header — 뒤로가기 + 주문번호 검색 + 필터/그리드/더보기 */}
+  const body = (
+    <>
       <View
-        style={styles.header}
+        style={[styles.header, embedded && styles.embeddedHeader]}
         onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
       >
-        <TouchableOpacity
-          hitSlop={BACK_HIT_SLOP}
-          style={styles.backButton}
-          onPress={() => {
-            if (navigation.canGoBack()) navigation.goBack();
-            else navigation.navigate('Main');
-          }}
-        >
-          <Icon name="chevron-back" size={24} color={COLORS.text.primary} />
-        </TouchableOpacity>
+        {!embedded && (
+          <TouchableOpacity
+            hitSlop={BACK_HIT_SLOP}
+            style={styles.backButton}
+            onPress={() => {
+              if (navigation.canGoBack()) navigation.goBack();
+              else navigation.navigate('Main');
+            }}
+          >
+            <Icon name="chevron-back" size={24} color={COLORS.text.primary} />
+          </TouchableOpacity>
+        )}
 
-        <View style={styles.headerCenter}>
+        <View style={[styles.headerCenter, embedded && styles.embeddedHeaderCenter]}>
           <View style={styles.orderSearchBar}>
             <TextInput
               style={styles.orderSearchInput}
@@ -442,6 +444,16 @@ export default function OrderListPlaceholderScreen<TKey extends string>(
           </View>
         </TouchableOpacity>
       </Modal>
+    </>
+  );
+
+  if (embedded) {
+    return <View style={[styles.container, styles.embeddedContainer]}>{body}</View>;
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {body}
     </SafeAreaView>
   );
 }
@@ -451,6 +463,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  embeddedContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  embeddedHeader: {
+    paddingTop: SPACING.sm,
+  },
+  embeddedHeaderCenter: {
+    marginLeft: 0,
   },
   // Header
   header: {

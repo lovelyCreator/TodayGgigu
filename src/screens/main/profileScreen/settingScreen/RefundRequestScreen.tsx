@@ -9,87 +9,116 @@ import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../../../constants';
 import { formatPriceKRW } from '../../../../utils/i18nHelpers';
 import { useToast } from '../../../../context/ToastContext';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
+import { useTranslation } from '../../../../hooks/useTranslation';
 
-const REFUND_REASONS = [
-  'Overpaid/Discount Not Applied',
-  'Changed My Mind',
-  'Refund by Mutual Agreement',
-  'Empty Package',
-  'Failed to Ship on Time',
-  'Package Not Delivered',
-  'Item Damaged, Delivery Refused',
-];
+const REFUND_REASON_IDS = [
+  'overpaid',
+  'changedMyMind',
+  'mutualAgreement',
+  'emptyPackage',
+  'failedToShip',
+  'notDelivered',
+  'itemDamaged',
+] as const;
 
-const RefundRequestScreen: React.FC = () => {
+type RefundReasonId = (typeof REFUND_REASON_IDS)[number];
+
+type RefundRequestScreenProps = {
+  embedded?: boolean;
+  embeddedParams?: {
+    orderId?: string;
+    orderNumber?: string;
+    items?: unknown[];
+    refundData?: unknown;
+  };
+  onEmbeddedBack?: () => void;
+};
+
+const RefundRequestScreen: React.FC<RefundRequestScreenProps> = ({
+  embedded = false,
+  embeddedParams,
+  onEmbeddedBack,
+}) => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { orderId, orderNumber, items, refundData } = route.params || {};
+  const { t } = useTranslation();
   const { showToast } = useToast();
-
-  const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [selectedReason, setSelectedReason] = useState<RefundReasonId | null>(null);
   const [images, setImages] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const routeParams = route.params || {};
+  const orderNumber = embedded ? embeddedParams?.orderNumber : routeParams.orderNumber;
+  const items = embedded ? embeddedParams?.items : routeParams.items;
+  const refundData = embedded ? embeddedParams?.refundData : routeParams.refundData;
+
+  const handleBack = () => {
+    if (embedded && onEmbeddedBack) {
+      onEmbeddedBack();
+      return;
+    }
+    navigation.goBack();
+  };
+
   const handlePickImage = () => {
-    Alert.alert('Add Image', 'Choose an option', [
-      { text: 'Take Photo', onPress: async () => {
+    Alert.alert(t('profile.addImage'), t('profile.chooseAnOption'), [
+      { text: t('profile.takePhoto'), onPress: async () => {
         try {
           const result = await launchCamera({ mediaType: 'photo', saveToPhotos: false });
           if (result.assets?.[0]?.uri) setImages(prev => [...prev, result.assets![0].uri!].slice(0, 5));
         } catch (e) {
-          showToast('Camera not available', 'error');
+          showToast(t('profile.cameraNotAvailable'), 'error');
         }
       }},
-      { text: 'Choose from Library', onPress: async () => {
+      { text: t('profile.chooseFromLibrary'), onPress: async () => {
         try {
           const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 5 - images.length });
           if (result.assets) setImages(prev => [...prev, ...result.assets!.map(a => a.uri || '')].filter(Boolean).slice(0, 5));
         } catch (e) {
-          showToast('Failed to pick image', 'error');
+          showToast(t('profile.failedToPickImage'), 'error');
         }
       }},
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
     ]);
   };
 
   const handleSubmit = async () => {
     if (!selectedReason) {
-      showToast('Please select a refund reason', 'warning');
+      showToast(t('profile.pleaseSelectARefundReason'), 'warning');
       return;
     }
     setIsSubmitting(true);
     try {
       // TODO: call submit refund API
-      showToast('Refund request submitted', 'success');
-      navigation.goBack();
+      showToast(t('profile.refundRequestSubmitted'), 'success');
+      handleBack();
     } catch {
-      showToast('Failed to submit refund', 'error');
+      showToast(t('profile.failedToSubmitRefund'), 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
+  const body = (
+    <>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
           <Icon name="arrow-back" size={20} color={COLORS.text.primary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Refund Request</Text>
+        <Text style={styles.headerTitle}>{t('profile.refundRequest')}</Text>
         <View style={{ width: 32 }} />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         {/* Order info */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order</Text>
+          <Text style={styles.sectionTitle}>{t('profile.refundOrder')}</Text>
           <Text style={styles.orderNumber}>{orderNumber}</Text>
         </View>
 
         {/* Refund items */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Items</Text>
+          <Text style={styles.sectionTitle}>{t('profile.refundItems')}</Text>
           {(items || []).map((item: any, i: number) => (
             <View key={i} style={styles.itemRow}>
               <Image source={{ uri: item.image }} style={styles.itemImage} />
@@ -103,19 +132,19 @@ const RefundRequestScreen: React.FC = () => {
 
         {/* Refund amount — always shown */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Refund Amount</Text>
+          <Text style={styles.sectionTitle}>{t('profile.refundAmount')}</Text>
           {refundData ? (
             <>
               <View style={styles.amountRow}>
-                <Text style={styles.amountLabel}>Product</Text>
+                <Text style={styles.amountLabel}>{t('profile.refundProduct')}</Text>
                 <Text style={styles.amountValue}>{formatPriceKRW(refundData.itemAmount)}</Text>
               </View>
               <View style={styles.amountRow}>
-                <Text style={styles.amountLabel}>Shipping</Text>
+                <Text style={styles.amountLabel}>{t('profile.refundShipping')}</Text>
                 <Text style={styles.amountValue}>{formatPriceKRW(refundData.shippingAmount)}</Text>
               </View>
               <View style={[styles.amountRow, styles.amountTotal]}>
-                <Text style={styles.amountTotalLabel}>Total Refund</Text>
+                <Text style={styles.amountTotalLabel}>{t('profile.totalRefund')}</Text>
                 <Text style={styles.amountTotalValue}>{formatPriceKRW(refundData.totalRefundAmount)}</Text>
               </View>
               <View style={styles.totalHighlight}>
@@ -123,30 +152,32 @@ const RefundRequestScreen: React.FC = () => {
               </View>
             </>
           ) : (
-            <Text style={styles.amountLabel}>Calculating...</Text>
+            <Text style={styles.amountLabel}>{t('profile.refundCalculating')}</Text>
           )}
         </View>
 
         {/* Refund reason */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Refund Reason</Text>
-          {REFUND_REASONS.map((reason) => (
+          <Text style={styles.sectionTitle}>{t('profile.refundReason')}</Text>
+          {REFUND_REASON_IDS.map((reasonId) => (
             <TouchableOpacity
-              key={reason}
+              key={reasonId}
               style={styles.reasonRow}
-              onPress={() => setSelectedReason(reason)}
+              onPress={() => setSelectedReason(reasonId)}
             >
-              <View style={[styles.radio, selectedReason === reason && styles.radioSelected]}>
-                {selectedReason === reason && <View style={styles.radioDot} />}
+              <View style={[styles.radio, selectedReason === reasonId && styles.radioSelected]}>
+                {selectedReason === reasonId && <View style={styles.radioDot} />}
               </View>
-              <Text style={styles.reasonText}>{reason}</Text>
+              <Text style={styles.reasonText}>{t(`profile.refundReasons.${reasonId}`)}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
         {/* Image upload */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Images ({images.length}/5)</Text>
+          <Text style={styles.sectionTitle}>
+            {t('profile.imagesWithCount', { current: String(images.length), max: '5' })}
+          </Text>
           <View style={styles.imageRow}>
             {images.map((uri, i) => (
               <View key={i} style={styles.imageThumbContainer}>
@@ -162,7 +193,7 @@ const RefundRequestScreen: React.FC = () => {
             {images.length < 5 && (
               <TouchableOpacity style={styles.imageAddBtn} onPress={handlePickImage}>
                 <Icon name="camera-outline" size={24} color={COLORS.text.secondary} />
-                <Text style={styles.imageAddText}>Add</Text>
+                <Text style={styles.imageAddText}>{t('profile.refundAdd')}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -179,12 +210,18 @@ const RefundRequestScreen: React.FC = () => {
           {isSubmitting ? (
             <ActivityIndicator size="small" color={COLORS.white} />
           ) : (
-            <Text style={styles.submitBtnText}>Submit Refund</Text>
+            <Text style={styles.submitBtnText}>{t('profile.submitRefund')}</Text>
           )}
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </>
   );
+
+  if (embedded) {
+    return <View style={styles.container}>{body}</View>;
+  }
+
+  return <SafeAreaView style={styles.container}>{body}</SafeAreaView>;
 };
 
 const styles = StyleSheet.create({

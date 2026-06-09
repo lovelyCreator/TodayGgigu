@@ -30,6 +30,10 @@ import {
   resolvePendingOrderPayment,
 } from '../../../../services/orderApi';
 import { useAppSelector } from '../../../../store/hooks';
+import {
+  useProfileTabletEmbed,
+  useProfileTabletEmbedNavigation,
+} from '../ProfileTabletEmbedContext';
 
 type PaymentTab = 'bank' | 'credit_card' | 'deposit';
 
@@ -95,7 +99,17 @@ const resolveItemTitle = (item: OrderItem, locale: 'en' | 'ko' | 'zh'): string =
   coerceDisplayText(item.subject, locale, '') ||
   '';
 
-const OrderPaymentScreen: React.FC = () => {
+type OrderPaymentScreenProps = {
+  embedded?: boolean;
+  embeddedOrderId?: string;
+  onEmbeddedBack?: () => void;
+};
+
+const OrderPaymentScreen: React.FC<OrderPaymentScreenProps> = ({
+  embedded = false,
+  embeddedOrderId,
+  onEmbeddedBack,
+}) => {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
@@ -103,9 +117,19 @@ const OrderPaymentScreen: React.FC = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
+  const profileEmbed = useProfileTabletEmbed();
+  const { tryEmbedNavigate } = useProfileTabletEmbedNavigation(embedded);
 
   const params = (route.params ?? {}) as OrderPaymentParams;
-  const orderId = params.orderId;
+  const orderId = embedded ? embeddedOrderId : params.orderId;
+
+  const handleBack = () => {
+    if (embedded && onEmbeddedBack) {
+      onEmbeddedBack();
+      return;
+    }
+    navigation.goBack();
+  };
 
   const [order, setOrder] = useState<Order | null>(null);
   const [depositBalance, setDepositBalance] = useState(0);
@@ -259,10 +283,18 @@ const OrderPaymentScreen: React.FC = () => {
         showToast(t('profile.unitSurvey.paymentConfirmSuccess'), 'success');
         // 결제 완료 후 BuyList 가 발주관리·구매대행 목록을 새로고침하며
         // P_PAY_COMPLETE → 결제완료 카드로 표시한다 (useFocusEffect).
-        (navigation as any).navigate('BuyList', {
-          domain: 'purchase_agency',
-          initialTab: 'purchase_agency',
-        });
+        if (embedded && profileEmbed?.isEmbedActive) {
+          profileEmbed.replaceRoute({
+            type: 'buyList',
+            domain: 'purchase_agency',
+            initialTab: 'purchase_agency',
+          });
+        } else {
+          (navigation as any).navigate('BuyList', {
+            domain: 'purchase_agency',
+            initialTab: 'purchase_agency',
+          });
+        }
       } else {
         showToast(res.error || t('profile.unitSurvey.paymentConfirmFailed'), 'error');
       }
@@ -275,7 +307,7 @@ const OrderPaymentScreen: React.FC = () => {
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+      <TouchableOpacity style={styles.backButton} onPress={handleBack}>
         <Icon name="arrow-back" size={20} color={COLORS.black} />
       </TouchableOpacity>
       <Text style={styles.headerTitle}>{t('profile.unitSurvey.paymentModalTitle')}</Text>
@@ -285,7 +317,7 @@ const OrderPaymentScreen: React.FC = () => {
 
   const renderScreenShell = (children: React.ReactNode) => (
     <View style={styles.container}>
-      <View style={[styles.headerShell, { paddingTop: insets.top }]}>
+      <View style={[styles.headerShell, !embedded && { paddingTop: insets.top }]}>
         {renderHeader()}
       </View>
       {children}

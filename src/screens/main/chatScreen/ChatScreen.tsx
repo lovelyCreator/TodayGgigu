@@ -52,9 +52,31 @@ interface Message {
   }>;
 }
 
-const ChatScreen: React.FC = () => {
+type ChatScreenProps = {
+  embedded?: boolean;
+  embeddedParams?: {
+    inquiryId?: string;
+    orderId?: string;
+    orderNumber?: string;
+  };
+  onEmbeddedBack?: () => void;
+};
+
+const ChatScreen: React.FC<ChatScreenProps> = ({
+  embedded = false,
+  embeddedParams,
+  onEmbeddedBack,
+}) => {
   const route = useRoute<ChatRouteProp>();
   const navigation = useNavigation<ChatScreenNavigationProp>();
+
+  const handleBack = () => {
+    if (embedded && onEmbeddedBack) {
+      onEmbeddedBack();
+      return;
+    }
+    navigation.goBack();
+  };
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -91,8 +113,12 @@ const ChatScreen: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [showMoreModal, setShowMoreModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [inquiryId, setInquiryId] = useState<string | null>(route.params?.inquiryId || null);
-  const [orderNumber, setOrderNumber] = useState<string | null>(route.params?.orderNumber || null);
+  const [inquiryId, setInquiryId] = useState<string | null>(
+    (embedded ? embeddedParams?.inquiryId : route.params?.inquiryId) || null,
+  );
+  const [orderNumber, setOrderNumber] = useState<string | null>(
+    (embedded ? embeddedParams?.orderNumber : route.params?.orderNumber) || null,
+  );
   const [orderData, setOrderData] = useState<any>(null);
   const [showOrderDetail, setShowOrderDetail] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<Array<{ uri: string; type: string; name: string }>>([]);
@@ -714,7 +740,7 @@ const ChatScreen: React.FC = () => {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => navigation.goBack()}
+            onPress={handleBack}
             activeOpacity={0.85}
           >
             <Icon name="arrow-back" size={16} color={COLORS.black} />

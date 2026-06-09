@@ -38,6 +38,7 @@ import { openProductDetail } from '../../utils/openProductDetail';
 import { useResponsive } from '../../hooks/useResponsive';
 import HeadsetMicIcon from '../../assets/icons/HeadsetMicIcon';
 import MenuIcon from '../../assets/icons/MenuIcon';
+import CategoryTabScreen from './CategoryTabScreen';
 import TodayGgiguWordmarkIcon from '../../assets/icons/TodayGgiguWordmarkIcon';
 import { useWishlistStatus } from '../../hooks/useWishlistStatus';
 import { useAddToWishlistMutation } from '../../hooks/useAddToWishlistMutation';
@@ -225,6 +226,28 @@ const HomeScreen: React.FC = () => {
   const [popularMerchantThumb, setPopularMerchantThumb] = useState<string | null>(null);
   // 인기검색순위 모달 — 인사이트 카드의 '인기검색순위 Hot10' 단추에서 열림.
   const [showPopularRankingModal, setShowPopularRankingModal] = useState(false);
+  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  const [categoryModalTopOffset, setCategoryModalTopOffset] = useState(0);
+  const headerTopRowRef = useRef<View>(null);
+
+  const syncCategoryModalTopOffset = useCallback(() => {
+    headerTopRowRef.current?.measureInWindow((_x, y, _w, height) => {
+      if (y >= 0 && height > 0) {
+        setCategoryModalTopOffset(y + height);
+      }
+    });
+  }, []);
+
+  const openCategoryModal = useCallback(() => {
+    syncCategoryModalTopOffset();
+    setCategoryModalVisible(true);
+  }, [syncCategoryModalTopOffset]);
+
+  useEffect(() => {
+    if (!categoryModalVisible) return;
+    syncCategoryModalTopOffset();
+  }, [categoryModalVisible, responsive.width, responsive.height, syncCategoryModalTopOffset]);
+
   const { unreadCount: socketUnreadCount, onUnreadCountUpdated } = useSocket(); // Get total unread count from socket context
   const [unreadCount, setUnreadCount] = useState(0); // Local state for unread count (from REST API)
   const platforms = ['1688', 'taobao', 'myCompany'];
@@ -534,11 +557,24 @@ const HomeScreen: React.FC = () => {
     (navigation as any).navigate('Auth', { screen: 'Login', params: { fromProfile: true } });
   }, [navigation]);
 
-  const renderGuestInsightGrid = () => (
-    <View style={styles.guestInsightGrid}>
-      <View style={styles.guestInsightRow}>
+  const renderGuestInsightGrid = () => {
+    const insightCardStyle = (extra?: object) => [
+      styles.guestInsightCard,
+      responsive.isTabletLandscape && styles.guestInsightCardLandscape,
+      extra,
+    ];
+    const insightRowStyle = [
+      styles.guestInsightRow,
+      responsive.isTabletLandscape && styles.guestInsightRowLandscape,
+    ];
+    const thumbStyle = [
+      styles.bestProductsThumb,
+      responsive.isTabletLandscape && styles.bestProductsThumbLandscape,
+    ];
+
+    const popularCard = (
         <TouchableOpacity
-          style={styles.guestInsightCard}
+          style={insightCardStyle()}
           activeOpacity={0.88}
           onPress={() => setShowPopularRankingModal(true)}
         >
@@ -574,8 +610,11 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.popularCardUp}>{t('home.guestInsightPopularUp2')}</Text>
           </View>
         </TouchableOpacity>
+    );
+
+    const newStoresCard = (
         <TouchableOpacity
-          style={[styles.guestInsightCard, styles.bestProductsCard]}
+          style={insightCardStyle(styles.bestProductsCard)}
           activeOpacity={0.88}
           onPress={() => (navigation as any).navigate('NewStores')}
         >
@@ -598,17 +637,18 @@ const HomeScreen: React.FC = () => {
           {newStoreThumb ? (
             <Image
               source={{ uri: newStoreThumb }}
-              style={styles.bestProductsThumb}
+              style={thumbStyle}
               resizeMode="cover"
             />
           ) : (
-            <View style={[styles.bestProductsThumb, styles.bestProductsThumbPlaceholder]} />
+            <View style={[thumbStyle, styles.bestProductsThumbPlaceholder]} />
           )}
         </TouchableOpacity>
-      </View>
-      <View style={styles.guestInsightRow}>
+    );
+
+    const merchantsCard = (
         <TouchableOpacity
-          style={[styles.guestInsightCard, styles.bestProductsCard]}
+          style={insightCardStyle(styles.bestProductsCard)}
           activeOpacity={0.88}
           onPress={() => (navigation as any).navigate('PopularMerchants')}
         >
@@ -631,15 +671,18 @@ const HomeScreen: React.FC = () => {
           {popularMerchantThumb ? (
             <Image
               source={{ uri: popularMerchantThumb }}
-              style={styles.bestProductsThumb}
+              style={thumbStyle}
               resizeMode="cover"
             />
           ) : (
-            <View style={[styles.bestProductsThumb, styles.bestProductsThumbPlaceholder]} />
+            <View style={[thumbStyle, styles.bestProductsThumbPlaceholder]} />
           )}
         </TouchableOpacity>
+    );
+
+    const bestProductsCard = (
         <TouchableOpacity
-          style={[styles.guestInsightCard, styles.bestProductsCard]}
+          style={insightCardStyle(styles.bestProductsCard)}
           activeOpacity={0.88}
           onPress={() => (navigation as any).navigate('BestProducts')}
         >
@@ -660,16 +703,41 @@ const HomeScreen: React.FC = () => {
           {bestProductThumb ? (
             <Image
               source={{ uri: bestProductThumb }}
-              style={styles.bestProductsThumb}
+              style={thumbStyle}
               resizeMode="cover"
             />
           ) : (
-            <View style={[styles.bestProductsThumb, styles.bestProductsThumbPlaceholder]} />
+            <View style={[thumbStyle, styles.bestProductsThumbPlaceholder]} />
           )}
         </TouchableOpacity>
+    );
+
+    if (responsive.isTabletLandscape) {
+      return (
+        <View style={styles.guestInsightGrid}>
+          <View style={insightRowStyle}>
+            {popularCard}
+            {newStoresCard}
+            {merchantsCard}
+            {bestProductsCard}
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.guestInsightGrid}>
+        <View style={insightRowStyle}>
+          {popularCard}
+          {newStoresCard}
+        </View>
+        <View style={insightRowStyle}>
+          {merchantsCard}
+          {bestProductsCard}
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   const renderGuestWelcomePanel = () => (
     <View style={styles.guestWelcomePanel}>
@@ -2045,10 +2113,14 @@ const HomeScreen: React.FC = () => {
             backgroundColor="transparent"
             translucent={Platform.OS === 'android'}
           />
-          <View style={styles.headerGuestTop}>
+          <View
+            ref={headerTopRowRef}
+            style={styles.headerGuestTop}
+            onLayout={syncCategoryModalTopOffset}
+          >
             <TouchableOpacity
               style={styles.headerGuestMenuBtn}
-              onPress={() => navigation.navigate('Category' as never)}
+              onPress={openCategoryModal}
               activeOpacity={0.85}
             >
               <MenuIcon width={26} height={26} color={COLORS.black} />
@@ -2234,6 +2306,37 @@ const HomeScreen: React.FC = () => {
       {/* 인기검색순위 모달 — 인사이트 카드의 '인기검색순위 Hot10' 단추에서 열림.
           2-열 × 5-행 (총 10개 행) 그리드: 각 행은 [인기 10 | 랜크 번호 | 아이템명 | 상승 N]. */}
       <Modal
+        visible={categoryModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCategoryModalVisible(false)}
+      >
+        <View style={styles.categoryModalRoot}>
+          <View
+            style={[styles.categoryModalHeaderSpacer, { height: categoryModalTopOffset }]}
+            pointerEvents="none"
+          />
+          <View style={styles.categoryModalBody}>
+            <TouchableOpacity
+              style={styles.categoryModalBackdrop}
+              activeOpacity={1}
+              onPress={() => setCategoryModalVisible(false)}
+            />
+            <View
+              style={styles.categoryModalPanel}
+              onStartShouldSetResponder={() => true}
+            >
+              <CategoryTabScreen
+                hideHeader
+                asHomeModal
+                onModalClose={() => setCategoryModalVisible(false)}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={showPopularRankingModal}
         transparent
         animationType="fade"
@@ -2361,6 +2464,26 @@ const styles = StyleSheet.create({
     color: COLORS.red,
     fontWeight: '700',
     marginLeft: SPACING.xs,
+  },
+  // ─── 홈 카테고리 모달 (헤더 바로 아래) ───────────────────────────
+  categoryModalRoot: {
+    flex: 1,
+  },
+  categoryModalHeaderSpacer: {
+    backgroundColor: 'transparent',
+  },
+  categoryModalBody: {
+    flex: 1,
+    position: 'relative',
+  },
+  categoryModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  categoryModalPanel: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.white,
+    overflow: 'hidden',
   },
   // ─── 인기검색순위 모달 ──────────────────────────────────────────
   popularModalBackdrop: {
@@ -2636,6 +2759,9 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
     marginBottom: SPACING.sm,
   },
+  guestInsightRowLandscape: {
+    marginBottom: 0,
+  },
   guestInsightCard: {
     flex: 1,
     backgroundColor: COLORS.white,
@@ -2658,6 +2784,10 @@ const styles = StyleSheet.create({
         shadowRadius: 3,
       },
     }),
+  },
+  guestInsightCardLandscape: {
+    flex: 1,
+    minWidth: 0,
   },
   guestInsightTitle: {
     fontSize: FONTS.sizes.sm,
@@ -2742,6 +2872,10 @@ const styles = StyleSheet.create({
   bestProductsThumbPlaceholder: {
     borderWidth: 1,
     borderColor: FIGMA_OVERLAY_05,
+  },
+  bestProductsThumbLandscape: {
+    width: 44,
+    height: 44,
   },
   /** Figma Group 76728 — full-width inside 16px gutter, min height 472 */
   guestWelcomePanel: {

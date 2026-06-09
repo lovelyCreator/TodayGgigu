@@ -1,4 +1,13 @@
-import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react';
+import React, {
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useCallback,
+  useMemo,
+  lazy,
+  Suspense,
+} from 'react';
 import {
   View,
   Text,
@@ -38,6 +47,7 @@ import { useAddToWishlistMutation } from '../../../hooks/useAddToWishlistMutatio
 import { useDeleteFromWishlistMutation } from '../../../hooks/useDeleteFromWishlistMutation';
 import { usePlatformStore } from '../../../store/platformStore';
 import { useToast } from '../../../context/ToastContext';
+import { useResponsive } from '../../../hooks/useResponsive';
 import { formatPriceKRW, formatDepositBalance } from '../../../utils/i18nHelpers';
 import { useGetOrdersMutation } from '../../../hooks/useGetOrdersMutation';
 import { mapLocaleToOrdersLang } from '../../../services/orderApi';
@@ -72,6 +82,25 @@ import AddressIcon from '../../../assets/icons/AddressIcon';
 import SellerShopIcon from '../../../assets/icons/SellerShopIcon';
 import CustomerSupportIcon from '../../../assets/icons/CustomerSupportIcon';
 import AffiliateMarketingIcon from '../../../assets/icons/AffiliateMarketingIcon';
+import {
+  ProfileTabletSidebar,
+  type ProfileSidebarActiveKey,
+} from './ProfileTabletSidebar';
+import {
+  ProfileTabletEmbedProvider,
+  type ProfileTabletEmbedContextValue,
+} from './ProfileTabletEmbedContext';
+import {
+  mapNavigationTargetToDashboardRoute,
+  sidebarKeyToDashboardRoute,
+  type ProfileDashboardRoute,
+} from './profileTabletDashboardRoute';
+
+const LazyProfileTabletDashboardPanel = lazy(() =>
+  import('./ProfileTabletDashboardPanel').then((m) => ({
+    default: m.ProfileTabletDashboardPanel,
+  })),
+);
 
 
 
@@ -79,13 +108,16 @@ type ProfileScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Main
 
 const ProfileScreen: React.FC = () => {
   const { width: windowWidth } = useWindowDimensions();
+  const responsive = useResponsive();
   const moreToLoveGrid = useMemo(
-    () => getProfileMoreToLoveGridLayout(windowWidth),
-    [windowWidth],
+    () => getProfileMoreToLoveGridLayout(windowWidth, responsive.cols),
+    [windowWidth, responsive.cols],
   );
 
   const navigation = useNavigation<ProfileScreenNavigationProp>();
   const { user, isAuthenticated, isGuest } = useAuth();
+  const useTabletLandscapeLayout =
+    responsive.isTabletLandscape && isAuthenticated;
   const currentLocale = useAppSelector((state) => state.i18n.locale) as string;
   const normalizedLocale: 'en' | 'ko' | 'zh' =
     currentLocale === 'kr'
@@ -140,6 +172,80 @@ const ProfileScreen: React.FC = () => {
   const [activeOrderTab, setActiveOrderTab] = useState<
     'purchase_agency' | 'rocket_3pl' | 'vvic_hipass' | 'shipping_agency'
   >('purchase_agency');
+
+  const [sidebarActiveKey, setSidebarActiveKey] =
+    useState<ProfileSidebarActiveKey>('main');
+  const [embeddedPanelInitialTab, setEmbeddedPanelInitialTab] =
+    useState<string>('all');
+  const [dashboardStack, setDashboardStack] = useState<ProfileDashboardRoute[]>(
+    [],
+  );
+
+  type OrderDashboardDomain =
+    | 'purchase_agency'
+    | 'rocket_3pl'
+    | 'vvic_hipass'
+    | 'shipping_agency';
+
+  const resolveOrderListInitialTab = (
+    domain: OrderDashboardDomain,
+    cell: { initialTab?: string; accent?: boolean },
+  ): string => {
+    if (cell.accent) return 'all';
+    if (domain === 'purchase_agency' && cell.initialTab) return cell.initialTab;
+    if (domain === 'purchase_agency') return 'purchase_agency';
+    return 'all';
+  };
+
+  const openOrderInEmbeddedPanel = (
+    domain: OrderDashboardDomain,
+    cell: { initialTab?: string; accent?: boolean },
+  ) => {
+    setDashboardStack([]);
+    setSidebarActiveKey(domain);
+    setEmbeddedPanelInitialTab(resolveOrderListInitialTab(domain, cell));
+  };
+
+  const handleSidebarActiveKeyChange = (key: ProfileSidebarActiveKey) => {
+    setSidebarActiveKey(key);
+    setEmbeddedPanelInitialTab('all');
+    setDashboardStack([]);
+  };
+
+  const activeDashboardRoute = useMemo((): ProfileDashboardRoute | null => {
+    if (dashboardStack.length > 0) {
+      return dashboardStack[dashboardStack.length - 1];
+    }
+    return sidebarKeyToDashboardRoute(
+      sidebarActiveKey,
+      embeddedPanelInitialTab,
+    );
+  }, [dashboardStack, sidebarActiveKey, embeddedPanelInitialTab]);
+
+  const tabletEmbedContextValue = useMemo<ProfileTabletEmbedContextValue>(
+    () => ({
+      isEmbedActive: useTabletLandscapeLayout,
+      pushRoute: (route) => setDashboardStack((stack) => [...stack, route]),
+      popRoute: () =>
+        setDashboardStack((stack) => (stack.length > 0 ? stack.slice(0, -1) : stack)),
+      replaceRoute: (route) =>
+        setDashboardStack((stack) =>
+          stack.length > 0 ? [...stack.slice(0, -1), route] : [route],
+        ),
+      openSidebarPanel: (key, initialTab = 'all') => {
+        setDashboardStack([]);
+        setSidebarActiveKey(key);
+        setEmbeddedPanelInitialTab(initialTab);
+      },
+      navigateEmbedded: (target, params) => {
+        const route = mapNavigationTargetToDashboardRoute(target, params);
+        if (!route) return false;
+        setDashboardStack((stack) => [...stack, route]);
+        return true;
+      },
+    }),
+    [useTabletLandscapeLayout],
+  );
 
   const [wishlistCount, setWishlistCount] = useState(0);
   const [wishlistFirstImage, setWishlistFirstImage] = useState<string>('');
@@ -632,14 +738,16 @@ const ProfileScreen: React.FC = () => {
           </View>
         ) : ( */}
         <View style={{flexDirection: 'row', alignItems: 'center'}}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Icon name="arrow-back" size={20} color={COLORS.text.primary} />
-          </TouchableOpacity>
+          {!useTabletLandscapeLayout && (
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Icon name="arrow-back" size={20} color={COLORS.text.primary} />
+            </TouchableOpacity>
+          )}
           <Text style={styles.headerTitle}>{t('profile.title')}</Text>
-          </View>
+        </View>
         {/* )} */}
         <View style={styles.headerIcons}>
           <TouchableOpacity
@@ -661,8 +769,8 @@ const ProfileScreen: React.FC = () => {
               });
             }}
           />
-          {isAuthenticated && (
-            <TouchableOpacity 
+          {isAuthenticated && !useTabletLandscapeLayout && (
+            <TouchableOpacity
               style={styles.headerIcon}
               onPress={() => navigation.navigate('ProfileSettings')}
             >
@@ -726,7 +834,13 @@ const ProfileScreen: React.FC = () => {
     const addressString = defaultAddress
       ? `${defaultAddress.street}, ${defaultAddress.city}, ${defaultAddress.state}, ${defaultAddress.zipCode}, ${defaultAddress.country}`
       : '';
-    return (<View style={styles.statsSection}>       
+    return (
+      <View
+        style={[
+          styles.statsSection,
+          responsive.isTabletLandscape && styles.statsSectionTabletLandscape,
+        ]}
+      >
         {/* <View style={styles.headerLabel}>
           <Text style={styles.headerLabelText}>{t('profile.tmVip')}</Text>
         </View>
@@ -838,7 +952,7 @@ const ProfileScreen: React.FC = () => {
           // 셀을 누를 때 domain 파라미터로 어떤 도메인을 활성화할지 전달한다.
           // BuyListScreen 의 useEffect 가 route.params.domain 변화를 감지해
           // activeBusinessDomain 을 동기화한다.
-          const tabDomain: Record<typeof activeOrderTab, string> = {
+          const tabDomain: Record<typeof activeOrderTab, OrderDashboardDomain> = {
             purchase_agency: 'purchase_agency',
             rocket_3pl: 'rocket_3pl',
             vvic_hipass: 'vvic_hipass',
@@ -903,7 +1017,12 @@ const ProfileScreen: React.FC = () => {
           }
 
           return (
-            <View style={styles.myOrder}>
+            <View
+              style={[
+                styles.myOrder,
+                responsive.isTabletLandscape && styles.myOrderTabletLandscape,
+              ]}
+            >
               {/* 탭 스트립 — 활성 탭은 붉은색 */}
               <View style={styles.myOrderTabRow}>
                 {tabs.map((tab, idx) => {
@@ -964,18 +1083,14 @@ const ProfileScreen: React.FC = () => {
                           style={styles.myOrderCell}
                           onPress={() => {
                             const domain = tabDomain[activeOrderTab];
-                            // 구매대행 탭 셀:
-                            //  • 견적대기 → initialTab 'category' (구매견적 P_QUOTE)
-                            //  • 고객결제 → initialTab 'unpaid' (결제대기 BUY_PAY_WAIT)
-                            //  • 전체주문 → initialTab 'all'
-                            // 비-구매대행 탭: 본문이 도메인별 placeholder 이므로 'all'.
-                            const initialTab = cell.accent
-                              ? 'all'
-                              : domain === 'purchase_agency' && cell.initialTab
-                                ? cell.initialTab
-                                : domain === 'purchase_agency'
-                                  ? 'purchase_agency'
-                                  : 'all';
+                            if (useTabletLandscapeLayout) {
+                              openOrderInEmbeddedPanel(domain, cell);
+                              return;
+                            }
+                            const initialTab = resolveOrderListInitialTab(
+                              domain,
+                              cell,
+                            );
                             (navigation as any).navigate('BuyList', {
                               domain,
                               initialTab,
@@ -1322,6 +1437,18 @@ const ProfileScreen: React.FC = () => {
     );
   };
 
+  const showEmbeddedDashboardPanel =
+    useTabletLandscapeLayout && activeDashboardRoute != null;
+
+  const renderProfileScrollBody = () => (
+    <>
+      {isAuthenticated && renderStatsSection()}
+      {isAuthenticated && renderMenuItems()}
+      {!useTabletLandscapeLayout && isAuthenticated && renderQuickAccessSection()}
+      {!useTabletLandscapeLayout && renderMoreToLove()}
+    </>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Top half linear gradient background */}
@@ -1329,35 +1456,76 @@ const ProfileScreen: React.FC = () => {
         colors={['#FFE1D4', '#FAFAFA']}
         style={styles.gradientBackground}
       />
-      
+
       {renderHeader()}
-      <ScrollView
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        onScroll={(event) => {
-          const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-          const distanceFromBottom =
-            contentSize.height - contentOffset.y - layoutMeasurement.height;
-          if (distanceFromBottom < 200) {
-            loadMoreRecommendations();
+      {useTabletLandscapeLayout ? (
+        <ProfileTabletEmbedProvider value={tabletEmbedContextValue}>
+          <View style={styles.tabletLandscapeBody}>
+            <ProfileTabletSidebar
+              activeKey={sidebarActiveKey}
+              onActiveKeyChange={handleSidebarActiveKeyChange}
+              t={t}
+            />
+            {showEmbeddedDashboardPanel && activeDashboardRoute ? (
+              <View style={styles.tabletLandscapeMain}>
+                <Suspense
+                  fallback={
+                    <View style={styles.tabletDashboardFallback}>
+                      <ActivityIndicator size="large" color={COLORS.red} />
+                    </View>
+                  }
+                >
+                  <LazyProfileTabletDashboardPanel
+                    key={JSON.stringify(activeDashboardRoute)}
+                    route={activeDashboardRoute}
+                    onEmbeddedBack={tabletEmbedContextValue.popRoute}
+                  />
+                </Suspense>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.tabletLandscapeMain}
+                contentContainerStyle={styles.tabletLandscapeMainContent}
+                showsVerticalScrollIndicator={false}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={profileRefreshing}
+                    onRefresh={onProfileRefresh}
+                    colors={[COLORS.red]}
+                    tintColor={COLORS.red}
+                  />
+                }
+              >
+                {renderProfileScrollBody()}
+              </ScrollView>
+            )}
+          </View>
+        </ProfileTabletEmbedProvider>
+      ) : (
+        <ScrollView
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={false}
+          onScroll={(event) => {
+            const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+            const distanceFromBottom =
+              contentSize.height - contentOffset.y - layoutMeasurement.height;
+            if (distanceFromBottom < 200) {
+              loadMoreRecommendations();
+            }
+          }}
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={profileRefreshing}
+              onRefresh={onProfileRefresh}
+              colors={[COLORS.red]}
+              tintColor={COLORS.red}
+            />
           }
-        }}
-        scrollEventThrottle={16}
-        refreshControl={
-          <RefreshControl
-            refreshing={profileRefreshing}
-            onRefresh={onProfileRefresh}
-            colors={[COLORS.red]}
-            tintColor={COLORS.red}
-          />
-        }
-      >
-        {/* {renderUserSection()} */}
-        {isAuthenticated && renderStatsSection()}
-        {isAuthenticated && renderMenuItems()}
-        {isAuthenticated && renderQuickAccessSection()}
-        {renderMoreToLove()}
-      </ScrollView>
+        >
+          {renderProfileScrollBody()}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
@@ -1485,6 +1653,25 @@ const styles = StyleSheet.create({
     minHeight: '100%',
     marginBottom: 100,
   },
+  tabletLandscapeBody: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: COLORS.background,
+  },
+  tabletLandscapeMain: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  tabletDashboardFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.background,
+  },
+  tabletLandscapeMainContent: {
+    padding: SPACING.md,
+    paddingBottom: SPACING.xl,
+  },
   userSection: {
     paddingHorizontal: SPACING.lg,
     // paddingTop: SPACING.lg,
@@ -1601,6 +1788,9 @@ const styles = StyleSheet.create({
     padding: SPACING.sm,
     borderRadius: SPACING.md,
   },
+  statsSectionTabletLandscape: {
+    marginHorizontal: 0,
+  },
   statsCard: {
     backgroundColor: COLORS.text.red,
     padding: SPACING.sm,
@@ -1669,6 +1859,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     marginBottom: SPACING.sm,
+  },
+  myOrderTabletLandscape: {
+    marginHorizontal: 0,
   },
   // 내주문 카드 상단 탭 스트립 — 구매대행 > 로켓/3PL > VVIC하이패스 >
   myOrderTabRow: {

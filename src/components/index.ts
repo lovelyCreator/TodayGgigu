@@ -32,5 +32,6 @@ export { default as PermissionModal } from './PermissionModal';
 export { default as PhotoCaptureModal } from './PhotoCaptureModal';
 export { default as CachedImage } from './CachedImage';
 export { default as VariationSelectionModal } from './VariationSelectionModal';
+export { default as TabletContent } from './TabletContent';
 export { default as SortDropdown } from './SortDropdown';
 export { default as PriceFilterModal } from './PriceFilterModal';

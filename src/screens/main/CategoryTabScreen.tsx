@@ -62,6 +62,9 @@ const SECTION_HEADER_HEIGHT = 40;
 
 type CategoryTabScreenProps = {
   hideHeader?: boolean;
+  embedded?: boolean;
+  /** Home header category button — 1688/Taobao tabs only (no All). */
+  asHomeModal?: boolean;
   onModalClose?: () => void;
 };
 
@@ -78,12 +81,18 @@ function getLeftListViewPosition(index: number, length: number): number {
   return 0.5;
 }
 
-const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = false, onModalClose }) => {
+const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({
+  hideHeader = false,
+  embedded = false,
+  asHomeModal = false,
+  onModalClose,
+}) => {
   const navigation = useNavigation<CategoryTabScreenNavigationProp>();
   const route = useRoute<RouteProp<RootStackParamList, 'Category'>>();
   const { width: winWidth, height: winHeight } = useWindowDimensions();
   const isTabletLandscape = Math.min(winWidth, winHeight) >= 600 && winWidth > winHeight;
-  const isEmbeddedLandscapeHeader = hideHeader && isTabletLandscape;
+  const isEmbeddedLandscapeHeader =
+    hideHeader && isTabletLandscape && !embedded && !asHomeModal;
   // Responsive layout helper. We only enable the L3 panel for the
   // tablet-landscape bucket — phones and tablet-portrait keep the
   // original 2-column layout exactly as before.
@@ -160,7 +169,14 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
 
   const [refreshing, setRefreshing] = useState(false);
   const [imagePickerModalVisible, setImagePickerModalVisible] = useState(false);
-  const [selectedCompany, setSelectedCompany] = useState<string>('All');
+  const [selectedCompany, setSelectedCompany] = useState<string>(
+    asHomeModal ? '1688' : 'All',
+  );
+  useEffect(() => {
+    if (asHomeModal) {
+      setSelectedPlatform('1688');
+    }
+  }, [asHomeModal, setSelectedPlatform]);
   const [topCategories, setTopCategories] = useState<any[]>([]);
   // L2 categories grouped by parent L1 id; the right column reads from this
   // to render every L1's L2 list as one continuous SectionList.
@@ -476,6 +492,9 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
 
   const openProductDiscoveryForL2 = useCallback(
     (l2Item: any, initialL3Id?: string) => {
+      if (asHomeModal) {
+        onModalClose?.();
+      }
       const platform = getPlatformFromCompany(selectedCompany);
       const localizedSubSubs = (l2Item.subsubcategories || []).map((subSubCat: any) => {
         if (subSubCat.name && typeof subSubCat.name === 'object') {
@@ -500,7 +519,7 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
         ...(initialL3Id ? { initialSubSubCategoryId: initialL3Id } : {}),
       });
     },
-    [selectedCompany, locale, navigation],
+    [asHomeModal, onModalClose, selectedCompany, locale, navigation],
   );
 
   const onRefresh = async () => {
@@ -1133,9 +1152,9 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
     </View>
   );
 
-  return (
-    <SafeAreaView style={styles.container}>
-      {!hideHeader && renderHeader()}
+  const categoryContent = (
+    <>
+      {!embedded && !hideHeader && renderHeader()}
       {isEmbeddedLandscapeHeader && (
         <View style={styles.embeddedModalHeaderWrap}>
           <View style={styles.embeddedModalHeader}>
@@ -1151,6 +1170,20 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
           {renderCompanyTabs({ hideAllTab: true, compactSpacing: true })}
         </View>
       )}
+      {asHomeModal && (
+        <View style={styles.homeCategoryModalHeaderWrap}>
+          <TouchableOpacity
+            hitSlop={BACK_NAVIGATION_HIT_SLOP}
+            onPress={onModalClose}
+            style={styles.homeCategoryModalCloseBtn}
+            activeOpacity={0.8}
+          >
+            <Icon name="close" size={22} color={COLORS.text.primary} />
+          </TouchableOpacity>
+          {renderCompanyTabs({ hideAllTab: true, compactSpacing: true })}
+        </View>
+      )}
+      {embedded && renderCompanyTabs({ compactSpacing: true })}
       {renderCategoryBody()}
 
       <ImagePickerModal
@@ -1159,11 +1192,25 @@ const CategoryTabScreen: React.FC<CategoryTabScreenProps> = ({ hideHeader = fals
         onTakePhoto={handleTakePhoto}
         onChooseFromGallery={handleChooseFromGallery}
       />
-    </SafeAreaView>
+    </>
   );
+
+  if (embedded) {
+    return <View style={[styles.container, styles.profileEmbeddedContainer]}>{categoryContent}</View>;
+  }
+
+  if (asHomeModal) {
+    return <View style={[styles.container, styles.homeModalContainer]}>{categoryContent}</View>;
+  }
+
+  return <SafeAreaView style={styles.container}>{categoryContent}</SafeAreaView>;
 };
 
 const styles = StyleSheet.create({
+  profileEmbeddedContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.white,
@@ -1469,6 +1516,29 @@ const styles = StyleSheet.create({
   companyTabsContainerCompact: {
     // 10% of default spacing for tighter title-to-tabs gap in modal header.
     paddingVertical: Math.max(1, Math.round(SPACING.md * 0.1)),
+  },
+  homeModalContainer: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  homeCategoryModalHeaderWrap: {
+    position: 'relative',
+    backgroundColor: COLORS.white,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.gray[200],
+    paddingRight: SPACING.xl + SPACING.sm,
+  },
+  homeCategoryModalCloseBtn: {
+    position: 'absolute',
+    top: SPACING.xs,
+    right: SPACING.sm,
+    zIndex: 2,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.gray[100],
   },
   embeddedModalHeaderWrap: {
     backgroundColor: COLORS.white,

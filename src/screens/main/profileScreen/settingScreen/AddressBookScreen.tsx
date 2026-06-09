@@ -36,7 +36,15 @@ import { useTranslation } from '../../../../hooks/useTranslation';
 type AddressBookScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AddressBook'>;
 type AddressBookScreenRouteProp = RouteProp<RootStackParamList, 'AddressBook'>;
 
-const AddressBookScreen: React.FC = () => {
+type AddressBookScreenProps = {
+  embedded?: boolean;
+  fromShippingSettings?: boolean;
+};
+
+const AddressBookScreen: React.FC<AddressBookScreenProps> = ({
+  embedded = false,
+  fromShippingSettings: fromShippingSettingsProp,
+}) => {
   const navigation = useNavigation<AddressBookScreenNavigationProp>();
   const route = useRoute<AddressBookScreenRouteProp>();
   const { user, updateUser } = useAuth();
@@ -68,8 +76,8 @@ const AddressBookScreen: React.FC = () => {
     showToast(formatted, 'error', 6000);
   };
 
-  // Check if we came from shipping settings
-  const fromShippingSettings = route.params?.fromShippingSettings || false;
+  const fromShippingSettings =
+    fromShippingSettingsProp ?? route.params?.fromShippingSettings ?? false;
   
   // Get addresses from saved user data
   const addresses = user?.addresses || [];
@@ -351,14 +359,18 @@ const AddressBookScreen: React.FC = () => {
   };
 
   const renderHeader = () => (
-    <View style={styles.header}>
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => navigation.goBack()}
-      >
-        <Icon name="arrow-back" size={20} color={COLORS.text.primary} />
-      </TouchableOpacity>
-      <Text style={styles.headerTitle}>{t('profile.receivingAddress')}</Text>
+    <View style={[styles.header, embedded && styles.embeddedHeader]}>
+      {!embedded && (
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Icon name="arrow-back" size={20} color={COLORS.text.primary} />
+        </TouchableOpacity>
+      )}
+      <Text style={[styles.headerTitle, embedded && styles.embeddedHeaderTitle]}>
+        {t('profile.receivingAddress')}
+      </Text>
       <View style={styles.headerRight}>
         <TouchableOpacity style={styles.headerIconButton}>
           {/* <Icon name="search" size={24} color={COLORS.text.primary} /> */}
@@ -695,11 +707,15 @@ const AddressBookScreen: React.FC = () => {
     </Modal>
   );
 
-  return (
-    <SafeAreaView style={styles.container}>
+  const content = (
+    <>
       {renderHeader()}
-      
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+
+      <ScrollView
+        style={[styles.scrollView, embedded && styles.embeddedScrollView]}
+        contentContainerStyle={embedded ? styles.embeddedScrollContent : undefined}
+        showsVerticalScrollIndicator={false}
+      >
         <FlatList
           data={addresses}
           renderItem={renderAddressItem}
@@ -796,14 +812,40 @@ const AddressBookScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </>
   );
+
+  if (embedded) {
+    return <View style={styles.embeddedContainer}>{content}</View>;
+  }
+
+  return <SafeAreaView style={styles.container}>{content}</SafeAreaView>;
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  embeddedContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  embeddedHeader: {
+    paddingTop: SPACING.sm,
+    borderBottomWidth: 0,
+  },
+  embeddedHeaderTitle: {
+    flex: 1,
+    textAlign: 'left',
+    marginLeft: 0,
+  },
+  embeddedScrollView: {
+    flex: 1,
+  },
+  embeddedScrollContent: {
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.xl,
   },
   header: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,17 @@ import { productsApi } from '../../../../../services/productsApi';
 import { useAddToCartMutation } from '../../../../../hooks/useAddToCartMutation';
 import { useToast } from '../../../../../context/ToastContext';
 import ImageSearchResultsModal from '../../../searchScreen/ImageSearchResultsModal';
+import { TabletContent } from '../../../../../components/TabletContent';
+import { useResponsive } from '../../../../../hooks/useResponsive';
+import {
+  getEmbeddedDashboardPanelWidth,
+  getGridItemWidth,
+  getListPageContentWidth,
+  getListPagePadding,
+} from '../../../../../utils/responsiveLayout';
+
+/** 상품리스트 그리드 — 한 행에 표시할 카드 수. */
+const PRODUCT_MGMT_GRID_COLS = 3;
 
 type Nav = StackNavigationProp<RootStackParamList, 'ProductManagement'>;
 
@@ -116,7 +127,13 @@ const isBetween = (d: Date, start: Date, end: Date): boolean => {
   return t > stripTime(start).getTime() && t < stripTime(end).getTime();
 };
 
-const ProductManagementScreen: React.FC = () => {
+type ProductManagementScreenProps = {
+  embedded?: boolean;
+};
+
+const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
+  embedded = false,
+}) => {
   const navigation = useNavigation<Nav>();
   const { t, locale } = useTranslation();
 
@@ -137,6 +154,41 @@ const ProductManagementScreen: React.FC = () => {
   // setViewMode 는 의도적으로 미사용이며 void 처리로 미사용 힌트만 끈다.
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   void setViewMode;
+
+  const responsive = useResponsive();
+  const listPagePadding = getListPagePadding(responsive);
+  const listContentPaddingH = responsive.isTabletLandscape
+    ? 0
+    : responsive.isTablet
+      ? responsive.gutter
+      : SPACING.md;
+  const listContentPaddingV = responsive.isTablet ? responsive.gutter : SPACING.md;
+  const gridGap = SPACING.sm;
+  const [listContainerWidth, setListContainerWidth] = useState(0);
+
+  const gridContentWidth = useMemo(() => {
+    if (listContainerWidth > 0) {
+      return Math.max(0, listContainerWidth - listContentPaddingH * 2);
+    }
+    let pageW = getListPageContentWidth(responsive);
+    if (embedded && responsive.isTabletLandscape) {
+      pageW = getEmbeddedDashboardPanelWidth(responsive.width, listPagePadding);
+    }
+    return Math.max(0, pageW - listContentPaddingH * 2);
+  }, [
+    listContainerWidth,
+    responsive,
+    embedded,
+    listPagePadding,
+    listContentPaddingH,
+  ]);
+
+  const gridCols = viewMode === 'grid' ? PRODUCT_MGMT_GRID_COLS : 1;
+
+  const gridCardWidth = useMemo(
+    () => getGridItemWidth(gridContentWidth, gridCols, gridGap),
+    [gridContentWidth, gridCols, gridGap],
+  );
 
   type PickerKey = 'productType' | 'category' | 'labelType' | 'extra1' | 'extra2';
 
@@ -461,7 +513,14 @@ const ProductManagementScreen: React.FC = () => {
     p.thumbnails?.find((th) => th.isThumbnail)?.url || p.thumbnails?.[0]?.url || null;
 
   const renderHeader = () => (
-    <View style={styles.header}>
+    <View
+      style={[
+        styles.header,
+        responsive.isTabletLandscape && {
+          paddingHorizontal: listPagePadding,
+        },
+      ]}
+    >
       <TouchableOpacity
         hitSlop={BACK_HIT_SLOP}
         style={styles.backButton}
@@ -968,6 +1027,7 @@ const ProductManagementScreen: React.FC = () => {
         style={[
           styles.productCard,
           viewMode === 'grid' && styles.productCardGrid,
+          viewMode === 'grid' && { width: gridCardWidth },
           checked && styles.productCardSelected,
         ]}
         activeOpacity={0.8}
@@ -1031,7 +1091,12 @@ const ProductManagementScreen: React.FC = () => {
             <Icon name="create-outline" size={16} color={COLORS.text.primary} />
           </TouchableOpacity>
         </View>
-        <View style={styles.productInfo}>
+        <View
+          style={[
+            styles.productInfo,
+            viewMode === 'grid' && styles.productInfoGrid,
+          ]}
+        >
           <Text style={styles.productName} numberOfLines={2}>
             {item.productName}
           </Text>
@@ -1076,25 +1141,39 @@ const ProductManagementScreen: React.FC = () => {
       );
     }
     return (
-      <FlatList
-        key={viewMode}
-        data={visibleProducts}
-        keyExtractor={(item) => item.groupKey}
-        renderItem={renderProductItem}
-        numColumns={viewMode === 'grid' ? 2 : 1}
-        columnWrapperStyle={viewMode === 'grid' ? styles.gridRow : undefined}
-        contentContainerStyle={styles.listContent}
-        scrollEnabled={false}
-        ListFooterComponent={
-          <View style={styles.loadingDoneRow}>
-            <View style={styles.loadingDoneLine} />
-            <Text style={styles.loadingDoneText}>
-              {t('profile.productMgmt.loadingDone')}
-            </Text>
-            <View style={styles.loadingDoneLine} />
-          </View>
-        }
-      />
+      <View
+        style={styles.listMeasureWrap}
+        onLayout={(e) => setListContainerWidth(e.nativeEvent.layout.width)}
+      >
+        <FlatList
+          key={`${viewMode}-${gridCols}`}
+          data={visibleProducts}
+          keyExtractor={(item, index) => `${item.groupKey}::${index}`}
+          renderItem={renderProductItem}
+          numColumns={gridCols}
+          columnWrapperStyle={
+            gridCols > 1 ? [styles.gridRow, { gap: gridGap }] : undefined
+          }
+          contentContainerStyle={[
+            styles.listContent,
+            {
+              paddingHorizontal: listContentPaddingH,
+              paddingTop: listContentPaddingV,
+              paddingBottom: listContentPaddingV,
+            },
+          ]}
+          scrollEnabled={false}
+          ListFooterComponent={
+            <View style={styles.loadingDoneRow}>
+              <View style={styles.loadingDoneLine} />
+              <Text style={styles.loadingDoneText}>
+                {t('profile.productMgmt.loadingDone')}
+              </Text>
+              <View style={styles.loadingDoneLine} />
+            </View>
+          }
+        />
+      </View>
     );
   };
 
@@ -1687,11 +1766,21 @@ const ProductManagementScreen: React.FC = () => {
   };
 
   return (
-    <View style={styles.root}>
-      <SafeAreaView style={styles.safeTop} edges={['top']}>
-        {renderHeader()}
-      </SafeAreaView>
-      <View style={styles.body}>
+    <View style={[styles.root, embedded && styles.embeddedRoot]}>
+      {!embedded && (
+        <SafeAreaView style={styles.safeTop} edges={['top']}>
+          {renderHeader()}
+        </SafeAreaView>
+      )}
+      <TabletContent
+        style={styles.body}
+        fullWidth={responsive.isTabletLandscape}
+        contentStyle={
+          responsive.isTabletLandscape
+            ? { paddingHorizontal: listPagePadding }
+            : undefined
+        }
+      >
         <ScrollView showsVerticalScrollIndicator={false}>
           {renderFilters()}
           {renderToolbar()}
@@ -1767,7 +1856,7 @@ const ProductManagementScreen: React.FC = () => {
             imageBase64={imageSearchBase64}
           />
         )}
-      </View>
+      </TabletContent>
     </View>
   );
 };
@@ -1775,6 +1864,9 @@ const ProductManagementScreen: React.FC = () => {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  embeddedRoot: {
     backgroundColor: COLORS.background,
   },
   safeTop: {
@@ -2078,11 +2170,14 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.red,
   },
   // Body
+  listMeasureWrap: {
+    width: '100%',
+  },
   listContent: {
     padding: SPACING.md,
   },
   gridRow: {
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
   },
   productCard: {
     flexDirection: 'row',
@@ -2095,7 +2190,6 @@ const styles = StyleSheet.create({
   },
   productCardGrid: {
     flexDirection: 'column',
-    width: '48.5%',
   },
   cardCheckbox: {
     position: 'absolute',
@@ -2146,6 +2240,11 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: SPACING.sm,
     justifyContent: 'center',
+  },
+  productInfoGrid: {
+    marginLeft: 0,
+    marginTop: SPACING.xs,
+    width: '100%',
   },
   productName: {
     fontSize: FONTS.sizes.sm,

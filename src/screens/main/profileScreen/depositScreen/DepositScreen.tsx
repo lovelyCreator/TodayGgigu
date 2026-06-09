@@ -34,7 +34,11 @@ interface Transaction {
 
 const PRESET_CHARGE_AMOUNTS = [10000, 50000, 100000, 500000, 1000000] as const;
 
-const DepositScreen = () => {
+type DepositScreenProps = {
+  embedded?: boolean;
+};
+
+const DepositScreen: React.FC<DepositScreenProps> = ({ embedded = false }) => {
   const navigation = useNavigation();
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
@@ -303,19 +307,27 @@ const DepositScreen = () => {
   };
 
   return (
-    <View style={styles.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
-      <SafeAreaView style={styles.safeTop} edges={['top']}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Icon name="arrow-back" size={16} color={COLORS.black} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{t('deposit.title')}</Text>
-          <View style={styles.headerSide} />
-        </View>
-      </SafeAreaView>
+    <View style={[styles.root, embedded && styles.embeddedRoot]}>
+      {!embedded && (
+        <>
+          <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+          <SafeAreaView style={styles.safeTop} edges={['top']}>
+            <View style={styles.header}>
+              <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+                <Icon name="arrow-back" size={16} color={COLORS.black} />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>{t('deposit.title')}</Text>
+              <View style={styles.headerSide} />
+            </View>
+          </SafeAreaView>
+        </>
+      )}
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={[styles.scrollView, embedded && styles.embeddedScrollView]}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={embedded ? styles.embeddedScrollContent : undefined}
+      >
         {/* Balance Card */}
         <View style={styles.balanceCard}>
           <View style={styles.mainBalanceContainer}>
@@ -642,6 +654,16 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#F5F5F5',
+  },
+  embeddedRoot: {
+    backgroundColor: COLORS.background,
+  },
+  embeddedScrollView: {
+    flex: 1,
+  },
+  embeddedScrollContent: {
+    padding: SPACING.md,
+    paddingBottom: SPACING.xl,
   },
   safeTop: {
     backgroundColor: COLORS.white,

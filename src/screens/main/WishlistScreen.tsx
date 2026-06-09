@@ -54,7 +54,11 @@ const WISHLIST_COLLECTION_TIME_KEYS: readonly WishlistApiTimeFilter[] = [
 ];
 type WishlistCollectionTimeKey = WishlistApiTimeFilter;
 
-const WishlistScreen: React.FC = () => {
+type WishlistScreenProps = {
+  embedded?: boolean;
+};
+
+const WishlistScreen: React.FC<WishlistScreenProps> = ({ embedded = false }) => {
   const navigation = useNavigation();
   const { user, isAuthenticated } = useAuth();
   
@@ -498,14 +502,23 @@ const WishlistScreen: React.FC = () => {
     reloadWishlist();
   }, [sortBy, tempFilters.collectionTime, groupByStore, reloadWishlist]);
 
+  const ScreenWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) =>
+    embedded ? (
+      <View style={[styles.container, styles.embeddedContainer]}>{children}</View>
+    ) : (
+      <SafeAreaView style={styles.container}>{children}</SafeAreaView>
+    );
+
   // If not authenticated, show login prompt
   if (!isAuthenticated) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
-          </TouchableOpacity>
+      <ScreenWrapper>
+        <View style={[styles.header, embedded && styles.embeddedHeader]}>
+          {!embedded && (
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
+            </TouchableOpacity>
+          )}
           <Text style={styles.headerTitle}>{t('profile.wishlistTitle')}</Text>
           <View style={styles.placeholder} />
         </View>
@@ -529,7 +542,7 @@ const WishlistScreen: React.FC = () => {
             <Text style={styles.loginButtonText}>{t('profile.wishlistLogin')}</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </ScreenWrapper>
     );
   }
 
@@ -621,14 +634,16 @@ const WishlistScreen: React.FC = () => {
   };
 
   const renderHeader = () => (
-    <View style={styles.header}>
+    <View style={[styles.header, embedded && styles.embeddedHeader]}>
       <View style={styles.headerLeft}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="chevron-back" size={24} color={COLORS.black} />
-        </TouchableOpacity>
+        {!embedded && (
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="chevron-back" size={24} color={COLORS.black} />
+          </TouchableOpacity>
+        )}
         <Text style={styles.headerTitle}>
           {t('profile.wishlistTitle')}({wishlistItems.length})
         </Text>
@@ -1011,17 +1026,17 @@ const WishlistScreen: React.FC = () => {
   // Only show full-screen loading when wishlist data is loading, not when adding to cart
   if (wishlistLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <ScreenWrapper>
         {renderHeader()}
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
-      </SafeAreaView>
+      </ScreenWrapper>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <ScreenWrapper>
       {renderHeader()}
       {renderInfoBar()}
       {renderFilterBar()}
@@ -1461,7 +1476,7 @@ const WishlistScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </ScreenWrapper>
   );
 };
 
@@ -1469,6 +1484,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  embeddedContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  embeddedHeader: {
+    paddingTop: SPACING.sm,
   },
   header: {
     flexDirection: 'row',

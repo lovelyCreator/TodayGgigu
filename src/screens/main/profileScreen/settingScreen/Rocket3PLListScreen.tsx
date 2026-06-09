@@ -15,6 +15,11 @@ import OrderListPlaceholderScreen, {
 type RouteParams = RouteProp<RootStackParamList, 'Rocket3PLList'>;
 type TabKey = NonNullable<NonNullable<RouteParams['params']>['initialTab']>;
 
+type Rocket3PLListScreenProps = {
+  embedded?: boolean;
+  initialTab?: TabKey | 'all';
+};
+
 // 9개 단계 — 구매대행 카드와 동일한 라벨 셋. (전체주문은 'all' 키로 별도)
 const TABS: OrderListPlaceholderTab<TabKey>[] = [
   { key: 'category', labelKey: 'profile.quoteWaiting' },
@@ -25,12 +30,17 @@ const TABS: OrderListPlaceholderTab<TabKey>[] = [
   { key: 'shipped', labelKey: 'profile.orderCompleted' },
 ];
 
-const Rocket3PLListScreen: React.FC = () => {
+const Rocket3PLListScreen: React.FC<Rocket3PLListScreenProps> = ({
+  embedded = false,
+  initialTab: initialTabProp,
+}) => {
   const route = useRoute<RouteParams>();
-  const initialTab = (route.params?.initialTab ?? 'all') as TabKey | 'all';
+  const initialTab =
+    initialTabProp ?? (route.params?.initialTab as TabKey | 'all' | undefined) ?? 'all';
 
   return (
     <OrderListPlaceholderScreen
+      embedded={embedded}
       titleKey="profile.titleRocket3pl"
       tabs={TABS}
       initialTab={initialTab}

@@ -26,7 +26,15 @@ import NoteBroadcastModal from '../../../components/NoteBroadcastModal';
 
 type NoteScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Note'>;
 
-const NoteScreen: React.FC = () => {
+type NoteScreenProps = {
+  embedded?: boolean;
+  onEmbeddedBack?: () => void;
+};
+
+const NoteScreen: React.FC<NoteScreenProps> = ({
+  embedded = false,
+  onEmbeddedBack,
+}) => {
   const navigation = useNavigation<NoteScreenNavigationProp>();
   const { t } = useTranslation();
   const { isAuthenticated } = useAuth();
@@ -342,6 +350,11 @@ const NoteScreen: React.FC = () => {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
+          {embedded && onEmbeddedBack ? (
+            <TouchableOpacity onPress={onEmbeddedBack} style={styles.embeddedBackBtn}>
+              <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
+            </TouchableOpacity>
+          ) : null}
           <Text style={styles.headerNoteLabel}>{t('notes.noteLabel') || 'Note'}</Text>
         </View>
         <Text style={styles.headerTitle}>{t('notes.title') || 'Notes & Inquiries'}</Text>
@@ -455,6 +468,12 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     width: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  embeddedBackBtn: {
+    padding: SPACING.xs,
   },
   headerNoteLabel: {
     fontSize: FONTS.sizes.sm,

@@ -18,8 +18,24 @@ import { translations } from '../../../i18n/translations';
 import { useSocket } from '../../../context/SocketContext';
 import { inquiryApi } from '../../../services/inquiryApi';
 
-const CustomerServiceScreen: React.FC = () => {
+type CustomerServiceScreenProps = {
+  embedded?: boolean;
+  onEmbeddedBack?: () => void;
+};
+
+const CustomerServiceScreen: React.FC<CustomerServiceScreenProps> = ({
+  embedded = false,
+  onEmbeddedBack,
+}) => {
   const navigation = useNavigation();
+
+  const handleBack = () => {
+    if (embedded && onEmbeddedBack) {
+      onEmbeddedBack();
+      return;
+    }
+    navigation.goBack();
+  };
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
   const { onMessageReceived, onUnreadCountUpdated, getUnreadCounts, unreadCount } = useSocket();
   const [totalUnreadCount, setTotalUnreadCount] = useState<number>(0);
@@ -108,7 +124,7 @@ const CustomerServiceScreen: React.FC = () => {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={handleBack}
         >
           <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
         </TouchableOpacity>

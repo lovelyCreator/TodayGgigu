@@ -14,6 +14,11 @@ import OrderListPlaceholderScreen, {
 type RouteParams = RouteProp<RootStackParamList, 'VvicHipassList'>;
 type TabKey = NonNullable<NonNullable<RouteParams['params']>['initialTab']>;
 
+type VvicHipassListScreenProps = {
+  embedded?: boolean;
+  initialTab?: TabKey | 'all';
+};
+
 // 9개 단계 — 구매대행 카드와 동일한 라벨 셋.
 const TABS: OrderListPlaceholderTab<TabKey>[] = [
   { key: 'category', labelKey: 'profile.quoteWaiting' },
@@ -24,12 +29,17 @@ const TABS: OrderListPlaceholderTab<TabKey>[] = [
   { key: 'shipped', labelKey: 'profile.orderCompleted' },
 ];
 
-const VvicHipassListScreen: React.FC = () => {
+const VvicHipassListScreen: React.FC<VvicHipassListScreenProps> = ({
+  embedded = false,
+  initialTab: initialTabProp,
+}) => {
   const route = useRoute<RouteParams>();
-  const initialTab = (route.params?.initialTab ?? 'all') as TabKey | 'all';
+  const initialTab =
+    initialTabProp ?? (route.params?.initialTab as TabKey | 'all' | undefined) ?? 'all';
 
   return (
     <OrderListPlaceholderScreen
+      embedded={embedded}
       titleKey="profile.titleVvicHipass"
       tabs={TABS}
       initialTab={initialTab}

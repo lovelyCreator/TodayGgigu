@@ -23,8 +23,14 @@ const BACK_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 
 type PickerKey = 'businessName' | 'transactionType' | 'reviewStatus' | 'wallet';
 
+type PaymentHistoryScreenProps = {
+  embedded?: boolean;
+};
+
 /** 결제내역 - Payment History list screen. */
-const PaymentHistoryScreen: React.FC = () => {
+const PaymentHistoryScreen: React.FC<PaymentHistoryScreenProps> = ({
+  embedded = false,
+}) => {
   const navigation = useNavigation<Nav>();
   const { t } = useTranslation();
 
@@ -156,25 +162,21 @@ const PaymentHistoryScreen: React.FC = () => {
     );
   };
 
-  return (
-    // 헤더 웃부분(상단 status-bar 인셋)을 흰색으로 통일.
-    // SafeAreaView 가 인셋 영역을 자기 backgroundColor 로 칠하므로
-    // 바깥 SafeAreaView 는 흰색(safeTop), 안쪽 View(container) 는 기존
-    // 회색 배경으로 본문 카드 사이 여백을 유지한다.
-    <SafeAreaView style={styles.safeTop} edges={['top']}>
-      <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          hitSlop={BACK_HIT_SLOP}
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('profile.paymentHistory.title')}</Text>
-        <View style={styles.backButton} />
-      </View>
+  const body = (
+    <View style={[styles.container, embedded && styles.embeddedContainer]}>
+      {!embedded && (
+        <View style={styles.header}>
+          <TouchableOpacity
+            hitSlop={BACK_HIT_SLOP}
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('profile.paymentHistory.title')}</Text>
+          <View style={styles.backButton} />
+        </View>
+      )}
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -274,7 +276,16 @@ const PaymentHistoryScreen: React.FC = () => {
       </ScrollView>
 
       {renderPickerModal()}
-      </View>
+    </View>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <SafeAreaView style={styles.safeTop} edges={['top']}>
+      {body}
     </SafeAreaView>
   );
 };
@@ -288,6 +299,9 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  embeddedContainer: {
     backgroundColor: COLORS.background,
   },
   // Header

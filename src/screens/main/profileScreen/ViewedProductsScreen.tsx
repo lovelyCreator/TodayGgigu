@@ -28,7 +28,13 @@ import {
 } from '../../../utils/i18nHelpers';
 import { normalizeLocale } from '../../../i18n/translate';
 
-const ViewedProductsScreen: React.FC = () => {
+type ViewedProductsScreenProps = {
+  embedded?: boolean;
+};
+
+const ViewedProductsScreen: React.FC<ViewedProductsScreenProps> = ({
+  embedded = false,
+}) => {
   const navigation = useNavigation();
   const locale = useAppSelector((s) => s.i18n.locale);
   const appLocale = normalizeLocale(locale);
@@ -417,14 +423,16 @@ const ViewedProductsScreen: React.FC = () => {
   };
 
   const renderHeader = () => (
-    <View style={styles.header}>
+    <View style={[styles.header, embedded && styles.embeddedHeader]}>
       <View style={styles.headerLeft}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-back" size={20} color={COLORS.text.primary} />
-        </TouchableOpacity>
+        {!embedded && (
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="arrow-back" size={20} color={COLORS.text.primary} />
+          </TouchableOpacity>
+        )}
         <Text style={styles.headerTitle}>{t('profile.viewedProducts')}</Text>
       </View>
       <View style={styles.headerRight}>
@@ -565,7 +573,7 @@ const ViewedProductsScreen: React.FC = () => {
         <FlatList
           data={products}
           renderItem={renderProductItem}
-          keyExtractor={(product) => product.productId}
+          keyExtractor={(product, index) => `${product.productId}::${index}`}
           numColumns={3}
           scrollEnabled={false}
           columnWrapperStyle={styles.productRow}
@@ -575,16 +583,25 @@ const ViewedProductsScreen: React.FC = () => {
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor={COLORS.white}
-        translucent={Platform.OS === 'android'}
-      />
-      <SafeAreaView style={styles.topSafeArea} edges={['top', 'left', 'right']}>
-        {renderHeader()}
-        {renderFilterButton()}
-      </SafeAreaView>
+    <View style={[styles.container, embedded && styles.embeddedContainer]}>
+      {!embedded && (
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={COLORS.white}
+          translucent={Platform.OS === 'android'}
+        />
+      )}
+      {embedded ? (
+        <View style={styles.topSafeArea}>
+          {renderHeader()}
+          {renderFilterButton()}
+        </View>
+      ) : (
+        <SafeAreaView style={styles.topSafeArea} edges={['top', 'left', 'right']}>
+          {renderHeader()}
+          {renderFilterButton()}
+        </SafeAreaView>
+      )}
 
       <View style={styles.body}>
         {loading ? (
@@ -844,6 +861,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.white,
+  },
+  embeddedContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  embeddedHeader: {
+    paddingTop: SPACING.sm,
   },
   topSafeArea: {
     backgroundColor: COLORS.white,

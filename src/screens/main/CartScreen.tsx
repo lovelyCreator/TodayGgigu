@@ -81,7 +81,10 @@ interface ServiceCategory {
 }
 
 interface CartCard {
+  /** API cart row id — used for delete/update calls. */
   id: string;
+  /** Stable unique key for React lists (id can repeat across rows). */
+  listKey: string;
   index: string;
   offerId: string;
   source: string;
@@ -161,12 +164,19 @@ const mapCartItemToCard = (
     item.skuInfo?.consignPrice ||
     '0';
   const offerId = String(item.offerId ?? (item as { productId?: string | number }).productId ?? '');
+  const specId = String(item.skuInfo?.specId ?? '');
+  const skuId = String(item.skuInfo?.skuId ?? '');
+  const apiId =
+    item._id ||
+    [offerId, specId, skuId].filter(Boolean).join(':') ||
+    offerId;
   return {
-    id: item._id || offerId,
+    id: apiId,
+    listKey: `${apiId}::${index}`,
     index: String(index + 1).padStart(3, '0'),
     offerId,
     source: item.source || '1688',
-    specId: item.skuInfo?.specId ?? '',
+    specId,
     skuId: item.skuInfo?.skuId ?? '',
     companyName: pickLang(item.companyName, locale),
     productName:
@@ -241,7 +251,11 @@ const getCartLanguageFlag = (locale: string): string => {
   return flags[locale] || '🇺🇸';
 };
 
-const CartScreen: React.FC = () => {
+type CartScreenProps = {
+  embedded?: boolean;
+};
+
+const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
   const { t, locale } = useTranslation();
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<MainTabParamList, 'Cart'>>();
@@ -817,7 +831,7 @@ const CartScreen: React.FC = () => {
       card.size ? card.size : '',
     ].filter(Boolean);
     return (
-      <View key={`order-card-${card.id}`} style={styles.orderModalCard}>
+      <View key={`order-card-${card.listKey}`} style={styles.orderModalCard}>
         {/* Top row: left = image + name + options, right = negotiation */}
         <View style={styles.orderModalCardTop}>
           <View style={styles.orderModalCardLeft}>
@@ -1806,7 +1820,7 @@ const CartScreen: React.FC = () => {
 
     return (
       <View
-        key={card.id}
+        key={card.listKey}
         style={[styles.bundleItemRow, !isLast && styles.bundleItemRowBorder]}
       >
         <TouchableOpacity style={styles.bundleItemCheckCol} onPress={() => toggleCheck(card.id)}>
@@ -1930,7 +1944,7 @@ const CartScreen: React.FC = () => {
 
     return (
       <TouchableOpacity
-        key={card.id}
+        key={card.listKey}
         style={styles.card}
         activeOpacity={1}
         onPress={() => {
@@ -2074,8 +2088,8 @@ const CartScreen: React.FC = () => {
     );
   };
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+  const cartBody = (
+    <>
       <View style={styles.topSection}>
       {/* PAGE TITLE */}
       <View style={styles.pageHeader}>
@@ -2993,6 +3007,16 @@ const CartScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+    </>
+  );
+
+  if (embedded) {
+    return <View style={[styles.container, styles.embeddedContainer]}>{cartBody}</View>;
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {cartBody}
     </SafeAreaView>
   );
 };
@@ -3002,6 +3026,10 @@ const PRIMARY_SOFT = 'rgba(255, 85, 0, 0.10)';
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  embeddedContainer: {
     flex: 1,
     backgroundColor: COLORS.white,
   },

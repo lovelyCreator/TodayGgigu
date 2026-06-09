@@ -36,8 +36,24 @@ import DeliveryAddressMenuRow from '../settingScreen/accountCenterScreen/Deliver
 
 type ProfileSettingsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'ProfileSettings'>;
 
-const ProfileSettingsScreen: React.FC = () => {
+type ProfileSettingsScreenProps = {
+  embedded?: boolean;
+  onEmbeddedBack?: () => void;
+};
+
+const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
+  embedded = false,
+  onEmbeddedBack,
+}) => {
   const navigation = useNavigation<ProfileSettingsScreenNavigationProp>();
+
+  const handleBack = () => {
+    if (embedded && onEmbeddedBack) {
+      onEmbeddedBack();
+      return;
+    }
+    navigation.goBack();
+  };
   const { user, logout, isAuthenticated, updateUser } = useAuth();
   const locale = useAppSelector((state) => state.i18n.locale) as string;
   const normalizedLocale: 'en' | 'ko' | 'zh' =
@@ -144,7 +160,7 @@ const ProfileSettingsScreen: React.FC = () => {
     >
       <TouchableOpacity 
         style={styles.backButton}
-        onPress={() => navigation.goBack()}
+        onPress={handleBack}
       >
         <Icon name="arrow-back" size={24} color={COLORS.text.primary} />
       </TouchableOpacity>

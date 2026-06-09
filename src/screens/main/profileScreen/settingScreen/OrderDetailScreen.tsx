@@ -41,6 +41,7 @@ import {
   resolveOrderItemUnitPrice,
   resolveOrderTotalKRW,
 } from '../../../../services/orderApi';
+import { useProfileTabletEmbedNavigation } from '../ProfileTabletEmbedContext';
 
 type DetailTab = 'products' | 'photos';
 
@@ -79,14 +80,36 @@ const paymentMethodLabel = (
   return method || '';
 };
 
-const OrderDetailScreen: React.FC = () => {
+type OrderDetailScreenProps = {
+  embedded?: boolean;
+  embeddedOrderId?: string;
+  embeddedOrder?: Order;
+  onEmbeddedBack?: () => void;
+};
+
+const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
+  embedded = false,
+  embeddedOrderId,
+  embeddedOrder,
+  onEmbeddedBack,
+}) => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { t, locale } = useTranslation();
   const { showToast } = useToast();
+  const { tryEmbedNavigate } = useProfileTabletEmbedNavigation(embedded);
 
-  const initialOrder = route.params?.order;
-  const orderId = route.params?.orderId || initialOrder?.id;
+  const initialOrder = embedded ? embeddedOrder : route.params?.order;
+  const orderId =
+    (embedded ? embeddedOrderId : route.params?.orderId) || initialOrder?.id;
+
+  const handleBack = () => {
+    if (embedded && onEmbeddedBack) {
+      onEmbeddedBack();
+      return;
+    }
+    navigation.goBack();
+  };
 
   const [order, setOrder] = useState<any>(initialOrder ?? null);
   const [loading, setLoading] = useState(!initialOrder);
@@ -251,11 +274,19 @@ const OrderDetailScreen: React.FC = () => {
   );
 
   const handleOrderInquiry = () => {
-    navigation.navigate('Chat', {
-      inquiryId: order?.inquiryId || undefined,
-      orderId: order?.id,
-      orderNumber: order?.orderNumber,
-    });
+    if (
+      !tryEmbedNavigate('Chat', {
+        inquiryId: order?.inquiryId || undefined,
+        orderId: order?.id,
+        orderNumber: order?.orderNumber,
+      })
+    ) {
+      navigation.navigate('Chat', {
+        inquiryId: order?.inquiryId || undefined,
+        orderId: order?.id,
+        orderNumber: order?.orderNumber,
+      });
+    }
   };
 
   const kakaoPostcodeHtml = `<!DOCTYPE html>
@@ -419,15 +450,25 @@ const OrderDetailScreen: React.FC = () => {
   );
 
   const renderHeader = () => (
-    <SafeAreaView style={styles.headerSafeArea} edges={['top', 'left', 'right']}>
+    embedded ? (
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('profile.orderDetails')}</Text>
         <View style={styles.headerSpacer} />
       </View>
-    </SafeAreaView>
+    ) : (
+      <SafeAreaView style={styles.headerSafeArea} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+            <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('profile.orderDetails')}</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+      </SafeAreaView>
+    )
   );
 
   if (!orderId) {

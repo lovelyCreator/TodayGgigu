@@ -26,6 +26,7 @@ import { API_BASE_URL } from '../../constants';
 import { getStoredToken } from '../../services/authApi';
 import { buildSignatureHeaders } from '../../services/signature';
 import { getOrderProgressStatusLabel } from '../../utils/orderProgressStatusLabel';
+import { useProfileTabletEmbedNavigation } from './profileScreen/ProfileTabletEmbedContext';
 
 type TabType = 'order' | 'general' | 'fileDownload';
 
@@ -68,7 +69,11 @@ const getMessageLanguageFlag = (locale: string): string => {
   return flags[locale] || '🇺🇸';
 };
 
-const MessageScreen: React.FC<MessageScreenProps> = ({ initialTabOverride, onEmbeddedBack }) => {
+const MessageScreen: React.FC<MessageScreenProps> = ({
+  initialTabOverride,
+  embedded = false,
+  onEmbeddedBack,
+}) => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const insets = useSafeAreaInsets();
@@ -84,6 +89,17 @@ const MessageScreen: React.FC<MessageScreenProps> = ({ initialTabOverride, onEmb
     onGeneralInquiryMessageReceived,
   } = useSocket();
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
+  const { tryEmbedNavigate } = useProfileTabletEmbedNavigation(embedded);
+
+  const openChat = (params: {
+    orderId?: string;
+    orderNumber?: string;
+    inquiryId?: string;
+  }) => {
+    if (!tryEmbedNavigate('Chat', params)) {
+      navigation.navigate('Chat', params);
+    }
+  };
 
   const t = (key: string) => {
     const keys = key.split('.');
@@ -120,7 +136,7 @@ const MessageScreen: React.FC<MessageScreenProps> = ({ initialTabOverride, onEmb
     const orderId = route.params?.orderId;
     const orderNumber = route.params?.orderNumber;
     if (orderId && orderNumber) {
-      navigation.navigate('Chat', { orderId, orderNumber });
+      openChat({ orderId, orderNumber });
     }
   }, [route.params?.orderId, route.params?.orderNumber]);
 
@@ -482,11 +498,13 @@ const MessageScreen: React.FC<MessageScreenProps> = ({ initialTabOverride, onEmb
     <TouchableOpacity
       style={styles.orderItem}
       activeOpacity={0.7}
-      onPress={() => navigation.navigate('Chat', {
-        orderId: item.orderId,
-        orderNumber: item.orderNumber,
-        inquiryId: item.inquiryId,
-      })}
+      onPress={() =>
+        openChat({
+          orderId: item.orderId,
+          orderNumber: item.orderNumber,
+          inquiryId: item.inquiryId,
+        })
+      }
     >
       <View>
         <Image

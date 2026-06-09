@@ -57,7 +57,11 @@ const endOfDay = (d: Date) =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
 
 /** OEM - 진행단계 (OEM survey progress screen). */
-const OEMSurveyScreen: React.FC = () => {
+type OEMSurveyScreenProps = {
+  embedded?: boolean;
+};
+
+const OEMSurveyScreen: React.FC<OEMSurveyScreenProps> = ({ embedded = false }) => {
   const navigation = useNavigation<Nav>();
   const { t, locale } = useTranslation();
 
@@ -301,17 +305,21 @@ const OEMSurveyScreen: React.FC = () => {
     );
   };
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          hitSlop={BACK_HIT_SLOP}
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('profile.OEM')}</Text>
+  const body = (
+    <>
+      <View style={[styles.header, embedded && styles.embeddedHeader]}>
+        {!embedded && (
+          <TouchableOpacity
+            hitSlop={BACK_HIT_SLOP}
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
+          </TouchableOpacity>
+        )}
+        <Text style={[styles.headerTitle, embedded && styles.embeddedHeaderTitle]}>
+          {t('profile.OEM')}
+        </Text>
         <TouchableOpacity
           style={styles.requestButton}
           activeOpacity={0.85}
@@ -519,6 +527,16 @@ const OEMSurveyScreen: React.FC = () => {
           </View>
         </TouchableOpacity>
       </Modal>
+    </>
+  );
+
+  if (embedded) {
+    return <View style={[styles.container, styles.embeddedContainer]}>{body}</View>;
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {body}
     </SafeAreaView>
   );
 };
@@ -527,6 +545,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.white,
+  },
+  embeddedContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  embeddedHeader: {
+    paddingTop: SPACING.sm,
+  },
+  embeddedHeaderTitle: {
+    flex: 1,
+    textAlign: 'left',
+    marginLeft: 0,
   },
   header: {
     flexDirection: 'row',

@@ -1,5 +1,10 @@
 import { useMemo } from 'react';
 import { useWindowDimensions } from 'react-native';
+import {
+  getContentMaxWidth,
+  getModalMaxWidth,
+  getPagePaddingHorizontal,
+} from '../utils/responsiveLayout';
 
 /**
  * Reactive layout metrics that recalculate on every dimension change
@@ -32,6 +37,12 @@ export interface ResponsiveLayout {
   scale: number;
   /** Bucket name for explicit conditionals. */
   bucket: 'phone' | 'tabletPort' | 'tabletLand';
+  /** 태블릿에서 폼·리스트 본문 최대 너비 (폰은 화면 전체). */
+  contentMaxWidth: number;
+  /** 태블릿 좌우 여백 — contentMaxWidth 를 화면 중앙에 맞출 때 사용. */
+  pagePaddingHorizontal: number;
+  /** 태블릿 모달 권장 최대 너비. */
+  modalMaxWidth: number;
 }
 
 export const useResponsive = (): ResponsiveLayout => {
@@ -68,7 +79,7 @@ export const useResponsive = (): ResponsiveLayout => {
     const gutter = Math.round(16 * scale);
     const iconSize = Math.round(24 * scale);
 
-    return {
+    const layoutBase = {
       width,
       height,
       isLandscape,
@@ -79,6 +90,13 @@ export const useResponsive = (): ResponsiveLayout => {
       iconSize,
       scale,
       bucket,
+    };
+
+    return {
+      ...layoutBase,
+      contentMaxWidth: getContentMaxWidth(layoutBase),
+      pagePaddingHorizontal: getPagePaddingHorizontal(layoutBase),
+      modalMaxWidth: getModalMaxWidth(layoutBase),
     };
   }, [width, height]);
 };

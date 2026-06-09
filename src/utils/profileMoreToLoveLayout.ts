@@ -11,13 +11,16 @@ export type ProfileMoreToLoveGridLayout = {
   rowGap: number;
 };
 
-/** Two-column grid: side insets and column gap match; card width fills the remainder. */
+/** Product grid: side insets and column gap match; card width fills the remainder. */
 export function getProfileMoreToLoveGridLayout(
   windowWidth: number,
+  cols = 2,
 ): ProfileMoreToLoveGridLayout {
+  const safeCols = Math.max(1, cols);
   const horizontalInset = windowWidth * HORIZONTAL_RATIO;
   const columnGap = horizontalInset;
-  const cardWidth = (windowWidth - horizontalInset * 2 - columnGap) / 2;
+  const cardWidth =
+    (windowWidth - horizontalInset * 2 - columnGap * (safeCols - 1)) / safeCols;
   const rowGap = horizontalInset;
 
   return {

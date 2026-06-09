@@ -130,8 +130,14 @@ const UPDATE_SEED: NotificationItem[] = [
   },
 ];
 
+type ProgressNotificationScreenProps = {
+  embedded?: boolean;
+};
+
 /** 진행알림 - Progress Notification screen. */
-const ProgressNotificationScreen: React.FC = () => {
+const ProgressNotificationScreen: React.FC<ProgressNotificationScreenProps> = ({
+  embedded = false,
+}) => {
   const navigation = useNavigation<Nav>();
   const { t } = useTranslation();
 
@@ -229,22 +235,23 @@ const ProgressNotificationScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          hitSlop={BACK_HIT_SLOP}
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {t('profile.progressNotificationScreen.title')}
-        </Text>
-        <View style={styles.backButton} />
-      </View>
+  const body = (
+    <View style={[styles.body, embedded && styles.embeddedBody]}>
+      {!embedded && (
+        <View style={styles.header}>
+          <TouchableOpacity
+            hitSlop={BACK_HIT_SLOP}
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="arrow-back" size={22} color={COLORS.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>
+            {t('profile.progressNotificationScreen.title')}
+          </Text>
+          <View style={styles.backButton} />
+        </View>
+      )}
 
       {/* Tabs */}
       <View style={styles.tabBar}>
@@ -297,6 +304,16 @@ const ProgressNotificationScreen: React.FC = () => {
           visibleItems.map(renderItem)
         )}
       </ScrollView>
+    </View>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {body}
     </SafeAreaView>
   );
 };
@@ -305,6 +322,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.white,
+  },
+  body: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  embeddedBody: {
+    backgroundColor: COLORS.background,
   },
   // Header
   header: {
