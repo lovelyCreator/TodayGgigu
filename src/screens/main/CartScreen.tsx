@@ -627,18 +627,6 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, checked: !c.checked } : c)));
   };
 
-  const toggleExpand = (id: string) => {
-    setCards((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, expanded: !c.expanded } : { ...c, expanded: false },
-      ),
-    );
-  };
-
-  const collapseAll = () => {
-    setCards((prev) => prev.map((c) => (c.expanded ? { ...c, expanded: false } : c)));
-  };
-
   // `openServiceModal(cardId)` opens the extra-service picker scoped
   // to a specific cart card. When `cardId` is null the picker edits
   // the order-wide `extraServices` array (single-card legacy path).
@@ -797,10 +785,6 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
     }
   };
 
-  const updateRemarks = (id: string, text: string) => {
-    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, remarks: text } : c)));
-  };
-
   const toggleExtraService = (svc: ExtraService) => {
     setExtraServices((prev) => {
       const exists = prev.some((s) => s.id === svc.id);
@@ -941,58 +925,24 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
           </View>
         </View>
 
-        {/* 더보기/접기 토글 — 카드 우하단. card.expanded 를 그대로 공유하므로
-            장바구니 본문에서 펼친 카드는 이 모달에서도 펼친 상태로 시작한다. */}
-        <View style={styles.orderModalCardExpandRow}>
-          <TouchableOpacity
-            style={styles.orderModalCardExpandBtn}
-            onPress={() => toggleExpand(card.id)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.orderModalCardExpandText}>
-              {card.expanded ? t('cartOrder.card.collapse') : t('cartOrder.card.viewMore')}
-            </Text>
-            <Icon
-              name={card.expanded ? 'chevron-up' : 'chevron-down'}
-              size={10}
-              color={COLORS.primary}
-            />
-          </TouchableOpacity>
-        </View>
-
-        {/* 펼쳐졌을 때만 — 비고 / 라벨 / 삭제. 카트 본문 카드의 BOTTOM 과 동일한 구성. */}
-        {card.expanded && (
-          <View style={styles.orderModalCardExpanded}>
-            <Text style={styles.remarksLabel}>{t('cartOrder.card.remarks')}</Text>
-            <TextInput
-              style={styles.remarksInput}
-              multiline
-              maxLength={200}
-              placeholder={t('cartOrder.card.remarksPlaceholder')}
-              placeholderTextColor={COLORS.gray[400]}
-              value={card.remarks}
-              onChangeText={(txt) => updateRemarks(card.id, txt)}
-            />
-            <Text style={styles.remarksCounter}>{card.remarks.length}/200</Text>
-            <View style={styles.bottomActions}>
-              <TouchableOpacity
-                style={styles.labelRowBtn}
-                onPress={() => openLabelModal(card.id)}
-              >
-                {/* pricetag-outline 아이콘은 프로젝트 Icon 레지스트리에 없어
-                    물음표(?)로 렌더되던 문제 — 아이콘 제거하고 텍스트만 표시. */}
-                <Text style={styles.labelRowText}>{t('cartOrder.card.label')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deleteRowBtn}
-                onPress={() => handleDeleteOne(card.id)}
-              >
-                <Icon name="trash-outline" size={12} color={COLORS.primary} />
-                <Text style={styles.deleteRowText}>{t('cartOrder.card.delete')}</Text>
-              </TouchableOpacity>
-            </View>
+        {/* 라벨 / 삭제 — 카트 본문 카드와 동일하게 항상 표시 */}
+        <View style={styles.orderModalCardExpanded}>
+          <View style={styles.bottomActionsCompact}>
+            <TouchableOpacity
+              style={styles.labelRowBtn}
+              onPress={() => openLabelModal(card.id)}
+            >
+              <Text style={styles.labelRowText}>{t('cartOrder.card.label')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.deleteRowBtn}
+              onPress={() => handleDeleteOne(card.id)}
+            >
+              <Icon name="trash-outline" size={12} color={COLORS.primary} />
+              <Text style={styles.deleteRowText}>{t('cartOrder.card.delete')}</Text>
+            </TouchableOpacity>
           </View>
-        )}
+        </View>
 
         {/* Center: extra-service selector. Label hidden once chips exist. */}
         <View style={styles.orderModalCardServiceBar}>
@@ -1165,9 +1115,16 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
   const grandTotal = filteredCards.reduce((s, c) => s + c.quantity * c.unitPrice, 0);
   const checkedCards = cards.filter((c) => c.checked);
   const hasSelectedCards = checkedCards.length > 0;
+  const allCardsSelected = cards.length > 0 && cards.every((c) => c.checked);
   const checkedQty = checkedCards.reduce((s, c) => s + c.quantity, 0);
   const checkedTotal = checkedCards.reduce((s, c) => s + c.quantity * c.unitPrice, 0);
   const isOrderNowEnabled = hasSelectedCards && !profileLoading;
+
+  const toggleSelectAll = useCallback(() => {
+    if (cards.length === 0) return;
+    const nextChecked = !allCardsSelected;
+    setCards((prev) => prev.map((c) => ({ ...c, checked: nextChecked })));
+  }, [allCardsSelected, cards.length]);
 
   const showOrderModalRef = useRef(showOrderModal);
   showOrderModalRef.current = showOrderModal;
@@ -1947,14 +1904,11 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
         key={card.listKey}
         style={styles.card}
         activeOpacity={1}
-        onPress={() => {
-          if (card.expanded) collapseAll();
-        }}
       >
         {/* Accent strip */}
         <View style={styles.cardAccent} />
 
-        {/* TOP — company name + checkbox + photo button */}
+        {/* TOP — company name + checkbox */}
         <View style={styles.cardTop}>
           <TouchableOpacity style={styles.checkBtn} onPress={() => toggleCheck(card.id)}>
             <View style={[styles.checkBox, card.checked && styles.checkBoxChecked]}>
@@ -1969,13 +1923,6 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
                 : card.companyName}
             </Text>
           </View>
-          <TouchableOpacity style={styles.photoBtn} onPress={() => pickPhoto(card.id)}>
-            {card.photoUri ? (
-              <Image source={{ uri: card.photoUri }} style={styles.photoPreview} />
-            ) : (
-              <Icon name="camera-outline" size={14} color={COLORS.primary} />
-            )}
-          </TouchableOpacity>
         </View>
 
         {/* MIDDLE — product row */}
@@ -2031,59 +1978,31 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
             </View>
           </View>
 
-          {/* Right: subtotal (상품금액) + View More */}
+          {/* Right: subtotal (상품금액) */}
           <View style={styles.middleRight}>
             <Text style={styles.rightLabel}>{t('cartOrder.card.productAmount')}</Text>
             <Text style={styles.rightValue}>¥{subtotal.toFixed(2)}</Text>
-            <TouchableOpacity
-              style={styles.viewMoreBtn}
-              onPress={() => toggleExpand(card.id)}
-            >
-              <Text style={styles.viewMoreText}>
-                {card.expanded ? t('cartOrder.card.collapse') : t('cartOrder.card.viewMore')}
-              </Text>
-              <Icon
-                name={card.expanded ? 'chevron-up' : 'chevron-down'}
-                size={10}
-                color={COLORS.primary}
-              />
-            </TouchableOpacity>
           </View>
         </View>
 
-        {/* BOTTOM — hidden remarks area */}
-        {card.expanded && (
-          <View style={styles.cardBottom}>
-            <Text style={styles.remarksLabel}>{t('cartOrder.card.remarks')}</Text>
-            <TextInput
-              style={styles.remarksInput}
-              multiline
-              maxLength={200}
-              placeholder={t('cartOrder.card.remarksPlaceholder')}
-              placeholderTextColor={COLORS.gray[400]}
-              value={card.remarks}
-              onChangeText={(t) => updateRemarks(card.id, t)}
-            />
-            <Text style={styles.remarksCounter}>{card.remarks.length}/200</Text>
-            <View style={styles.bottomActions}>
-              <TouchableOpacity
-                style={styles.labelRowBtn}
-                onPress={() => openLabelModal(card.id)}
-              >
-                {/* pricetag-outline 은 Icon 레지스트리에 없어 물음표(?)로
-                    렌더되던 문제 — 아이콘 제거하고 텍스트만 표시. */}
-                <Text style={styles.labelRowText}>{t('cartOrder.card.label')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deleteRowBtn}
-                onPress={() => handleDeleteOne(card.id)}
-              >
-                <Icon name="trash-outline" size={12} color={COLORS.primary} />
-                <Text style={styles.deleteRowText}>{t('cartOrder.card.delete')}</Text>
-              </TouchableOpacity>
-            </View>
+        {/* BOTTOM — 라벨 / 삭제 */}
+        <View style={styles.cardBottom}>
+          <View style={styles.bottomActionsCompact}>
+            <TouchableOpacity
+              style={styles.labelRowBtn}
+              onPress={() => openLabelModal(card.id)}
+            >
+              <Text style={styles.labelRowText}>{t('cartOrder.card.label')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.deleteRowBtn}
+              onPress={() => handleDeleteOne(card.id)}
+            >
+              <Icon name="trash-outline" size={12} color={COLORS.primary} />
+              <Text style={styles.deleteRowText}>{t('cartOrder.card.delete')}</Text>
+            </TouchableOpacity>
           </View>
-        )}
+        </View>
       </TouchableOpacity>
     );
   };
@@ -2184,7 +2103,6 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
           style={styles.cardsList}
           contentContainerStyle={styles.cardsContent}
           showsVerticalScrollIndicator={false}
-          onScrollBeginDrag={() => collapseAll()}
           refreshControl={
             <RefreshControl
               refreshing={cartRefreshing}
@@ -2233,33 +2151,23 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
           <Text style={styles.summaryTotal}>
             {t('cartOrder.summary.total')} ¥{(checkedQty > 0 ? checkedTotal : grandTotal).toFixed(2)}
           </Text>
-          {/* Select-all / deselect-all controls. Both buttons live in the
-              summary bar to the LEFT of the "Order Now" CTA so the
-              shopper can quickly toggle every card's `checked` state
-              without scrolling through individual seller groups. */}
           <TouchableOpacity
-            style={styles.bulkSelectBtn}
-            onPress={() =>
-              setCards((prev) => prev.map((c) => ({ ...c, checked: true })))
-            }
+            style={styles.selectAllToggle}
+            onPress={toggleSelectAll}
             disabled={cards.length === 0}
             activeOpacity={0.85}
           >
-            <Text style={styles.bulkSelectBtnText}>
-              {t('cartOrder.summary.selectAll')}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.bulkSelectBtn}
-            onPress={() =>
-              setCards((prev) => prev.map((c) => ({ ...c, checked: false })))
-            }
-            disabled={!hasSelectedCards}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.bulkSelectBtnText}>
-              {t('cartOrder.summary.deselectAll')}
-            </Text>
+            <View
+              style={[
+                styles.selectAllCircle,
+                allCardsSelected && styles.selectAllCircleChecked,
+              ]}
+            >
+              {allCardsSelected && (
+                <Icon name="checkmark" size={12} color={COLORS.white} />
+              )}
+            </View>
+            <Text style={styles.selectAllText}>{t('cartOrder.summary.selectAll')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -4061,6 +3969,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 8,
   },
+  bottomActionsCompact: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
   labelRowBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4177,23 +4090,31 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 3,
   },
-  // Outline buttons that toggle every card's `checked` state in one
-  // tap. Sit in the summary bar to the left of the primary "Order Now"
-  // CTA, with light borders so they don't compete with the bold orange
-  // CTA visually.
-  bulkSelectBtn: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.gray[300],
-    marginRight: SPACING.xs,
-    backgroundColor: COLORS.white,
+  selectAllToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: SPACING.sm,
+    paddingVertical: 4,
   },
-  bulkSelectBtnText: {
-    fontSize: FONTS.sizes.xs,
+  selectAllCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: COLORS.gray[400],
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.white,
+    marginRight: 6,
+  },
+  selectAllCircleChecked: {
+    backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
+  },
+  selectAllText: {
+    fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   // Wrapper around the per-card list rendered inside the order
   // modal when 2+ cart cards are selected. Adds a small vertical

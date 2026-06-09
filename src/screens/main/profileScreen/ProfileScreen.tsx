@@ -49,12 +49,11 @@ import { usePlatformStore } from '../../../store/platformStore';
 import { useToast } from '../../../context/ToastContext';
 import { useResponsive } from '../../../hooks/useResponsive';
 import { formatPriceKRW, formatDepositBalance } from '../../../utils/i18nHelpers';
-import { useGetOrdersMutation } from '../../../hooks/useGetOrdersMutation';
-import { mapLocaleToOrdersLang } from '../../../services/orderApi';
+import { mapLocaleToOrdersLang, orderApi } from '../../../services/orderApi';
 import {
   mergeProfileOrderCounts,
-  computeProfileOrderCountsByDomain,
-  type ProfileOrderCountsByDomain,
+  computeProfileDashboardCounts,
+  type ProfileDashboardCounts,
 } from '../../../utils/orderCounts';
 import { getProfileMoreToLoveGridLayout } from '../../../utils/profileMoreToLoveLayout';
 import HeadsetMicIcon from '../../../assets/icons/HeadsetMicIcon';
@@ -93,6 +92,7 @@ import {
 import {
   mapNavigationTargetToDashboardRoute,
   sidebarKeyToDashboardRoute,
+  type BuyListEmbedDomain,
   type ProfileDashboardRoute,
 } from './profileTabletDashboardRoute';
 
@@ -144,34 +144,14 @@ const ProfileScreen: React.FC = () => {
     problemProducts: 0,
   }); // Order counts from API
 
-  // 사업 도메인별 ProfileOrderCounts — 활성 탭에 맞춰 카드 셀에 표시된다.
-  // 백엔드는 viewFilterCounts 를 도메인 무관 전체로만 내려주므로,
-  // orders 배열을 도메인별로 쪼개 클라이언트에서 직접 계산한다.
-  const [orderCountsByDomain, setOrderCountsByDomain] =
-    useState<ProfileOrderCountsByDomain>({
-      purchase_agency: {
-        quotePending: 0, unpaid: 0, to_be_shipped: 0, shipped: 0, processed: 0,
-        shipping_delay: 0, error: 0, refunds: 0, problemProducts: 0,
-      },
-      rocket_3pl: {
-        quotePending: 0, unpaid: 0, to_be_shipped: 0, shipped: 0, processed: 0,
-        shipping_delay: 0, error: 0, refunds: 0, problemProducts: 0,
-      },
-      vvic_hipass: {
-        quotePending: 0, unpaid: 0, to_be_shipped: 0, shipped: 0, processed: 0,
-        shipping_delay: 0, error: 0, refunds: 0, problemProducts: 0,
-      },
-      shipping_agency: {
-        quotePending: 0, unpaid: 0, to_be_shipped: 0, shipped: 0, processed: 0,
-        shipping_delay: 0, error: 0, refunds: 0, problemProducts: 0,
-      },
-    });
-
-  // 내주문 카드 상단 탭(구매대행 / 로켓·3PL / VVIC하이패스 / 배송대행) 활성 키.
-  // 활성 탭이 바뀌면 밑의 5×2 그리드 내용도 myOrderTabContent 룩업으로 교체된다.
-  const [activeOrderTab, setActiveOrderTab] = useState<
-    'purchase_agency' | 'rocket_3pl' | 'vvic_hipass' | 'shipping_agency'
-  >('purchase_agency');
+  const [dashboardCounts, setDashboardCounts] = useState<ProfileDashboardCounts>({
+    purchasePaymentPending: 0,
+    shipPaymentPending: 0,
+    unconfirmed: 0,
+    problemProduct: 0,
+    errorInbound: 0,
+    shipmentHold: 0,
+  });
 
   const [sidebarActiveKey, setSidebarActiveKey] =
     useState<ProfileSidebarActiveKey>('main');
@@ -181,29 +161,35 @@ const ProfileScreen: React.FC = () => {
     [],
   );
 
-  type OrderDashboardDomain =
-    | 'purchase_agency'
-    | 'rocket_3pl'
-    | 'vvic_hipass'
-    | 'shipping_agency';
-
-  const resolveOrderListInitialTab = (
-    domain: OrderDashboardDomain,
-    cell: { initialTab?: string; accent?: boolean },
-  ): string => {
-    if (cell.accent) return 'all';
-    if (domain === 'purchase_agency' && cell.initialTab) return cell.initialTab;
-    if (domain === 'purchase_agency') return 'purchase_agency';
-    return 'all';
-  };
-
-  const openOrderInEmbeddedPanel = (
-    domain: OrderDashboardDomain,
-    cell: { initialTab?: string; accent?: boolean },
-  ) => {
-    setDashboardStack([]);
-    setSidebarActiveKey(domain);
-    setEmbeddedPanelInitialTab(resolveOrderListInitialTab(domain, cell));
+  const openBuyListFromProfile = (opts: {
+    initialTab?: string;
+    domain?: BuyListEmbedDomain;
+    progressStatus?: string;
+  }) => {
+    const domain = opts.domain ?? 'purchase_agency';
+    const initialTab = opts.initialTab ?? 'all';
+    const sidebarKey: ProfileSidebarActiveKey =
+      domain === 'error_management' || domain === 'refund_management'
+        ? 'purchase_agency'
+        : domain;
+    if (useTabletLandscapeLayout) {
+      setDashboardStack([
+        {
+          type: 'buyList',
+          domain,
+          initialTab,
+          progressStatus: opts.progressStatus,
+        },
+      ]);
+      setSidebarActiveKey(sidebarKey);
+      setEmbeddedPanelInitialTab(initialTab);
+    } else {
+      (navigation as any).navigate('BuyList', {
+        domain,
+        initialTab,
+        progressStatus: opts.progressStatus,
+      });
+    }
   };
 
   const handleSidebarActiveKeyChange = (key: ProfileSidebarActiveKey) => {
@@ -252,15 +238,6 @@ const ProfileScreen: React.FC = () => {
   const [viewedCount, setViewedCount] = useState(0);
   const [viewedFirstImage, setViewedFirstImage] = useState<string>('');
 
-  // Order counts for My Orders — API viewFilterCounts with client-side fallback.
-  // 또한 orders 배열을 사업 도메인별로 쪼개 도메인 × 상태 카운트도 함께 계산한다.
-  const { mutate: getOrders } = useGetOrdersMutation({
-    onSuccess: (data) => {
-      const ordersList = data.orders ?? [];
-      setOrderCounts(mergeProfileOrderCounts(ordersList, data.viewFilterCounts));
-      setOrderCountsByDomain(computeProfileOrderCountsByDomain(ordersList));
-    },
-  });
   
   // Recommendations state for "More to Love"
   const [recommendationsProducts, setRecommendationsProducts] = useState<Product[]>([]);
@@ -334,8 +311,25 @@ const ProfileScreen: React.FC = () => {
       }
     };
 
-    // 3) 주문 카운트 — getOrders 의 onSuccess 가 orderCounts / orderCountsByDomain 갱신.
-    getOrders({ page: 1, pageSize: 100, lang: mapLocaleToOrdersLang(normalizedLocale) });
+    // 3) 주문 카운트 — BuyList fetchOrderCounts 와 동일한 조회·집계 규칙.
+    const fetchOrderDashboardCounts = async () => {
+      if (!isAuthenticated || isGuest || !user) return;
+      try {
+        const response = await orderApi.getOrders({
+          page: 1,
+          pageSize: 100,
+          lang: mapLocaleToOrdersLang(normalizedLocale),
+          viewFilter: 'all',
+          datePeriod: 'last_6_months',
+        });
+        if (!response.success || !response.data?.orders) return;
+        const ordersList = response.data.orders;
+        setOrderCounts(mergeProfileOrderCounts(ordersList, response.data.viewFilterCounts));
+        setDashboardCounts(computeProfileDashboardCounts(ordersList));
+      } catch {
+        // silent
+      }
+    };
 
     // 4) 위시리스트 + 최근본 카운트
     const fetchCounts = async () => {
@@ -367,18 +361,18 @@ const ProfileScreen: React.FC = () => {
     await Promise.allSettled([
       fetchUnreadCounts(),
       fetchDepositBalance(),
+      fetchOrderDashboardCounts(),
       fetchCounts(),
     ]);
-  }, [isAuthenticated, isGuest, user, normalizedLocale, getOrders]);
+  }, [isAuthenticated, isGuest, user, normalizedLocale]);
 
   // 화면 포커스 시 통합 로더 실행 — 진입 / 다른 탭에서 돌아옴 / 백그라운드 복귀 모두 커버.
   useFocusEffect(
     useCallback(() => {
-      loadProfileData();
-      // 의존성은 빈 배열 유지 — loadProfileData 자체가 useCallback 으로 안정적이라
-      // focus 시점에만 실행되면 충분하다(루프 방지).
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []),
+      if (isAuthenticated && !isGuest) {
+        void loadProfileData();
+      }
+    }, [isAuthenticated, isGuest, loadProfileData]),
   );
 
   // pull-to-refresh — 본문 ScrollView 가 더 이상 위로 못 갈 때 한 번 더 당기면
@@ -933,181 +927,79 @@ const ProfileScreen: React.FC = () => {
 
     return (
       <View style={styles.menuContainer}>
-        {(() => {
-          /*
-            내주문 카드 — 4개 탭(구매대행 / 로켓·3PL / VVIC하이패스 / 배송대행)을
-            하나의 틀거리에 묶고, 첫머리 탭이 붉은색으로 활성화될 때마다
-            밑의 5×2 그리드 내용이 바뀐다. 각 셀: 왼쪽 라벨 / 오른쪽 카운트,
-            disabled=true 셀은 연한 회색 + 클릭 불가.
-          */
-          type Cell = {
-            labelKey: string;
-            count: number;
-            initialTab?: string;
-            disabled?: boolean;
-            accent?: boolean;
-          };
-          // 4개 탭 모두 하나의 BuyList 페지로 내비게이션된다 (별도 페지 없음).
-          // 활성 도메인은 BuyList 의 발주관리 드롭다운에 의해 결정되므로
-          // 셀을 누를 때 domain 파라미터로 어떤 도메인을 활성화할지 전달한다.
-          // BuyListScreen 의 useEffect 가 route.params.domain 변화를 감지해
-          // activeBusinessDomain 을 동기화한다.
-          const tabDomain: Record<typeof activeOrderTab, OrderDashboardDomain> = {
-            purchase_agency: 'purchase_agency',
-            rocket_3pl: 'rocket_3pl',
-            vvic_hipass: 'vvic_hipass',
-            shipping_agency: 'shipping_agency',
-          };
+        <View
+          style={[
+            styles.myOrder,
+            responsive.isTabletLandscape && styles.myOrderTabletLandscape,
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.myOrderHeader}
+            activeOpacity={0.7}
+            onPress={() => openBuyListFromProfile({ initialTab: 'all' })}
+          >
+            <Text style={styles.myOrderHeaderText}>{t('profile.myOrders')} {'>'}</Text>
+          </TouchableOpacity>
 
-          /**
-           * 도메인 하나의 ProfileOrderCounts 를 카드의 10개 셀 배열로 변환한다.
-           * 라벨 구성은 4개 탭이 모두 동일하고, 다른 점은 카운트뿐 — 그래서
-           * 한 함수로 4개 탭의 셀을 일관되게 만든다. 백엔드가 viewFilterCounts
-           * 를 도메인 무관 전체로 내리므로 orderCountsByDomain[domain] 는
-           * 클라이언트에서 도메인 분류 후 다시 계산한 결과를 갖는다.
-           */
-          const buildCells = (
-            counts: ProfileOrderCountsByDomain[keyof ProfileOrderCountsByDomain],
-          ): Cell[] => {
-            const total =
-              (counts.quotePending || 0) +
-              (counts.unpaid || 0) +
-              (counts.to_be_shipped || 0) +
-              (counts.shipped || 0) +
-              (counts.processed || 0) +
-              (counts.shipping_delay || 0) +
-              (counts.error || 0) +
-              (counts.refunds || 0) +
-              (counts.problemProducts || 0);
-            return [
-              // 견적대기 ↔ counts.quotePending (P_QUOTE 가 그대로 남은 주문)
-              { labelKey: 'profile.quoteWaiting', count: counts.quotePending, initialTab: 'category' },
-              { labelKey: 'profile.customerConfirm', count: 0, disabled: true },
-              // 고객결제 ↔ counts.unpaid (BUY_PAY_WAIT + 자동 전환된 P_QUOTE)
-              { labelKey: 'profile.customerPayment', count: counts.unpaid, initialTab: 'unpaid' },
-              { labelKey: 'profile.paymentReview', count: 0, disabled: true },
-              { labelKey: 'profile.orderPurchasing', count: counts.to_be_shipped, initialTab: 'to_be_shipped' },
-              { labelKey: 'profile.orderWarehoused', count: counts.processed, initialTab: 'processed' },
-              { labelKey: 'profile.shipmentWaiting', count: counts.shipping_delay, initialTab: 'shipping_delay' },
-              { labelKey: 'profile.partialShipment', count: 0, disabled: true },
-              { labelKey: 'profile.orderCompleted', count: counts.shipped, initialTab: 'shipped' },
-              { labelKey: 'profile.allOrders', count: total, initialTab: 'all', accent: true },
-            ];
-          };
-
-          const myOrderTabContent: Record<typeof activeOrderTab, Cell[]> = {
-            purchase_agency: buildCells(orderCountsByDomain.purchase_agency),
-            rocket_3pl: buildCells(orderCountsByDomain.rocket_3pl),
-            vvic_hipass: buildCells(orderCountsByDomain.vvic_hipass),
-            shipping_agency: buildCells(orderCountsByDomain.shipping_agency),
-          };
-
-          const tabs: { key: typeof activeOrderTab; labelKey: string }[] = [
-            { key: 'purchase_agency', labelKey: 'profile.tabPurchaseAgency' },
-            { key: 'rocket_3pl', labelKey: 'profile.tabRocket3pl' },
-            { key: 'vvic_hipass', labelKey: 'profile.tabVvicHipass' },
-            { key: 'shipping_agency', labelKey: 'profile.tabShippingAgency' },
-          ];
-
-          const activeCells = myOrderTabContent[activeOrderTab];
-          // 5×2 그리드 — 2개씩 묶어 5행으로 나눈다.
-          const rows: Cell[][] = [];
-          for (let i = 0; i < activeCells.length; i += 2) {
-            rows.push(activeCells.slice(i, i + 2));
-          }
-
-          return (
-            <View
-              style={[
-                styles.myOrder,
-                responsive.isTabletLandscape && styles.myOrderTabletLandscape,
-              ]}
-            >
-              {/* 탭 스트립 — 활성 탭은 붉은색 */}
-              <View style={styles.myOrderTabRow}>
-                {tabs.map((tab, idx) => {
-                  const isActive = activeOrderTab === tab.key;
-                  return (
-                    <React.Fragment key={tab.key}>
-                      <TouchableOpacity
-                        style={styles.myOrderTabItem}
-                        activeOpacity={0.6}
-                        onPress={() => setActiveOrderTab(tab.key)}
-                      >
-                        <Text
-                          style={[
-                            styles.myOrderTabText,
-                            isActive && styles.myOrderTabTextActive,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {t(tab.labelKey)}
-                        </Text>
-                      </TouchableOpacity>
-                      {idx < tabs.length - 1 && (
-                        <Text style={styles.myOrderTabChevron}>{'>'}</Text>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+          <View style={styles.myOrderContent}>
+            {[
+              {
+                labelKey: 'profile.myOrderPurchasePayment',
+                count: dashboardCounts.purchasePaymentPending,
+              },
+              {
+                labelKey: 'profile.myOrderShipmentPayment',
+                count: dashboardCounts.shipPaymentPending,
+              },
+              {
+                labelKey: 'profile.myOrderUnconfirmed',
+                count: dashboardCounts.unconfirmed || notificationCount,
+              },
+            ].map((cell) => (
+              <View key={cell.labelKey} style={styles.myOrderStatCard}>
+                <Text style={styles.myOrderItemCount}>{cell.count}</Text>
+                <Text style={styles.myOrderItemText}>{t(cell.labelKey)}</Text>
               </View>
+            ))}
+          </View>
 
-              {/* 5×2 셀 그리드 — 활성 탭의 데이터로 렌더 */}
-              <View style={styles.myOrderGrid}>
-                {rows.map((row, rowIdx) => (
-                  <View key={rowIdx} style={styles.myOrderGridRow}>
-                    {row.map((cell, cellIdx) => {
-                      const labelStyle = [
-                        styles.myOrderCellLabel,
-                        cell.disabled && styles.myOrderCellLabelDisabled,
-                      ];
-                      const countStyle = [
-                        styles.myOrderCellCount,
-                        cell.disabled && styles.myOrderCellCountDisabled,
-                        cell.accent && styles.myOrderCellCountAccent,
-                      ];
-                      if (cell.disabled) {
-                        return (
-                          <View
-                            key={cellIdx}
-                            style={[styles.myOrderCell, styles.myOrderCellDisabled]}
-                          >
-                            <Text style={labelStyle}>{t(cell.labelKey)}</Text>
-                            <Text style={countStyle}>{cell.count}</Text>
-                          </View>
-                        );
-                      }
-                      return (
-                        <TouchableOpacity
-                          key={cellIdx}
-                          style={styles.myOrderCell}
-                          onPress={() => {
-                            const domain = tabDomain[activeOrderTab];
-                            if (useTabletLandscapeLayout) {
-                              openOrderInEmbeddedPanel(domain, cell);
-                              return;
-                            }
-                            const initialTab = resolveOrderListInitialTab(
-                              domain,
-                              cell,
-                            );
-                            (navigation as any).navigate('BuyList', {
-                              domain,
-                              initialTab,
-                            });
-                          }}
-                        >
-                          <Text style={labelStyle}>{t(cell.labelKey)}</Text>
-                          <Text style={countStyle}>{cell.count}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                ))}
+          <TouchableOpacity
+            style={styles.myOrderErrorsHeader}
+            activeOpacity={0.7}
+            onPress={() =>
+              openBuyListFromProfile({
+                domain: 'error_management',
+                initialTab: 'error',
+              })
+            }
+          >
+            <Text style={styles.myOrderHeaderText}>
+              {t('profile.myOrderErrors')} {'>'}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.myOrderContent}>
+            {[
+              {
+                labelKey: 'profile.toProblem',
+                count: dashboardCounts.problemProduct,
+              },
+              {
+                labelKey: 'profile.toErrorIn',
+                count: dashboardCounts.errorInbound,
+              },
+              {
+                labelKey: 'profile.toShipmentHold',
+                count: dashboardCounts.shipmentHold,
+              },
+            ].map((cell) => (
+              <View key={cell.labelKey} style={styles.myOrderStatCard}>
+                <Text style={styles.myOrderItemCount}>{cell.count}</Text>
+                <Text style={styles.myOrderItemText}>{t(cell.labelKey)}</Text>
               </View>
-            </View>
-          );
-        })()}
+            ))}
+          </View>
+        </View>
         {/*
           Hidden per request — 8-item quick grid (위시리스트 / 팔로우하는
           스토어 / 쿠폰 / 포인트 / Affiliate Marketing / 피드백 / 고객 지원 / 고객
@@ -1954,6 +1846,28 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
     fontWeight: '400',
+  },
+  myOrderSectionTitle: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '700',
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  myOrderErrorsHeader: {
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  myOrderStatCard: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.xs,
+    marginHorizontal: SPACING.xs / 2,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.background,
+    minHeight: 72,
   },
   myOrderContent: {
     flexDirection: 'row',

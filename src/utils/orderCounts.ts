@@ -1,5 +1,6 @@
 import type { Order as ApiOrder } from '../services/orderApi';
 import { resolveOrderProgressStatus } from '../services/orderApi';
+import { WAREHOUSE_DASHBOARD_STATUSES } from './apiProgressStatus';
 
 export type ProfileOrderCounts = {
   // 구매견적 — API progressStatus 가 P_QUOTE 인 주문.
@@ -29,6 +30,30 @@ export type BusinessDomain =
   | 'shipping_agency';
 
 export type ProfileOrderCountsByDomain = Record<BusinessDomain, ProfileOrderCounts>;
+
+/** Profile 내주문 카드 — 발주/출고 결제·미확인·오류 요약 셀용 카운트. */
+export type ProfileDashboardCounts = {
+  /** 발주관리(구매대행·로켓·VVIC·배송대행) 도메인 주문 합계 — BuyList 칩 배지와 동일. */
+  purchasePaymentPending: number;
+  /** 현지입/출고 그룹 주문 합계 — BuyList 현지입/출고 칩 배지와 동일. */
+  shipPaymentPending: number;
+  unconfirmed: number;
+  /** BuyList 오류 > 문제상품(P_MA_PROBLEM) 과 동일. */
+  problemProduct: number;
+  /** BuyList 오류 > 오류입고(E_ERROR) 와 동일. */
+  errorInbound: number;
+  /** BuyList 오류 > 출고보류 + 반품관리 합계. */
+  shipmentHold: number;
+};
+
+const EMPTY_DASHBOARD_COUNTS: ProfileDashboardCounts = {
+  purchasePaymentPending: 0,
+  shipPaymentPending: 0,
+  unconfirmed: 0,
+  problemProduct: 0,
+  errorInbound: 0,
+  shipmentHold: 0,
+};
 
 const classifyOrderDomain = (order: {
   orderType?: string | null;
@@ -113,12 +138,95 @@ const PROFILE_STATUS_MAP: Record<keyof ProfileOrderCounts, readonly string[]> = 
   ],
 };
 
+export const computeBusinessDomainCounts = (
+  orders: Array<{
+    orderType?: string | null;
+    orderMainInfo?: ApiOrder['orderMainInfo'];
+  }>,
+): Record<BusinessDomain, number> => {
+  const counts: Record<BusinessDomain, number> = {
+    purchase_agency: 0,
+    rocket_3pl: 0,
+    vvic_hipass: 0,
+    shipping_agency: 0,
+  };
+  for (const order of orders) {
+    counts[classifyOrderDomain(order)] += 1;
+  }
+  return counts;
+};
+
+/**
+ * BuyList 발주관리 칩 배지와 동일 — 구매대행·로켓·VVIC·배송대행 도메인 주문 합계.
+ * 오류관리·반품관리는 별도 화면이라 도메인 분류에서 제외하지 않는다.
+ */
+/** BuyList STATUS_GROUPS.warehouse 와 동일한 진행상태 목록. */
+const WAREHOUSE_STATUS_GROUP_STATUSES: readonly string[] = [
+  'P_RECEIPT_APPLICATION',
+  ...WAREHOUSE_DASHBOARD_STATUSES,
+];
+
+/** BuyList 현지입/출고 칩 배지와 동일한 그룹 카운트. */
+export const computeWarehouseGroupCount = (
+  orders: Array<{
+    progressStatus?: string | null;
+    statusHistory?: Array<{ status?: string | null }>;
+    paymentStatus?: string | null;
+    firstTierCost?: ApiOrder['firstTierCost'];
+    orderMainInfo?: ApiOrder['orderMainInfo'];
+    orderType?: string | null;
+    orderNumber?: string | null;
+  }>,
+): number => {
+  const progressCounts = computeProgressStatusCounts(orders);
+  return WAREHOUSE_STATUS_GROUP_STATUSES.reduce(
+    (sum, status) => sum + (progressCounts[status] ?? 0),
+    0,
+  );
+};
+
+/** BuyList 오류 > 출고보류(E_SHIPMENT_HOLD) + 반품관리(USER_REFUND_REQ) 합계. */
+export const computeShipmentHoldDashboardCount = (
+  orders: Array<{
+    progressStatus?: string | null;
+    statusHistory?: Array<{ status?: string | null }>;
+    paymentStatus?: string | null;
+    firstTierCost?: ApiOrder['firstTierCost'];
+    orderMainInfo?: ApiOrder['orderMainInfo'];
+    orderType?: string | null;
+    orderNumber?: string | null;
+  }>,
+): number => {
+  const progressCounts = computeProgressStatusCounts(orders);
+  return (
+    (progressCounts.E_SHIPMENT_HOLD ?? 0) +
+    (progressCounts.E_CUSTOMER_RETURN_REQ ?? 0)
+  );
+};
+
+export const computePurchaseAgencyDropdownCount = (
+  orders: Array<{
+    orderType?: string | null;
+    orderMainInfo?: ApiOrder['orderMainInfo'];
+  }>,
+): number => {
+  const domainCounts = computeBusinessDomainCounts(orders);
+  return (
+    domainCounts.purchase_agency +
+    domainCounts.rocket_3pl +
+    domainCounts.vvic_hipass +
+    domainCounts.shipping_agency
+  );
+};
+
 export const getOrderProgressStatus = (order: {
   progressStatus?: string | null;
   statusHistory?: Array<{ status?: string | null }>;
   paymentStatus?: string | null;
   firstTierCost?: ApiOrder['firstTierCost'];
   orderMainInfo?: ApiOrder['orderMainInfo'];
+  orderType?: string | null;
+  orderNumber?: string | null;
 }): string =>
   resolveOrderProgressStatus({
     progressStatus: order.progressStatus,
@@ -126,6 +234,8 @@ export const getOrderProgressStatus = (order: {
     paymentStatus: order.paymentStatus,
     firstTierCost: order.firstTierCost,
     orderMainInfo: order.orderMainInfo,
+    orderType: order.orderType,
+    orderNumber: order.orderNumber,
   });
 
 export const computeProgressStatusCounts = (
@@ -241,4 +351,33 @@ export const computeProfileOrderCountsByDomain = (
     vvic_hipass: computeProfileOrderCounts(buckets.vvic_hipass),
     shipping_agency: computeProfileOrderCounts(buckets.shipping_agency),
   };
+};
+
+export const computeProfileDashboardCounts = (
+  orders: Array<{
+    progressStatus?: string | null;
+    statusHistory?: Array<{ status?: string | null }>;
+    paymentStatus?: string | null;
+    firstTierCost?: ApiOrder['firstTierCost'];
+    orderMainInfo?: ApiOrder['orderMainInfo'];
+    orderType?: string | null;
+    orderNumber?: string | null;
+    unreadCount?: number;
+  }>,
+): ProfileDashboardCounts => {
+  const counts = { ...EMPTY_DASHBOARD_COUNTS };
+  counts.purchasePaymentPending = computePurchaseAgencyDropdownCount(orders);
+  counts.shipPaymentPending = computeWarehouseGroupCount(orders);
+
+  const progressCounts = computeProgressStatusCounts(orders);
+  counts.problemProduct = progressCounts.P_MA_PROBLEM ?? 0;
+  counts.errorInbound = progressCounts.E_ERROR ?? 0;
+  counts.shipmentHold = computeShipmentHoldDashboardCount(orders);
+
+  for (const order of orders) {
+    if ((order.unreadCount ?? 0) > 0) {
+      counts.unconfirmed += 1;
+    }
+  }
+  return counts;
 };

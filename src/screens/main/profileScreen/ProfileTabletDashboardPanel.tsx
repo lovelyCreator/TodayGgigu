@@ -162,6 +162,8 @@ export const ProfileTabletDashboardPanel: React.FC<
 
           embeddedInitialTab={route.initialTab}
 
+          embeddedProgressStatus={route.progressStatus}
+
         />,
 
       );

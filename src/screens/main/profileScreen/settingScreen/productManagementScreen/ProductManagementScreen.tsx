@@ -39,8 +39,8 @@ import {
   getListPagePadding,
 } from '../../../../../utils/responsiveLayout';
 
-/** 상품리스트 그리드 — 한 행에 표시할 카드 수. */
-const PRODUCT_MGMT_GRID_COLS = 3;
+/** 상품리스트 — 한 행에 표시할 카드 수 (1 = 한 줄에 카드 1개). */
+const PRODUCT_MGMT_GRID_COLS = 1;
 
 type Nav = StackNavigationProp<RootStackParamList, 'ProductManagement'>;
 
@@ -147,12 +147,12 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
   // 활성 정렬의 방향 — chip 한 번 더 누르면 asc<->desc 토글.
   // 기본은 desc (최신/높은 가격/높은 판매량부터). 다른 chip 으로 갈아탈 땐 desc 로 초기화.
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  // 보기 모드는 grid 로 고정. 토글 단추는 사용자 요청으로 제거됐지만
+  // 보기 모드는 list(한 행 1카드) 로 고정. 토글 단추는 사용자 요청으로 제거됐지만
   // useState 를 그대로 유지한다 — Fast Refresh 상황에서 hooks 인덱스가
   // 어긋나 "Should have a queue" Render Error 가 뜨는 것을 막기 위함.
   // 또한 추후 토글 단추를 다시 노출할 때 그대로 setter 가 살아 있어야 한다.
   // setViewMode 는 의도적으로 미사용이며 void 처리로 미사용 힌트만 끈다.
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   void setViewMode;
 
   const responsive = useResponsive();
@@ -1121,7 +1121,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
   const renderBody = () => {
     if (loading) {
       // Skeleton fills the list area while the seller's products are fetched.
-      return <ScreenSkeleton variant="grid" showHeader={false} />;
+      return <ScreenSkeleton variant="list" showHeader={false} />;
     }
     if (error) {
       return (
@@ -2181,6 +2181,7 @@ const styles = StyleSheet.create({
   },
   productCard: {
     flexDirection: 'row',
+    width: '100%',
     backgroundColor: COLORS.white,
     borderRadius: 10,
     borderWidth: 1,

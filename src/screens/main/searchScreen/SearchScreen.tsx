@@ -46,6 +46,9 @@ import ViewListIcon from '../../../assets/icons/ViewListIcon';
 import CameraIcon from '../../../assets/icons/CameraIcon';
 import { useSearchProductsMutation } from '../../../hooks/useSearchProductsMutation';
 import DeleteIcon from '../../../assets/icons/DeleteIcon';
+import { looksLikeDirectProductSearch, resolveProductFromSearchInput } from '../../../utils/parseProductLinkSearch';
+import { productPlatformToCompanyTab, resolveProductPlatformKey } from '../../../utils/productPlatform';
+import { openProductDetail } from '../../../utils/openProductDetail';
 
 
 const { width } = Dimensions.get('window');
@@ -244,6 +247,13 @@ const SearchScreenComponent: React.FC = () => {
     
     // Hide autocomplete if query is empty
     if (!text || text.trim().length === 0) {
+      setShowAutocomplete(false);
+      setAutocompleteSuggestions([]);
+      return;
+    }
+
+    // Product links / offerId / productNo — skip keyword autocomplete
+    if (looksLikeDirectProductSearch(text)) {
       setShowAutocomplete(false);
       setAutocompleteSuggestions([]);
       return;
@@ -468,6 +478,35 @@ const SearchScreenComponent: React.FC = () => {
     });
   };
 
+  const resolveSearchPlatform = useCallback((): '1688' | 'taobao' => {
+    const company = selectedCompanyRef.current;
+    if (company === 'Taobao') return 'taobao';
+    if (company === '1688') return '1688';
+    return resolveProductPlatformKey(selectedPlatform);
+  }, [selectedPlatform]);
+
+  const tryOpenProductFromSearchInput = useCallback(
+    (input: string): boolean => {
+      const defaultSource = resolveSearchPlatform();
+      const parsed = resolveProductFromSearchInput(input, defaultSource);
+      if (!parsed) return false;
+
+      const companyTab = productPlatformToCompanyTab(parsed.source);
+      setSelectedCompany(companyTab);
+      selectedCompanyRef.current = companyTab;
+      setShowAutocomplete(false);
+
+      openProductDetail(navigation, {
+        productId: parsed.offerId,
+        offerId: parsed.offerId,
+        source: parsed.source,
+        country: locale,
+      });
+      return true;
+    },
+    [navigation, locale, resolveSearchPlatform],
+  );
+
   // Preload recent searches when component mounts
   useEffect(() => {
     const loadInitialSearches = async () => {
@@ -567,6 +606,10 @@ const SearchScreenComponent: React.FC = () => {
     
     // Hide autocomplete
     setShowAutocomplete(false);
+
+    if (tryOpenProductFromSearchInput(searchQuery)) {
+      return;
+    }
     
     // Reset states - always start fresh with 'All' platforms
     isRecentSearchClickRef.current = false;
@@ -578,7 +621,7 @@ const SearchScreenComponent: React.FC = () => {
     setAllProducts([]);
 
     loadProducts(selectedSort || 'best_match', 1);
-  }, [searchQuery, selectedSort]);
+  }, [searchQuery, selectedSort, tryOpenProductFromSearchInput]);
 
   // Note: Removed automatic search on searchQuery change
   // Search now only triggers when:
@@ -774,6 +817,11 @@ const SearchScreenComponent: React.FC = () => {
 
     if (!searchKeyword) {
       // console.warn('No search keyword available, skipping product load');
+      isLoadingRef.current = false;
+      return;
+    }
+
+    if (tryOpenProductFromSearchInput(searchKeyword)) {
       isLoadingRef.current = false;
       return;
     }

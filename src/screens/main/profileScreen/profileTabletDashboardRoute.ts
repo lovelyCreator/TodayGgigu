@@ -10,7 +10,7 @@ export type BuyListEmbedDomain =
   | 'refund_management';
 
 export type ProfileDashboardRoute =
-  | { type: 'buyList'; domain: BuyListEmbedDomain; initialTab: string }
+  | { type: 'buyList'; domain: BuyListEmbedDomain; initialTab: string; progressStatus?: string }
   | { type: 'cart' }
   | { type: 'productList' }
   | { type: 'category' }
@@ -143,6 +143,8 @@ export const mapNavigationTargetToDashboardRoute = (
         type: 'buyList',
         domain: (params?.domain as BuyListEmbedDomain) ?? 'purchase_agency',
         initialTab: String(params?.initialTab ?? 'all'),
+        progressStatus:
+          typeof params?.progressStatus === 'string' ? params.progressStatus : undefined,
       };
     case 'Main': {
       const screen = params?.screen as string | undefined;

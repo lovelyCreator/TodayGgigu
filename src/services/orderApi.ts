@@ -668,6 +668,20 @@ export interface OrderResponse {
   };
 }
 
+export interface OrderItemBarcodeInfo {
+  barcodeLabelType?: string;
+  barcodeIdeFormat?: string;
+  barcodeProductName?: string;
+  barcodeContent?: string;
+  barcodeIdeContent?: string;
+  barcodeNumber?: string;
+  barcodeImageUrl?: string;
+  labelProductName?: string;
+  labelContent?: string;
+  labelBarcode?: string;
+  labelFileUri?: string | null;
+}
+
 export interface OrderItemSkuAttribute {
   attributeId: number;
   attributeName: string;
@@ -710,6 +724,8 @@ export interface OrderItem {
   incomeImgUrl?: string[];
   issueImgUrl?: string[];
   productStatus?: string;
+  productNo?: string;
+  barcodeInfo?: OrderItemBarcodeInfo;
   itemAmount?: number;
   sellerShippingFee?: number;
   productOrderNumber?: string;
@@ -1146,12 +1162,20 @@ const normalizeProxyOrderItem = (item: any, locale: AppLocale = 'ko'): OrderItem
         : undefined),
     categoryName: item.categoryName ?? item.categoryNameMultiLang,
     sellerOpenId: item.sellerOpenId ?? '',
+    notes: item.notes ?? item.note ?? item.usermemo,
     source,
     otherSite: item.otherSite,
     addServices: item.addServices,
     incomeImgUrl: item.incomeImgUrl ?? item.incomeimgurl ?? [],
     issueImgUrl: item.issueImgUrl ?? item.issueimgurl ?? [],
     productStatus: item.productStatus,
+    productNo:
+      item.productNo != null && String(item.productNo).trim() !== ''
+        ? String(item.productNo).trim()
+        : item.itemUniqueNo != null
+          ? String(item.itemUniqueNo)
+          : undefined,
+    barcodeInfo: item.barcodeInfo,
     itemAmount: coerceOrderAmount(item.itemAmount),
     sellerShippingFee: coerceOrderAmount(item.sellerShippingFee),
     productOrderNumber: item.productOrderNumber,

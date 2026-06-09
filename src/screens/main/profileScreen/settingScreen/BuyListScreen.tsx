@@ -30,7 +30,8 @@ import FeedbackIcon from '../../../../assets/icons/FeedbackIcon';
 import CustomerSupportIcon from '../../../../assets/icons/CustomerSupportIcon';
 import HeadsetMicIcon from '../../../../assets/icons/HeadsetMicIcon';
 import SellerShopIcon from '../../../../assets/icons/SellerShopIcon';
-import { OrderFilterModal } from '../../../../components';
+import { OrderFilterModal, BuyListProductSelectionModal } from '../../../../components';
+import type { BuyListProductSelectionItem } from '../../../../components/BuyListProductSelectionModal';
 import { useGetOrdersMutation } from '../../../../hooks/useGetOrdersMutation';
 import { Order as ApiOrder } from '../../../../services/orderApi';
 import {
@@ -61,9 +62,7 @@ import { productsApi } from '../../../../services/productsApi';
 import { fetchAdditionalServices } from '../../../../services/additionalServicesApi';
 import { translations } from '../../../../i18n/translations';
 import { useCancelOrderMutation } from '../../../../hooks/useCancelOrderMutation';
-import { useAddToCartMutation } from '../../../../hooks/useAddToCartMutation';
 import { cartApi } from '../../../../services/cartApi';
-import { useProductDetailMutation } from '../../../../hooks/useProductDetailMutation';
 import type { ViewFilterType } from '../../../../services/orderApi';
 import { inquiryApi } from '../../../../services/inquiryApi';
 import { useSocket } from '../../../../context/SocketContext';
@@ -543,12 +542,14 @@ type BuyListScreenProps = {
   embedded?: boolean;
   embeddedDomain?: BuyListBusinessDomain | 'error_management' | 'refund_management';
   embeddedInitialTab?: string;
+  embeddedProgressStatus?: string;
 };
 
 const BuyListScreen: React.FC<BuyListScreenProps> = ({
   embedded = false,
   embeddedDomain,
   embeddedInitialTab,
+  embeddedProgressStatus,
 }) => {
   const navigation = useNavigation<BuyListScreenNavigationProp>();
   const route = useRoute<BuyListScreenRouteProp>();
@@ -580,15 +581,29 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   // 'purchase_agency' 가 기본값이며 이때만 기존 BuyListScreen 본문(주문 카드 리스트)
   // 이 그대로 표시된다. 나머지 4개 도메인은 BuyListScreen 안에서 별도의
   // placeholder 대시보드를 렌더한다 (페지 이동 없이 본문만 교체).
-  type BusinessDomain =
-    | BuyListBusinessDomain
+  type ErrorSubFilter =
     | 'error_management'
-    | 'refund_management';
-  const initialDomain =
-    (embedded && embeddedDomain
-      ? embeddedDomain
-      : route.params?.domain as BusinessDomain | undefined) ?? 'purchase_agency';
+    | 'refund_management'
+    | 'shipment_hold'
+    | 'problem_product';
+  type BusinessDomain = BuyListBusinessDomain;
+  const routeDomain = (embedded ? embeddedDomain : route.params?.domain) as
+    | BusinessDomain
+    | 'error_management'
+    | 'refund_management'
+    | undefined;
+  const initialDomain: BusinessDomain =
+    routeDomain === 'error_management' || routeDomain === 'refund_management'
+      ? 'purchase_agency'
+      : (routeDomain ?? 'purchase_agency');
+  const initialErrorSubFilter: ErrorSubFilter | null =
+    routeDomain === 'error_management' || routeDomain === 'refund_management'
+      ? routeDomain
+      : null;
   const [activeBusinessDomain, setActiveBusinessDomain] = useState<BusinessDomain>(initialDomain);
+  const [errorSubFilter, setErrorSubFilter] = useState<ErrorSubFilter | null>(
+    initialErrorSubFilter,
+  );
   // 발주관리 칩의 화면상 좌표 — 드롭다운을 칩 바로 밑에 띄우기 위해 측정.
   // 화면 회전/스크롤로 위치가 바뀔 수 있으므로 클릭할 때마다 다시 측정한다.
   const [purchaseChipLayout, setPurchaseChipLayout] = useState<{
@@ -606,22 +621,13 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
     height: number;
   } | null>(null);
   const warehouseChipRef = useRef<View | null>(null);
-  // 통관방식 칩의 화면상 좌표 — 발주관리·현지입/출고와 같은 앵커링 방식.
-  const [customsChipLayout, setCustomsChipLayout] = useState<{
+  const [errorChipLayout, setErrorChipLayout] = useState<{
     x: number;
     y: number;
     width: number;
     height: number;
   } | null>(null);
-  const customsChipRef = useRef<View | null>(null);
-  // 운송방식 칩의 화면상 좌표 — 같은 앵커링 방식.
-  const [transportChipLayout, setTransportChipLayout] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
-  const transportChipRef = useRef<View | null>(null);
+  const errorChipRef = useRef<View | null>(null);
   const [selectedProgressStatus, setSelectedProgressStatus] = useState<string | null>(null);
   // 현지입/출고 드롭다운 필터 — '전체' / '입고' / '출고' 3가지.
   // 'all' 일 때는 현지 그룹 전체, 'in' 은 입고 관련 진행상태, 'out' 은 출고 관련.
@@ -660,8 +666,21 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
 
   useEffect(() => {
     if (!embedded || !embeddedDomain) return;
-    setActiveBusinessDomain(embeddedDomain);
     setExpandedStatusGroup(null);
+    if (
+      embeddedDomain === 'error_management' ||
+      embeddedDomain === 'refund_management'
+    ) {
+      setActiveBusinessDomain('purchase_agency');
+      setActiveTab('error');
+      setErrorSubFilter(embeddedDomain);
+      setSelectedProgressStatus(
+        embeddedDomain === 'refund_management' ? 'USER_REFUND_REQ' : 'E_ERROR',
+      );
+      return;
+    }
+    setActiveBusinessDomain(embeddedDomain);
+    setErrorSubFilter(null);
     setSelectedProgressStatus(null);
   }, [embedded, embeddedDomain]);
 
@@ -670,38 +689,60 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   // 모두 적용한다. 단순히 activeBusinessDomain 만 바꾸면 selected 표시는 되지만
   // selectedProgressStatus 같은 부수 필터가 이전 세션 값으로 남아 충돌이 생긴다.
   useEffect(() => {
-    const domain = route.params?.domain as BusinessDomain | undefined;
+    const domain = route.params?.domain as
+      | BusinessDomain
+      | 'error_management'
+      | 'refund_management'
+      | undefined;
     if (!domain) return;
-    setActiveBusinessDomain(domain);
     setExpandedStatusGroup(null);
     switch (domain) {
       case 'purchase_agency':
-        // 카드 셀에서 들어올 때 initialTab 이 함께 오므로 activeTab 은 위쪽
-        // useEffect 가 처리한다. 진행상태 필터만 비우면 충분.
+        setActiveBusinessDomain(domain);
+        setErrorSubFilter(null);
         setSelectedProgressStatus(null);
         break;
       case 'rocket_3pl':
       case 'vvic_hipass':
       case 'shipping_agency':
-        // 도메인 그룹만 전환 — 세부 진행상태 필터 해제. activeTab 은 initialTab
-        // (대개 'all') 이 위쪽 useEffect 에서 반영됨.
+        setActiveBusinessDomain(domain);
+        setErrorSubFilter(null);
         setSelectedProgressStatus(null);
         break;
       case 'error_management':
+        setActiveBusinessDomain('purchase_agency');
         setActiveTab('error');
-        setSelectedProgressStatus(null);
+        setErrorSubFilter('error_management');
+        setSelectedProgressStatus('E_ERROR');
         break;
       case 'refund_management':
+        setActiveBusinessDomain('purchase_agency');
         setActiveTab('error');
+        setErrorSubFilter('refund_management');
         setSelectedProgressStatus('USER_REFUND_REQ');
         break;
     }
   }, [route.params?.domain]);
+
+  useEffect(() => {
+    const progressStatus =
+      (embedded ? embeddedProgressStatus : route.params?.progressStatus) ?? null;
+    if (!progressStatus) return;
+    setActiveBusinessDomain('purchase_agency');
+    setSelectedProgressStatus(progressStatus);
+    if (progressStatus === 'P_MA_PROBLEM') {
+      setActiveTab('error');
+      setErrorSubFilter('problem_product');
+    } else if (progressStatus === 'E_SHIPMENT_HOLD') {
+      setActiveTab('error');
+      setErrorSubFilter('shipment_hold');
+    } else if (progressStatus === 'E_ERROR') {
+      setActiveTab('error');
+      setErrorSubFilter('error_management');
+    }
+  }, [embedded, embeddedProgressStatus, route.params?.progressStatus]);
+
   const [unreadCounts, setUnreadCounts] = useState<{ [inquiryId: string]: number }>({});
-  const [selectedCustomsMethod, setSelectedCustomsMethod] = useState<string | null>(null);
-  const [selectedTransportMethod, setSelectedTransportMethod] = useState<string | null>(null);
-  const [showCustomsDropdown, setShowCustomsDropdown] = useState(false);
-  const [showTransportDropdown, setShowTransportDropdown] = useState(false);
   const [selectAll, setSelectAll] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(new Set());
@@ -713,14 +754,10 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   const [selectedEndDate, setSelectedEndDate] = useState<Date | null>(null);
   const [pickingEnd, setPickingEnd] = useState(false);
   // Add to cart modal state
-  const [addToCartModalVisible, setAddToCartModalVisible] = useState(false);
-  const [addToCartItem, setAddToCartItem] = useState<OrderItem | null>(null);
-  const [addToCartProductDetail, setAddToCartProductDetail] = useState<any>(null);
-  const [addToCartQuantity, setAddToCartQuantity] = useState(1);
-  const [addToCartSelectedSku, setAddToCartSelectedSku] = useState<any>(null);
-  const [addToCartSelectedAttrs, setAddToCartSelectedAttrs] = useState<Record<string, string>>({});
+  const [productSelectionItems, setProductSelectionItems] = useState<
+    BuyListProductSelectionItem[] | null
+  >(null);
   const [isRepurchasing, setIsRepurchasing] = useState(false);
-  const [isConfirmingAddToCart, setIsConfirmingAddToCart] = useState(false);
   const [additionalServiceIconById, setAdditionalServiceIconById] = useState<
     Record<string, string>
   >({});
@@ -740,8 +777,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   const [inlinePickingEnd, setInlinePickingEnd] = useState(false);
   // Draft states — only applied when user presses Apply
   const [draftPlatform, setDraftPlatform] = useState<string>('');
-  const [draftCustoms, setDraftCustoms] = useState<string | null>(null);
-  const [draftTransport, setDraftTransport] = useState<string | null>(null);
   const [draftStartDate, setDraftStartDate] = useState<Date | null>(null);
   const [draftEndDate, setDraftEndDate] = useState<Date | null>(null);
   const [refundModalOrder, setRefundModalOrder] = useState<Order | null>(null);
@@ -912,64 +947,53 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
     }
   };
 
-  const { mutate: addToCart } = useAddToCartMutation({
-    onSuccess: () => {
-      showToast(t('product.addedToCart') || 'Added to cart', 'success');
-    },
-    onError: (error) => {
-      showToast(error || 'Failed to add to cart', 'error');
-    },
-  });
-
-  const handleRepurchase = async (order: Order) => {
-    if (isRepurchasing) return;
-    setIsRepurchasing(true);
+  const repurchaseOrderItems = async (order: Order) => {
     let successCount = 0;
     let failCount = 0;
 
-    try {
-      for (const item of order.items) {
-        const source = item.source || '1688';
-        const detailRes = await productsApi.getProductDetail(item.offerId, source, locale);
-        if (!detailRes.success || !detailRes.data) {
-          failCount += 1;
-          continue;
-        }
-
-        const request = buildAddToCartRequestFromDetail({
-          productDetail: detailRes.data,
-          quantity: item.quantity,
-          locale,
-          preferredSkuId: item.skuId,
-          preferredSpecId: item.specId,
-          orderItemFallback: buildOrderItemCartFallback(item),
-        });
-
-        if (!request) {
-          failCount += 1;
-          continue;
-        }
-
-        const response = await cartApi.addToCart(request, locale);
-        if (response.success) {
-          successCount += 1;
-        } else {
-          failCount += 1;
-        }
+    for (const item of order.items) {
+      const source = item.source || '1688';
+      const detailRes = await productsApi.getProductDetail(item.offerId, source, locale);
+      if (!detailRes.success || !detailRes.data) {
+        failCount += 1;
+        continue;
       }
 
-      if (successCount > 0 && failCount === 0) {
-        showToast(t('product.addedToCart') || 'Added to cart', 'success');
-      } else if (successCount > 0) {
-        showToast(
-          t('buyList.addToCartPartialSuccess') || 'Some items were added to cart',
-          'warning',
-        );
+      const request = buildAddToCartRequestFromDetail({
+        productDetail: detailRes.data,
+        quantity: item.quantity,
+        locale,
+        preferredSkuId: item.skuId,
+        preferredSpecId: item.specId,
+        orderItemFallback: buildOrderItemCartFallback(item),
+      });
+
+      if (!request) {
+        failCount += 1;
+        continue;
+      }
+
+      const response = await cartApi.addToCart(request, locale);
+      if (response.success) {
+        successCount += 1;
       } else {
-        showToast(t('product.failedToAdd') || 'Failed to add to cart', 'error');
+        failCount += 1;
       }
-    } finally {
-      setIsRepurchasing(false);
+    }
+
+    return { successCount, failCount };
+  };
+
+  const showRepurchaseResultToast = (successCount: number, failCount: number) => {
+    if (successCount > 0 && failCount === 0) {
+      showToast(t('product.addedToCart') || 'Added to cart', 'success');
+    } else if (successCount > 0) {
+      showToast(
+        t('buyList.addToCartPartialSuccess') || 'Some items were added to cart',
+        'warning',
+      );
+    } else {
+      showToast(t('product.failedToAdd') || 'Failed to add to cart', 'error');
     }
   };
 
@@ -982,70 +1006,31 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
     });
   };
 
-  const { mutate: fetchProductDetail, isLoading: isLoadingProductDetail } = useProductDetailMutation({
-    onSuccess: (data) => {
-      setAddToCartProductDetail(data);
-      // Pre-select first SKU variant if available
-      const variants = data?.product?.rawVariants || data?.rawVariants || [];
-      if (variants.length > 0) setAddToCartSelectedSku(variants[0]);
-    },
-    onError: () => {
-      // Show modal with basic item info even if detail fetch fails
-      setAddToCartProductDetail(null);
-    },
-  });
-
-  const handleOpenAddToCartModal = (item: OrderItem) => {
-    setAddToCartItem(item);
-    setAddToCartQuantity(item.quantity || 1);
-    setAddToCartSelectedSku(null);
-    setAddToCartSelectedAttrs({});
-    setAddToCartProductDetail(null);
-    setAddToCartModalVisible(true);
-    fetchProductDetail(item.offerId, item.source || '1688', locale);
-  };
-
-  const handleConfirmAddToCart = async () => {
-    if (!addToCartItem || isConfirmingAddToCart) return;
-    setIsConfirmingAddToCart(true);
-
-    try {
-      let productDetail = addToCartProductDetail;
-      if (!productDetail) {
-        const source = addToCartItem.source || '1688';
-        const detailRes = await productsApi.getProductDetail(
-          addToCartItem.offerId,
-          source,
-          locale,
-        );
-        if (!detailRes.success || !detailRes.data) {
-          showToast(t('product.failedToAdd') || 'Failed to add to cart', 'error');
-          return;
-        }
-        productDetail = detailRes.data;
+  const collectSelectionItemsFromOrders = (
+    selectedOrders: Order[],
+  ): BuyListProductSelectionItem[] => {
+    const items: BuyListProductSelectionItem[] = [];
+    const seen = new Set<string>();
+    for (const order of selectedOrders) {
+      for (const item of order.items) {
+        const key = `${item.offerId}:${item.skuId || item.specId || item.itemId || ''}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push({
+          offerId: item.offerId,
+          productName: item.productName,
+          image: item.image,
+          companyName: item.companyName,
+          companyNameMultiLang: item.companyNameMultiLang,
+          source: item.source,
+          skuId: item.skuId,
+          specId: item.specId,
+          quantity: item.quantity,
+          price: item.price,
+        });
       }
-
-      const request = buildAddToCartRequestFromDetail({
-        productDetail,
-        quantity: addToCartQuantity,
-        locale,
-        selectedSku: addToCartSelectedSku,
-        selectedVariations: addToCartSelectedAttrs,
-        preferredSkuId: addToCartItem.skuId,
-        preferredSpecId: addToCartItem.specId,
-        orderItemFallback: buildOrderItemCartFallback(addToCartItem),
-      });
-
-      if (!request) {
-        showToast(t('product.invalidProductId') || 'Invalid product', 'error');
-        return;
-      }
-
-      await addToCart(request, locale);
-      setAddToCartModalVisible(false);
-    } finally {
-      setIsConfirmingAddToCart(false);
     }
+    return items;
   };
 
   // Delete from wishlist mutation
@@ -1382,16 +1367,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   getOrdersRef.current = getOrders;
 
   const fetchOrders = useCallback(() => {
-    const hasSimplifiedClearance =
-      selectedCustomsMethod === '간이통관' ? true :
-      selectedCustomsMethod === '일반통관' ? false :
-      undefined;
-
-    const transferMethod =
-      selectedTransportMethod === '항공' ? 'air' :
-      selectedTransportMethod === '선박' ? 'ship' :
-      undefined;
-
     const formatDate = (d: Date) =>
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -1406,8 +1381,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       platform: filterPlatform || undefined,
       viewFilter: 'all',
       // Status filters are applied client-side so API codes like P_PENDING still match BUY_PAY_WAIT
-      hasSimplifiedClearance,
-      transferMethod: transferMethod as 'air' | 'ship' | undefined,
       periodFrom: selectedStartDate ? formatDate(selectedStartDate) : undefined,
       periodTo: selectedEndDate ? formatDate(selectedEndDate) : undefined,
     });
@@ -1416,8 +1389,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
     filters.orderNumber,
     orderSearchText,
     filterPlatform,
-    selectedCustomsMethod,
-    selectedTransportMethod,
     selectedStartDate,
     selectedEndDate,
   ]);
@@ -2055,98 +2026,40 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
           )}
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.orderActionButtons}
-          contentContainerStyle={styles.orderActionButtonsContent}
-        >
-          {/* Left button: Cancel order (unpaid) or Repurchase */}
-          {order.status === 'unpaid' ? (
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => {
-                // 모달 열 때 기본 사유는 첫 번째 항목(단순 변심) id 로.
-                setCancelReason('changedMyMind');
-                setCancelOtherText('');
-                setCancelOrderModal({ orderId: order.id });
-              }}
-            >
-              <Text style={styles.secondaryButtonText}>{t('cart.cancelOrder') || 'Cancel order'}</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[styles.secondaryButton, isRepurchasing && styles.secondaryButtonDisabled]}
-              onPress={() => handleRepurchase(order)}
-              disabled={isRepurchasing}
-            >
-              {isRepurchasing ? (
-                <ActivityIndicator size="small" color={COLORS.text.secondary} />
-              ) : (
-                <Text style={styles.secondaryButtonText}>{t('profile.repurchase') || 'Repurchase'}</Text>
-              )}
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity style={styles.secondaryButton} onPress={() => order.items[0] && handleOpenAddToCartModal(order.items[0])}>
-            <Text style={styles.secondaryButtonText}>
-              {order.status === 'pending_review' ? t('buyList.review') : t('buyList.addToCart')}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.secondaryButton}
-            onPress={() => {
-              const address = (order as any).shippingAddress;
-              setEditAddress({
-                zonecode: address?.zipCode || '',
-                roadAddress: address?.detailedAddress || '',
-                detailAddress: address?.detailedAddress ? `${address.detailedAddress}`.trim() : '',
-                recipient: address?.recipient || '',
-                contact: address?.contact || '',
-                customsCode: address?.personalCustomsCode || '',
-              });
-              setSelectedOrderForAddress(order);
-              setIsDefaultAddress(address?.defaultAddress || false);
-              setAddressModalVisible(true);
-            }}
+        {(order.status === 'unpaid' ||
+          canonicalStatus === 'P_PENDING' ||
+          canonicalStatus === 'IO_PAY_PENDING') && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.orderActionButtons}
+            contentContainerStyle={styles.orderActionButtonsContent}
           >
-            <Text style={styles.secondaryButtonText}>{t('buyList.editAddress')}</Text>
-          </TouchableOpacity>
+            {order.status === 'unpaid' && (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => {
+                  setCancelReason('changedMyMind');
+                  setCancelOtherText('');
+                  setCancelOrderModal({ orderId: order.id });
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {t('cart.cancelOrder') || 'Cancel order'}
+                </Text>
+              </TouchableOpacity>
+            )}
 
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={() => {
-              setRefundSelectedItems(new Set());
-              setRefundModalOrder(order);
-            }}
-          >
-            <Text style={styles.secondaryButtonText}>{t('profile.refund') || 'Refund'}</Text>
-          </TouchableOpacity>
-
-          {/* Primary button: Pay for unpaid/waiting settlement, Confirm receipt for shipped */}
-          {(canonicalStatus === 'P_PENDING' || canonicalStatus === 'IO_PAY_PENDING') ? (
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() =>
-                embedNavigate('OrderPayment', { orderId: order.id })
-              }
-            >
-              <Text style={styles.primaryButtonText}>{t('cart.pay') || 'Pay Now'}</Text>
-            </TouchableOpacity>
-          ) : (canonicalStatus === 'INTERNATIONAL_SHIPPED' || canonicalStatus === 'ORDER_RECEIVED') ? (
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() => handleConfirmReceived(order.id)}
-            >
-              <Text style={styles.primaryButtonText}>{t('profile.confirmReceipt') || 'Confirm receipt'}</Text>
-            </TouchableOpacity>
-          ) : order.status === 'progressing' ? (
-            <TouchableOpacity style={[styles.primaryButton, { opacity: 0.4 }]} disabled>
-              <Text style={styles.primaryButtonText}>{t('profile.confirmReceipt') || 'Confirm receipt'}</Text>
-            </TouchableOpacity>
-          ) : null}
-        </ScrollView>
+            {(canonicalStatus === 'P_PENDING' || canonicalStatus === 'IO_PAY_PENDING') && (
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={() => embedNavigate('OrderPayment', { orderId: order.id })}
+              >
+                <Text style={styles.primaryButtonText}>{t('cart.pay') || 'Pay Now'}</Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+        )}
       </View>
     );
   };
@@ -2171,24 +2084,46 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
           }),
         );
       }
-      if (selectedTransportMethod === '항공') {
-        result = result.filter(order => order.transferMethod === 'air');
-      } else if (selectedTransportMethod === '선박') {
-        result = result.filter(order => order.transferMethod === 'ship');
-      }
       // 1) 사업 도메인 필터 — 발주관리 드롭다운의 활성 항목으로 1차 필터링.
       //    구매대행/로켓-3PL/VVIC하이패스/배송대행 각 도메인은
       //    resolveOrderBusinessDomain 으로 분류되며 우선권 규칙(VVIC > Rocket > Shipping > Purchase)
       //    을 따른다. 오류/반품관리는 도메인 필터 대신 status 그룹 필터를 따른다.
       if (
-        activeBusinessDomain === 'purchase_agency' ||
-        activeBusinessDomain === 'rocket_3pl' ||
-        activeBusinessDomain === 'vvic_hipass' ||
-        activeBusinessDomain === 'shipping_agency'
+        activeTab !== 'error' &&
+        (activeBusinessDomain === 'purchase_agency' ||
+          activeBusinessDomain === 'rocket_3pl' ||
+          activeBusinessDomain === 'vvic_hipass' ||
+          activeBusinessDomain === 'shipping_agency')
       ) {
         result = result.filter(
           (order) => resolveOrderBusinessDomain(order) === activeBusinessDomain,
         );
+      }
+
+      if (activeTab === 'error') {
+        switch (errorSubFilter) {
+          case 'refund_management':
+            result = result.filter((order) =>
+              orderMatchesProgressStatus(order, 'USER_REFUND_REQ'),
+            );
+            break;
+          case 'shipment_hold':
+            result = result.filter((order) =>
+              orderMatchesProgressStatus(order, 'E_SHIPMENT_HOLD'),
+            );
+            break;
+          case 'problem_product':
+            result = result.filter((order) =>
+              orderMatchesProgressStatus(order, 'P_MA_PROBLEM'),
+            );
+            break;
+          case 'error_management':
+          default:
+            result = result.filter((order) =>
+              orderMatchesProgressStatus(order, 'E_ERROR'),
+            );
+            break;
+        }
       }
 
       // 2) activeTab 별 추가 필터. 두 종류가 섞여 들어온다:
@@ -2196,13 +2131,13 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       //    - Order.status 값 ('category' / 'unpaid' / 'progressing' / 'end' / ...)
       //   'purchase_agency' 같은 그룹 키가 들어와도 이미 도메인 필터를 적용했으므로
       //   추가 좁힘 없이 그대로 통과시킨다(이중 필터 방지).
-      if (activeTab !== 'all') {
+      if (activeTab !== 'all' && activeTab !== 'error') {
         const isKnownGroup = STATUS_GROUPS.some((g) => g.key === activeTab);
         const isKnownStatus = ['category','unpaid','progressing','end','pending_review','error','refunds']
           .includes(activeTab);
         if (isKnownGroup) {
           // 도메인 필터가 이미 처리했으므로 그룹 키는 통과.
-          // (단, warehouse·international_shipping·error 같은 현지·오류 그룹은 그대로 필터.)
+          // (단, warehouse·international_shipping 같은 현지 그룹은 그대로 필터.)
           if (activeTab !== 'purchase_agency') {
             result = result.filter(order => orderBelongsToStatusGroup(order, activeTab));
           }
@@ -2235,10 +2170,50 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       selectedProgressStatus,
       filters.orderNumber,
       filterPlatform,
-      selectedTransportMethod,
       activeBusinessDomain,
+      errorSubFilter,
     ],
   );
+
+  const getToolbarSelectedOrders = () =>
+    filteredOrders.filter((order) => selectedOrderIds.has(order.id));
+
+  const handleToolbarRepurchase = async () => {
+    const selectedOrders = getToolbarSelectedOrders();
+    if (selectedOrders.length === 0) {
+      showToast(t('buyList.selectOrdersFirst'), 'warning');
+      return;
+    }
+    if (isRepurchasing) return;
+
+    setIsRepurchasing(true);
+    let successCount = 0;
+    let failCount = 0;
+    try {
+      for (const order of selectedOrders) {
+        const result = await repurchaseOrderItems(order);
+        successCount += result.successCount;
+        failCount += result.failCount;
+      }
+      showRepurchaseResultToast(successCount, failCount);
+    } finally {
+      setIsRepurchasing(false);
+    }
+  };
+
+  const handleToolbarAddToCart = () => {
+    const selectedOrders = getToolbarSelectedOrders();
+    if (selectedOrders.length === 0) {
+      showToast(t('buyList.selectOrdersFirst'), 'warning');
+      return;
+    }
+    const selectionItems = collectSelectionItemsFromOrders(selectedOrders);
+    if (selectionItems.length === 0) {
+      showToast(t('buyList.failedToAddCart'), 'error');
+      return;
+    }
+    setProductSelectionItems(selectionItems);
+  };
 
   const groupedOrdersForCategory = useMemo(() => {
     return STATUS_GROUPS.map((group) => {
@@ -2280,14 +2255,37 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   const getProgressStatusCount = (progressStatus: string): number =>
     progressStatusCounts[progressStatus] ?? 0;
 
+  /** 오류 드롭다운 4개 항목(오류입고·반품관리·출고보류·문제상품) 합계. */
+  const getErrorDropdownTotalCount = (): number =>
+    getProgressStatusCount('E_ERROR') +
+    getProgressStatusCount('E_CUSTOMER_RETURN_REQ') +
+    getProgressStatusCount('E_SHIPMENT_HOLD') +
+    getProgressStatusCount('P_MA_PROBLEM');
+
+  /** 오류 칩 배지 — 활성 시 선택 하위 필터, 비활성 시 드롭다운 4항목 합계. */
+  const getErrorChipCount = (): number => {
+    if (activeTab !== 'error') {
+      return getErrorDropdownTotalCount();
+    }
+    switch (errorSubFilter) {
+      case 'refund_management':
+        return getProgressStatusCount('E_CUSTOMER_RETURN_REQ');
+      case 'shipment_hold':
+        return getProgressStatusCount('E_SHIPMENT_HOLD');
+      case 'problem_product':
+        return getProgressStatusCount('P_MA_PROBLEM');
+      case 'error_management':
+      default:
+        return getProgressStatusCount('E_ERROR');
+    }
+  };
+
   const renderCategoryStatusFilters = () => {
-    // 발주관리 / 현지입/출고 두 항목만 노출한다.
-    // 사용자 요청으로 국제운송과 오류 칩은 제거 — '오류관리'는 발주관리
-    // 드롭다운 안으로 옮겨졌고 국제운송은 별도 페지로 분리되었다.
     const groups = STATUS_GROUPS.filter(
-      (g) => g.key === 'purchase_agency' || g.key === 'warehouse',
+      (g) => g.key === 'purchase_agency' || g.key === 'warehouse' || g.key === 'error',
     );
     const currentGroup = groups.find((g) => g.key === activeTab);
+    const errorGroup = groups.find((g) => g.key === 'error');
 
     // 발주관리 드롭다운 — 스크린샷의 7개 항목. 각 항목의 onPress 는
     // 해당 도메인 화면으로 분기하거나 현재 BuyList 의 필터 상태를 바꾼다.
@@ -2382,39 +2380,77 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
         },
         isSelected: () => activeBusinessDomain === 'shipping_agency',
       },
+    ];
+
+    type ErrorDropdownItem = {
+      key: ErrorSubFilter;
+      labelKey: string;
+      fallbackLabel: string;
+      onSelect: () => void;
+    };
+    const errorDropdownItems: ErrorDropdownItem[] = [
       {
         key: 'error_management',
-        labelKey: 'profile.errorManagement',
-        fallbackLabel: '오류관리',
-        // 오류 상태 그룹 필터를 적용 (상단 칩이 보이지 않는 대신 본문은 필터됨).
+        labelKey: 'profile.toErrorIn',
+        fallbackLabel: '오류입고',
         onSelect: () => {
-          setActiveBusinessDomain('error_management');
+          setActiveBusinessDomain('purchase_agency');
           setActiveTab('error');
-          setSelectedProgressStatus(null);
+          setErrorSubFilter('error_management');
+          setSelectedProgressStatus('E_ERROR');
           setExpandedStatusGroup(null);
         },
-        isSelected: () => activeBusinessDomain === 'error_management',
       },
       {
         key: 'refund_management',
         labelKey: 'profile.refundManagement',
         fallbackLabel: '반품관리',
-        // 환불 요청 진행상태를 선택. PROGRESS_STATUS_META 의 USER_REFUND_REQ 사용.
         onSelect: () => {
-          setActiveBusinessDomain('refund_management');
+          setActiveBusinessDomain('purchase_agency');
           setActiveTab('error');
+          setErrorSubFilter('refund_management');
           setSelectedProgressStatus('USER_REFUND_REQ');
           setExpandedStatusGroup(null);
         },
-        isSelected: () => activeBusinessDomain === 'refund_management',
+      },
+      {
+        key: 'shipment_hold',
+        labelKey: 'profile.toShipmentHold',
+        fallbackLabel: '출고보류',
+        onSelect: () => {
+          setActiveBusinessDomain('purchase_agency');
+          setActiveTab('error');
+          setErrorSubFilter('shipment_hold');
+          setSelectedProgressStatus('E_SHIPMENT_HOLD');
+          setExpandedStatusGroup(null);
+        },
+      },
+      {
+        key: 'problem_product',
+        labelKey: 'profile.toProblem',
+        fallbackLabel: '문제상품',
+        onSelect: () => {
+          setActiveBusinessDomain('purchase_agency');
+          setActiveTab('error');
+          setErrorSubFilter('problem_product');
+          setSelectedProgressStatus('P_MA_PROBLEM');
+          setExpandedStatusGroup(null);
+        },
       },
     ];
 
+    const purchaseBusinessDomains: BusinessDomain[] = [
+      'rocket_3pl',
+      'vvic_hipass',
+      'shipping_agency',
+    ];
+
     const isPurchaseDropdownOpen = expandedStatusGroup === 'purchase_agency';
+    const isErrorDropdownOpen = expandedStatusGroup === 'error';
 
     return (
       <>
-        {/* Row 1: Status group tabs (발주관리, 현지입/출고 만 노출) */}
+        {/* Row 1: Status group tabs (발주관리, 현지입/출고, 오류) */}
         <View style={styles.filterRow1}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow1Content}>
             <TouchableOpacity
@@ -2429,8 +2465,7 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
               const isOpen = expandedStatusGroup === group.key;
               const isPurchase = group.key === 'purchase_agency';
               const isWarehouse = group.key === 'warehouse';
-              // 발주관리 칩은 활성 도메인 이름을 라벨로 보여준다 (예: 로켓/3PL).
-              // 다른 칩은 기존 그룹 제목을 그대로 사용.
+              const isError = group.key === 'error';
               let chipLabel = t(group.titleKey) || group.title;
               if (isPurchase) {
                 const labelKey =
@@ -2440,25 +2475,26 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
                       ? 'profile.tabVvicHipass'
                       : activeBusinessDomain === 'shipping_agency'
                         ? 'profile.tabShippingAgency'
-                        : activeBusinessDomain === 'error_management'
-                          ? 'profile.errorManagement'
-                          : activeBusinessDomain === 'refund_management'
-                            ? 'profile.refundManagement'
-                            : null;
+                        : null;
                 if (labelKey) {
                   chipLabel = t(labelKey) || chipLabel;
                 }
+              } else if (isError && errorSubFilter) {
+                const errorLabelKey =
+                  errorSubFilter === 'error_management'
+                    ? 'profile.toErrorIn'
+                    : errorSubFilter === 'refund_management'
+                      ? 'profile.refundManagement'
+                      : errorSubFilter === 'shipment_hold'
+                        ? 'profile.toShipmentHold'
+                        : 'profile.toProblem';
+                chipLabel = t(errorLabelKey) || chipLabel;
               }
-              // 발주관리 칩은 다음 중 하나라도 만족하면 붉은색 활성:
-              //  1) 도메인이 purchase_agency 이고 activeTab 이 그 도메인의 어떤 세부
-              //     필터(견적대기 = 'category', 결제대기 = 'unpaid', ...) 라도 켜져 있을 때 —
-              //     ProfileScreen 카드에서 구매대행 셀로 진입한 경우가 여기에 해당.
-              //  2) 도메인이 로켓/3PL · VVIC하이패스 · 배송대행 · 오류관리 · 반품관리 처럼
-              //     비-구매대행 도메인으로 갈아탔을 때(드롭다운 라벨이 그 이름으로 바뀜).
-              // 현지입/출고 칩은 기존대로 activeTab 매칭만.
               const isChipActive = isPurchase
-                ? (activeBusinessDomain === 'purchase_agency' && purchaseAgencyTabs.includes(activeTab)) ||
-                  activeBusinessDomain !== 'purchase_agency'
+                ? activeTab !== 'error' &&
+                  (purchaseBusinessDomains.includes(activeBusinessDomain) ||
+                    (activeBusinessDomain === 'purchase_agency' &&
+                      purchaseAgencyTabs.includes(activeTab)))
                 : activeTab === group.key;
               return (
                 <TouchableOpacity
@@ -2470,16 +2506,16 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
                       ? (purchaseChipRef as any)
                       : isWarehouse
                         ? (warehouseChipRef as any)
-                        : undefined
+                        : isError
+                          ? (errorChipRef as any)
+                          : undefined
                   }
                   style={[styles.filterChip, isChipActive && styles.filterChipActive]}
                   onPress={() => {
                     if (isPurchase) {
-                      // 칩 위치 측정 — 매 클릭마다 다시 잰다(회전·스크롤 대비).
                       purchaseChipRef.current?.measureInWindow((x, y, width, height) => {
                         setPurchaseChipLayout({ x, y, width, height });
                       });
-                      // 발주관리는 항상 드롭다운 토글만 — activeTab 변경 X.
                       setExpandedStatusGroup(prev => prev === group.key ? null : group.key);
                       return;
                     }
@@ -2488,13 +2524,20 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
                         setWarehouseChipLayout({ x, y, width, height });
                       });
                     }
+                    if (isError) {
+                      errorChipRef.current?.measureInWindow((x, y, width, height) => {
+                        setErrorChipLayout({ x, y, width, height });
+                      });
+                    }
                     if (activeTab === group.key) {
-                      // Already on this tab — toggle dropdown
                       setExpandedStatusGroup(prev => prev === group.key ? null : group.key);
                     } else {
-                      // Switch to this tab and open dropdown
                       setActiveTab(group.key);
                       setExpandedStatusGroup(group.key);
+                      if (isError && !errorSubFilter) {
+                        setErrorSubFilter('error_management');
+                        setSelectedProgressStatus('E_ERROR');
+                      }
                     }
                   }}
                 >
@@ -2510,7 +2553,9 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
                               : activeBusinessDomain === 'shipping_agency'
                                 ? businessDomainCounts.shipping_agency
                                 : businessDomainCounts.purchase_agency)
-                        : getGroupOrderCount(group.key)})
+                        : isError
+                          ? getErrorChipCount()
+                          : getGroupOrderCount(group.key)})
                     </Text>
                   </Text>
                   <Icon
@@ -2658,7 +2703,66 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
           </TouchableOpacity>
         </Modal>
 
-        {/* Row 2: Select all + customs + transport + date */}
+        {/* 오류 드롭다운 — 오류관리 · 반품관리 · 출고보류 · 문제상품 */}
+        <Modal
+          visible={!!(errorGroup && isErrorDropdownOpen && activeTab === 'error')}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setExpandedStatusGroup(null)}
+        >
+          <TouchableOpacity
+            style={styles.purchaseDropdownBackdrop}
+            activeOpacity={1}
+            onPress={() => setExpandedStatusGroup(null)}
+          >
+            <View
+              style={[
+                styles.warehouseDropdownAnchor,
+                errorChipLayout && {
+                  top: errorChipLayout.y + errorChipLayout.height + 4,
+                  left: errorChipLayout.x,
+                  width: errorChipLayout.width,
+                },
+              ]}
+              onStartShouldSetResponder={() => true}
+            >
+              <View style={styles.purchaseDropdownCard}>
+                <Text style={styles.purchaseDropdownTitle}>
+                  {errorGroup ? (t(errorGroup.titleKey) || errorGroup.title) : ''}
+                </Text>
+                {errorDropdownItems.map((item) => {
+                  const selected = errorSubFilter === item.key;
+                  return (
+                    <TouchableOpacity
+                      key={item.key}
+                      style={styles.purchaseDropdownItem}
+                      activeOpacity={0.7}
+                      onPress={item.onSelect}
+                    >
+                      <View
+                        style={[
+                          styles.purchaseDropdownBullet,
+                          selected && styles.purchaseDropdownBulletActive,
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.purchaseDropdownText,
+                          selected && styles.purchaseDropdownTextActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {t(item.labelKey) || item.fallbackLabel}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* Row 2: Select all + date */}
         <View style={styles.filterRow2}>
           <TouchableOpacity
             style={styles.selectAllChip}
@@ -2683,45 +2787,26 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
           </TouchableOpacity>
 
           <TouchableOpacity
-            ref={customsChipRef as any}
-            style={[styles.filterChip, !!selectedCustomsMethod && styles.filterChipActive]}
-            onPress={() => {
-              // 칩 위치 측정 — 클릭마다 다시 잰다(회전·스크롤 대비).
-              customsChipRef.current?.measureInWindow((x, y, width, height) => {
-                setCustomsChipLayout({ x, y, width, height });
-              });
-              setShowCustomsDropdown(prev => !prev);
-            }}
+            style={[styles.filterChip, isRepurchasing && styles.secondaryButtonDisabled]}
+            onPress={handleToolbarRepurchase}
+            disabled={isRepurchasing}
           >
-            <Text style={[styles.filterChipText, !!selectedCustomsMethod && styles.filterChipTextActive]}>
-              {selectedCustomsMethod || (t('pages.orders.filters.customsMethod') || '통관방식')}
-            </Text>
-            <Icon
-              name={showCustomsDropdown ? 'chevron-up' : 'chevron-down'}
-              size={14}
-              color={selectedCustomsMethod ? COLORS.red : COLORS.text.primary}
-            />
+            {isRepurchasing ? (
+              <ActivityIndicator size="small" color={COLORS.text.secondary} />
+            ) : (
+              <Text style={styles.filterChipText}>
+                {t('profile.repurchase') || '재구매'}
+              </Text>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
-            ref={transportChipRef as any}
-            style={[styles.filterChip, !!selectedTransportMethod && styles.filterChipActive]}
-            onPress={() => {
-              // 칩 위치 측정 — 클릭마다 다시 잰다(회전·스크롤 대비).
-              transportChipRef.current?.measureInWindow((x, y, width, height) => {
-                setTransportChipLayout({ x, y, width, height });
-              });
-              setShowTransportDropdown(prev => !prev);
-            }}
+            style={styles.filterChip}
+            onPress={handleToolbarAddToCart}
           >
-            <Text style={[styles.filterChipText, !!selectedTransportMethod && styles.filterChipTextActive]}>
-              {selectedTransportMethod || (t('pages.orders.filters.transportMethod') || '운송방식')}
+            <Text style={styles.filterChipText}>
+              {t('buyList.addToCart') || '장바구니 담기'}
             </Text>
-            <Icon
-              name={showTransportDropdown ? 'chevron-up' : 'chevron-down'}
-              size={14}
-              color={selectedTransportMethod ? COLORS.red : COLORS.text.primary}
-            />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -2737,9 +2822,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Customs dropdown — All, General, Simplified only */}
-        {/* Transport dropdown */}
-        {/* (Modals moved to main return for proper overlay) */}
       </>
     );
   };
@@ -2834,8 +2916,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
               setShowMoreMenu(false);
               // Initialize drafts from current applied values
               setDraftPlatform(filterPlatform);
-              setDraftCustoms(selectedCustomsMethod);
-              setDraftTransport(selectedTransportMethod);
               setDraftStartDate(selectedStartDate);
               setDraftEndDate(selectedEndDate);
               setShowInlineCalendar(false);
@@ -2918,25 +2998,7 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       >
         <View style={styles.content}>
 
-          {/* 본문 분기:
-              - 4개 사업 도메인(구매대행 · 로켓/3PL · VVIC하이패스 · 배송대행):
-                resolveOrderBusinessDomain 으로 분류한 결과를 filteredOrders 가
-                이미 필터링했으므로 그대로 주문 카드 리스트를 렌더한다.
-              - 오류관리 · 반품관리: 백엔드에 별도 데이터가 없으므로 placeholder. */}
-          {activeBusinessDomain === 'error_management' ||
-          activeBusinessDomain === 'refund_management' ? (
-            <View style={styles.emptyState}>
-              <Icon name="basket-outline" size={80} color="#CCC" />
-              <Text style={styles.emptyTitle}>
-                {activeBusinessDomain === 'error_management'
-                  ? (t('profile.errorManagement') || '오류관리')
-                  : (t('profile.refundManagement') || '반품관리')}
-              </Text>
-              <Text style={styles.emptySubtitle}>
-                {t('profile.placeholderEmpty') || '아직 표시할 주문이 없습니다.'}
-              </Text>
-            </View>
-          ) : isLoading && orders.length === 0 ? (
+          {isLoading && orders.length === 0 ? (
             /* Loading State — show a list-shaped skeleton in the body while
                orders are being fetched, so the page never flips back to a
                spinner after the lazy-route skeleton fades out. */
@@ -2969,140 +3031,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
         onClose={() => setShowFilterModal(false)}
         onApply={handleApplyFilters}
       />
-
-      {/* 통관방식 드롭다운 — 발주관리·현지입/출고와 같은 앵커 패턴.
-          칩 바로 아래에 떠 있고 너비는 칩과 일치한다. */}
-      <Modal
-        visible={showCustomsDropdown}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowCustomsDropdown(false)}
-      >
-        <TouchableOpacity
-          style={styles.purchaseDropdownBackdrop}
-          activeOpacity={1}
-          onPress={() => setShowCustomsDropdown(false)}
-        >
-          <View
-            style={[
-              styles.warehouseDropdownAnchor,
-              customsChipLayout && {
-                top: customsChipLayout.y + customsChipLayout.height + 4,
-                left: customsChipLayout.x,
-                width: customsChipLayout.width,
-              },
-            ]}
-            onStartShouldSetResponder={() => true}
-          >
-            <View style={styles.purchaseDropdownCard}>
-              <Text style={styles.purchaseDropdownTitle}>
-                {t('pages.orders.filters.customsMethod') || '통관방식'}
-              </Text>
-              {[
-                { label: t('profile.viewAll') || 'All', value: '' },
-                { label: t('pages.orders.filters.generalClearance') || '일반통관', value: '일반통관' },
-                { label: t('pages.orders.filters.simplifiedClearance') || '간이통관', value: '간이통관' },
-              ].map((opt) => {
-                const selected = selectedCustomsMethod === (opt.value || null);
-                return (
-                  <TouchableOpacity
-                    key={opt.value || 'all'}
-                    style={styles.purchaseDropdownItem}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      setSelectedCustomsMethod(opt.value || null);
-                      setShowCustomsDropdown(false);
-                    }}
-                  >
-                    <View
-                      style={[
-                        styles.purchaseDropdownBullet,
-                        selected && styles.purchaseDropdownBulletActive,
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.purchaseDropdownText,
-                        selected && styles.purchaseDropdownTextActive,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {opt.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* 운송방식 드롭다운 — 발주관리·현지입출고·통관방식과 같은 앵커 패턴.
-          칩 바로 아래에 떠 있고 너비는 칩과 일치한다. */}
-      <Modal
-        visible={showTransportDropdown}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowTransportDropdown(false)}
-      >
-        <TouchableOpacity
-          style={styles.purchaseDropdownBackdrop}
-          activeOpacity={1}
-          onPress={() => setShowTransportDropdown(false)}
-        >
-          <View
-            style={[
-              styles.warehouseDropdownAnchor,
-              transportChipLayout && {
-                top: transportChipLayout.y + transportChipLayout.height + 4,
-                left: transportChipLayout.x,
-                width: transportChipLayout.width,
-              },
-            ]}
-            onStartShouldSetResponder={() => true}
-          >
-            <View style={styles.purchaseDropdownCard}>
-              <Text style={styles.purchaseDropdownTitle}>
-                {t('pages.orders.filters.transportMethod') || '운송방식'}
-              </Text>
-              {[
-                { label: t('profile.viewAll') || 'All', value: '' },
-                { label: t('pages.orders.filters.air') || '항공', value: '항공' },
-                { label: t('pages.orders.filters.ship') || '선박', value: '선박' },
-              ].map((opt) => {
-                const selected = selectedTransportMethod === (opt.value || null);
-                return (
-                  <TouchableOpacity
-                    key={opt.value || 'all'}
-                    style={styles.purchaseDropdownItem}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      setSelectedTransportMethod(opt.value || null);
-                      setShowTransportDropdown(false);
-                    }}
-                  >
-                    <View
-                      style={[
-                        styles.purchaseDropdownBullet,
-                        selected && styles.purchaseDropdownBulletActive,
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.purchaseDropdownText,
-                        selected && styles.purchaseDropdownTextActive,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {opt.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        </TouchableOpacity>
-      </Modal>
 
       {/* Date Range Picker Modal */}
       <Modal visible={showDateModal} transparent animationType="fade" onRequestClose={() => setShowDateModal(false)}>
@@ -3188,171 +3116,11 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
         </TouchableOpacity>
       </Modal>
 
-      {/* Add to Cart Modal */}
-      <Modal visible={addToCartModalVisible} transparent animationType="slide" onRequestClose={() => setAddToCartModalVisible(false)}>
-        <View style={styles.atcModalOverlay}>
-          <View style={styles.atcModalContent}>
-            {/* Header */}
-            <View style={styles.atcModalHeader}>
-              <Text style={styles.atcModalTitle}>{t('buyList.addToCartModal.title')}</Text>
-              <TouchableOpacity onPress={() => setAddToCartModalVisible(false)}>
-                <Icon name="close" size={22} color={COLORS.text.primary} />
-              </TouchableOpacity>
-            </View>
-
-            {isLoadingProductDetail ? (
-              <View style={styles.atcLoadingContainer}>
-                <ActivityIndicator size="large" color={COLORS.primary} />
-              </View>
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {/* Product image + name */}
-                <View style={styles.atcProductRow}>
-                  <Image source={{ uri: addToCartItem?.image }} style={styles.atcProductImage} resizeMode="cover" />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.atcProductName} numberOfLines={3}>{addToCartItem?.productName}</Text>
-                    <Text style={styles.atcProductPrice}>{formatPriceKRW(addToCartSelectedSku?.price || addToCartItem?.price || 0)}</Text>
-                  </View>
-                </View>
-
-                {/* SKU options — same logic as ProductDetailScreen */}
-                {(() => {
-                  const rawVariants: any[] = addToCartProductDetail?.product?.rawVariants || addToCartProductDetail?.rawVariants || [];
-                  const productSkuInfos: any[] = addToCartProductDetail?.product?.productSkuInfos || addToCartProductDetail?.productSkuInfos || [];
-                  
-                  // If rawVariants empty but productSkuInfos has data, build variants from it
-                  const effectiveVariants = rawVariants.length > 0 ? rawVariants :
-                    productSkuInfos.map((sku: any) => ({
-                      id: sku.skuId?.toString() || '',
-                      name: (sku.skuAttributes || []).map((a: any) => `${a.attributeNameTrans || a.attributeName}: ${a.valueTrans || a.value}`).join(' / '),
-                      price: parseFloat(sku.price || sku.consignPrice || 0),
-                      stock: sku.amountOnSale || 0,
-                      image: sku.skuAttributes?.[0]?.skuImageUrl || '',
-                      attributes: sku.skuAttributes || [],
-                      specId: sku.specId || '',
-                      skuId: sku.skuId?.toString() || '',
-                    }));
-
-                  if (effectiveVariants.length === 0) return null;
-
-                  // Build variationTypesMap exactly like ProductDetailScreen.getVariationTypes
-                  const variationTypesMap = new Map<string, Map<string, { value: string; image?: string }>>();
-
-                  effectiveVariants.forEach((variant: any) => {
-                    const attrs = variant.attributes || variant.skuAttributes || [];
-                    attrs.forEach((a: any) => {
-                      const typeName = (a.attributeNameTrans || a.attributeName || a.prop_name || a.name || '').trim();
-                      const val = (a.valueTrans || a.value || '').trim();
-                      const img = a.skuImageUrl || a.pic_url || '';
-                      if (!typeName || !val) return;
-                      if (!variationTypesMap.has(typeName)) variationTypesMap.set(typeName, new Map());
-                      const optMap = variationTypesMap.get(typeName)!;
-                      if (!optMap.has(val)) optMap.set(val, { value: val, image: img });
-                    });
-                    // Also handle variant.name format "Color: Red / Size: L"
-                    if (attrs.length === 0 && variant.name) {
-                      variant.name.split('/').forEach((part: string) => {
-                        const [k, v] = part.split(':').map((s: string) => s.trim());
-                        if (k && v) {
-                          if (!variationTypesMap.has(k)) variationTypesMap.set(k, new Map());
-                          const optMap = variationTypesMap.get(k)!;
-                          if (!optMap.has(v)) optMap.set(v, { value: v, image: variant.image || '' });
-                        }
-                      });
-                    }
-                  });
-
-                  const variationTypes: { name: string; options: { value: string; image?: string }[] }[] = [];
-                  variationTypesMap.forEach((optMap, name) => {
-                    variationTypes.push({ name, options: Array.from(optMap.values()) });
-                  });
-
-                  if (variationTypes.length === 0) return null;
-
-                  const findMatchingSku = (attrs: Record<string, string>) => {
-                    return effectiveVariants.find((v: any) => {
-                      const vAttrs = v.attributes || v.skuAttributes || [];
-                      if (vAttrs.length > 0) {
-                        return Object.entries(attrs).every(([k, val]) =>
-                          vAttrs.some((a: any) => (a.attributeNameTrans || a.attributeName || a.name || '').trim() === k && (a.valueTrans || a.value || '').trim() === val)
-                        );
-                      }
-                      // name-based matching
-                      return Object.entries(attrs).every(([k, val]) =>
-                        (v.name || '').toLowerCase().includes(`${k}: ${val}`.toLowerCase())
-                      );
-                    }) || null;
-                  };
-
-                  return variationTypes.map((vt, idx) => {
-                    const selectedVal = addToCartSelectedAttrs[vt.name] || null;
-                    const hasImages = vt.options.some(o => o.image);
-                    return (
-                      <View key={vt.name} style={styles.atcSection}>
-                        <Text style={styles.atcSectionTitle}>
-                          {vt.name}{selectedVal ? ` : ${selectedVal}` : ''}
-                        </Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                          <View style={styles.atcSkuRow}>
-                            {vt.options.map((opt) => {
-                              const isSelected = selectedVal === opt.value;
-                              return (
-                                <TouchableOpacity
-                                  key={opt.value}
-                                  style={[styles.atcSkuChip, isSelected && styles.atcSkuChipActive]}
-                                  onPress={() => {
-                                    const newAttrs = { ...addToCartSelectedAttrs, [vt.name]: opt.value };
-                                    setAddToCartSelectedAttrs(newAttrs);
-                                    setAddToCartSelectedSku(findMatchingSku(newAttrs));
-                                  }}
-                                >
-                                  {hasImages && opt.image ? (
-                                    <Image source={{ uri: opt.image }} style={styles.atcSkuChipImage} />
-                                  ) : null}
-                                  <Text style={[styles.atcSkuChipText, isSelected && styles.atcSkuChipTextActive]} numberOfLines={2}>
-                                    {opt.value}
-                                  </Text>
-                                </TouchableOpacity>
-                              );
-                            })}
-                          </View>
-                        </ScrollView>
-                      </View>
-                    );
-                  });
-                })()}
-
-                {/* Quantity */}
-                <View style={styles.atcSection}>
-                  <Text style={styles.atcSectionTitle}>{t('buyList.addToCartModal.quantity')}</Text>
-                  <View style={styles.atcQtyRow}>
-                    <TouchableOpacity style={styles.atcQtyBtn} onPress={() => setAddToCartQuantity(q => Math.max(1, q - 1))}>
-                      <Icon name="remove" size={18} color={COLORS.text.primary} />
-                    </TouchableOpacity>
-                    <Text style={styles.atcQtyText}>{addToCartQuantity}</Text>
-                    <TouchableOpacity style={styles.atcQtyBtn} onPress={() => setAddToCartQuantity(q => q + 1)}>
-                      <Icon name="add" size={18} color={COLORS.text.primary} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </ScrollView>
-            )}
-
-            {/* Add to cart button */}
-            <TouchableOpacity
-              style={[styles.atcConfirmButton, isConfirmingAddToCart && styles.atcConfirmButtonDisabled]}
-              onPress={handleConfirmAddToCart}
-              disabled={isConfirmingAddToCart}
-            >
-              {isConfirmingAddToCart ? (
-                <ActivityIndicator size="small" color={COLORS.white} />
-              ) : (
-                <Text style={styles.atcConfirmButtonText}>{t('buyList.addToCartModal.confirm')}</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <BuyListProductSelectionModal
+        visible={productSelectionItems != null && productSelectionItems.length > 0}
+        items={productSelectionItems || []}
+        onClose={() => setProductSelectionItems(null)}
+      />
 
       {/* Refund Modal */}
       <Modal visible={!!refundModalOrder} transparent animationType="slide" onRequestClose={() => setRefundModalOrder(null)}>
@@ -3642,46 +3410,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
                 </View>
               </View>
 
-              {/* Customs */}
-              <View style={styles.allFiltersSection}>
-                <Text style={styles.allFiltersSectionTitle}>{t('pages.orders.filters.customsMethod') || '통관방식'}</Text>
-                <View style={styles.allFiltersChipRow}>
-                  {[
-                    { label: t('profile.viewAll') || 'All', value: '' },
-                    { label: t('pages.orders.filters.generalClearance') || '일반통관', value: '일반통관' },
-                    { label: t('pages.orders.filters.simplifiedClearance') || '간이통관', value: '간이통관' },
-                  ].map(opt => (
-                    <TouchableOpacity
-                      key={opt.value || 'all'}
-                      style={[styles.allFiltersChip, draftCustoms === (opt.value || null) && styles.allFiltersChipActive]}
-                      onPress={() => setDraftCustoms(opt.value || null)}
-                    >
-                      <Text style={[styles.allFiltersChipText, draftCustoms === (opt.value || null) && styles.allFiltersChipTextActive]}>{opt.label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              {/* Transport */}
-              <View style={styles.allFiltersSection}>
-                <Text style={styles.allFiltersSectionTitle}>{t('pages.orders.filters.transportMethod') || '운송방식'}</Text>
-                <View style={styles.allFiltersChipRow}>
-                  {[
-                    { label: t('profile.viewAll') || 'All', value: '' },
-                    { label: t('pages.orders.filters.air') || '항공', value: '항공' },
-                    { label: t('pages.orders.filters.ship') || '선박', value: '선박' },
-                  ].map(opt => (
-                    <TouchableOpacity
-                      key={opt.value || 'all'}
-                      style={[styles.allFiltersChip, draftTransport === (opt.value || null) && styles.allFiltersChipActive]}
-                      onPress={() => setDraftTransport(opt.value || null)}
-                    >
-                      <Text style={[styles.allFiltersChipText, draftTransport === (opt.value || null) && styles.allFiltersChipTextActive]}>{opt.label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
               {/* Period */}
               <View style={styles.allFiltersSection}>
                 <Text style={styles.allFiltersSectionTitle}>{t('pages.orders.filters.periodSelect') || '기간선택'}</Text>
@@ -3793,8 +3521,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
                 style={styles.allFiltersResetBtn}
                 onPress={() => {
                   setDraftPlatform('');
-                  setDraftCustoms(null);
-                  setDraftTransport(null);
                   setDraftStartDate(null);
                   setDraftEndDate(null);
                 }}
@@ -3806,8 +3532,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
                 onPress={() => {
                   // Commit drafts to real filter states (triggers re-fetch via useCallback deps)
                   setFilterPlatform(draftPlatform);
-                  setSelectedCustomsMethod(draftCustoms);
-                  setSelectedTransportMethod(draftTransport);
                   setSelectedStartDate(draftStartDate);
                   setSelectedEndDate(draftEndDate);
                   setShowAllFiltersModal(false);

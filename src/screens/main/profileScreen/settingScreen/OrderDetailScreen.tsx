@@ -35,6 +35,13 @@ import {
   isCompleteStepBorderActive,
 } from '../../../../utils/orderDetailProgress';
 import {
+  hasOrderItemLabel,
+  resolveOrderItemLabel,
+  resolveOrderItemNote,
+  resolveOrderItemProductStatusLabel,
+  type ResolvedOrderItemLabel,
+} from '../../../../utils/orderItemLabel';
+import {
   Order,
   OrderItem,
   orderApi,
@@ -126,6 +133,7 @@ const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
     contact: '',
     customsCode: '',
   });
+  const [labelViewer, setLabelViewer] = useState<ResolvedOrderItemLabel | null>(null);
 
   const loadOrder = useCallback(async () => {
     if (!orderId) {
@@ -355,6 +363,11 @@ const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
     const specLines = formatSkuLines(item);
     const storeName = resolveStoreName(item);
     const is1688 = String(item.otherSite ?? item.source ?? '').includes('1688');
+    const resultText =
+      resolveOrderItemProductStatusLabel(item.productStatus, t) || dash;
+    const noteText = resolveOrderItemNote(item) || dash;
+    const labelConfigured = hasOrderItemLabel(item.barcodeInfo);
+    const resolvedLabel = resolveOrderItemLabel(item, title);
 
     return (
       <View key={item.id || item._id || index} style={styles.productCard}>
@@ -403,11 +416,28 @@ const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
         </View>
         <View style={styles.productMetaRow}>
           <Text style={styles.productMetaLabel}>{t('profile.orderDetailPage.result')}</Text>
-          <Text style={styles.productMetaValue}>{dash}</Text>
+          <Text style={styles.productMetaValue}>{resultText}</Text>
+        </View>
+        <View style={styles.productMetaRow}>
+          <Text style={styles.productMetaLabel}>{t('profile.orderDetailPage.labelCheck')}</Text>
+          {labelConfigured && resolvedLabel ? (
+            <TouchableOpacity
+              onPress={() => setLabelViewer(resolvedLabel)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.labelCheckLink}>
+                {t('profile.orderDetailPage.labelCheckView')}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.productMetaValue}>{dash}</Text>
+          )}
         </View>
         <View style={styles.productMetaRow}>
           <Text style={styles.productMetaLabel}>{t('profile.orderDetailPage.note')}</Text>
-          <Text style={styles.productMetaValue}>{dash}</Text>
+          <Text style={styles.productMetaValue} numberOfLines={2}>
+            {noteText}
+          </Text>
         </View>
         <View style={styles.productMetaRow}>
           <Text style={styles.productMetaLabel}>{t('profile.orderDetailPage.date')}</Text>
@@ -765,6 +795,73 @@ const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
         </View>
       </ScrollView>
 
+      {/* Label preview modal */}
+      <Modal
+        visible={labelViewer !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLabelViewer(null)}
+      >
+        <View style={styles.labelModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setLabelViewer(null)}
+          />
+          <View style={styles.labelModalCard}>
+            <View style={styles.labelModalHeader}>
+              <Text style={styles.labelModalTitle}>
+                {t('cartOrder.labelModal.barcodeImageCheck')}
+              </Text>
+              <TouchableOpacity onPress={() => setLabelViewer(null)}>
+                <Icon name="close" size={20} color={COLORS.text.secondary} />
+              </TouchableOpacity>
+            </View>
+            {labelViewer ? (
+              <ScrollView
+                style={styles.labelModalBody}
+                contentContainerStyle={styles.labelModalBodyContent}
+                showsVerticalScrollIndicator
+              >
+                {labelViewer.imageUrl ? (
+                  <Image
+                    source={{ uri: labelViewer.imageUrl }}
+                    style={styles.labelPreviewImage}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.labelPreviewCard,
+                      labelViewer.labelFormat === '50x80'
+                        ? styles.labelPreviewCard5080
+                        : styles.labelPreviewCard4060,
+                    ]}
+                  >
+                    {labelViewer.labelType === 'foodInspect' && (
+                      <Text style={styles.labelFoodBadge}>
+                        {t('cartOrder.labelModal.foodBadge')}
+                      </Text>
+                    )}
+                    {!!labelViewer.productName && (
+                      <Text style={styles.labelPreviewProductName}>
+                        {t('cartOrder.labelModal.productName')}: {labelViewer.productName}
+                      </Text>
+                    )}
+                    {!!labelViewer.content && (
+                      <Text style={styles.labelPreviewContent}>{labelViewer.content}</Text>
+                    )}
+                    {!!labelViewer.barcode && (
+                      <Text style={styles.labelPreviewBarcode}>{labelViewer.barcode}</Text>
+                    )}
+                  </View>
+                )}
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
       {/* Address edit modal */}
       <Modal
         visible={addressModalVisible}
@@ -1087,7 +1184,85 @@ const styles = StyleSheet.create({
   },
   productMetaLabel: { fontSize: FONTS.sizes.xs, color: COLORS.text.secondary },
   productMetaValue: { fontSize: FONTS.sizes.xs, color: COLORS.text.primary },
+  labelCheckLink: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.red,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
   productMetaDate: { color: COLORS.red, textDecorationLine: 'underline' },
+  labelModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    padding: SPACING.md,
+  },
+  labelModalCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    maxHeight: '80%',
+    overflow: 'hidden',
+  },
+  labelModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[100],
+  },
+  labelModalTitle: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  labelModalBody: { maxHeight: 420 },
+  labelModalBodyContent: {
+    padding: SPACING.md,
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  labelPreviewImage: {
+    width: '100%',
+    minHeight: 220,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.gray[100],
+  },
+  labelPreviewCard: {
+    width: '100%',
+    maxWidth: 280,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    backgroundColor: COLORS.white,
+    gap: 6,
+  },
+  labelPreviewCard5080: { minHeight: 180 },
+  labelPreviewCard4060: { minHeight: 140 },
+  labelFoodBadge: {
+    alignSelf: 'flex-start',
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.red,
+    fontWeight: '700',
+  },
+  labelPreviewProductName: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  labelPreviewContent: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    lineHeight: 16,
+  },
+  labelPreviewBarcode: {
+    marginTop: SPACING.xs,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
+    letterSpacing: 1,
+  },
   statusBadge: {
     backgroundColor: '#E8F8EE',
     borderRadius: 4,

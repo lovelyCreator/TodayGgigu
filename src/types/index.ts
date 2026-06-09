@@ -442,6 +442,7 @@ export type RootStackParamList = {
     // 사업 도메인 — 발주관리 드롭다운에서 선택되는 키. 외부(ProfileScreen 내주문 카드 등)에서
     // 도메인을 강제로 활성화시키며 BuyListScreen 으로 진입할 때 사용.
     domain?: 'purchase_agency' | 'rocket_3pl' | 'vvic_hipass' | 'shipping_agency' | 'error_management' | 'refund_management';
+    progressStatus?: string;
   } | undefined;
   // 로켓/3PL, VVIC하이패스, 배송대행 페지는 구매대행과 동일한 9개 단계 라벨(견적대기/고객확인/.../완료/전체주문)을 공유한다.
   // 4개 도메인은 시각상 ">"로 묶여 있어도 서로 독립이며, 카운트만 도메인별로 다르다.
