@@ -1986,6 +1986,8 @@ For return assistance, please contact our customer service team with your order 
     payment: {
       // Header
       orderConfirmation: 'Order Confirmation',
+      // BillGate WebView header
+      cardPayment: 'Credit Card Payment',
       // Hardcoded bank name displayed in payment info
       kbBank: 'Kookmin Bank',
       // Product card
@@ -2251,6 +2253,7 @@ For return assistance, please contact our customer service team with your order 
       localWarehouse: 'Local Warehouse',
       internationalShipping: 'International Shipping',
       error: 'Error',
+      paying: 'Paying',
       searchOrders: 'Search orders',
       noOrders: 'No orders',
       noOrdersInCategory: "You don't have any orders in this category",
@@ -2455,6 +2458,9 @@ For return assistance, please contact our customer service team with your order 
     message: {
       orderInquiryHint: 'Order inquiries are only available when you have orders.',
       noFiles: 'No files available for download.',
+      newOrderInquiryMessage: 'New order inquiry message',
+      newGeneralInquiryMessage: 'New 1:1 inquiry message',
+      messageCountLabel: 'Messages {count}',
       progressStatus: {
         paymentPending: 'Payment Pending',
         purchaseInProgress: 'Purchase In Progress',
@@ -4512,6 +4518,8 @@ Supports credit and check cards from various banks for recharging and payments.`
     payment: {
       // Header
       orderConfirmation: '订单确认',
+      // BillGate WebView header
+      cardPayment: '信用卡支付',
       // 银行名称
       kbBank: '国民银行',
       // Product card
@@ -4746,6 +4754,7 @@ Supports credit and check cards from various banks for recharging and payments.`
       localWarehouse: '本地入/出库',
       internationalShipping: '国际运输',
       error: '错误',
+      paying: '付款中',
       searchOrders: '搜索订单',
       noOrders: '暂无订单',
       noOrdersInCategory: '该分类暂无订单',
@@ -4950,6 +4959,9 @@ Supports credit and check cards from various banks for recharging and payments.`
     message: {
       orderInquiryHint: '只有在有订单时才能进行订单咨询。',
       noFiles: '暂无可下载的文件。',
+      newOrderInquiryMessage: '收到新的订单咨询消息',
+      newGeneralInquiryMessage: '收到新的1:1咨询消息',
+      messageCountLabel: '消息 {count}',
       progressStatus: {
         paymentPending: '待付款',
         purchaseInProgress: '代购中',
@@ -7443,6 +7455,8 @@ Supports credit and check cards from various banks for recharging and payments.`
     payment: {
       // 헤더
       orderConfirmation: '주문 확인',
+      // BillGate WebView 헤더
+      cardPayment: '신용카드 결제',
       // 은행명
       kbBank: '국민은행',
       // 상품 카드
@@ -7677,6 +7691,7 @@ Supports credit and check cards from various banks for recharging and payments.`
       localWarehouse: '현지입/출고',
       internationalShipping: '국제운송',
       error: '오류',
+      paying: '결제중',
       searchOrders: '주문 검색',
       noOrders: '주문 없음',
       noOrdersInCategory: '해당 카테고리에 주문이 없습니다',
@@ -7881,6 +7896,9 @@ Supports credit and check cards from various banks for recharging and payments.`
     message: {
       orderInquiryHint: '주문이 있는 경우에만 주문문의가 가능합니다.',
       noFiles: '다운로드 가능한 파일이 없습니다.',
+      newOrderInquiryMessage: '새 주문 문의 메시지가 도착했습니다',
+      newGeneralInquiryMessage: '새 1:1 문의 메시지가 도착했습니다',
+      messageCountLabel: '메시지 {count}',
       progressStatus: {
         paymentPending: '결제대기',
         purchaseInProgress: '구매대행중',

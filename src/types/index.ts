@@ -384,6 +384,16 @@ export type RootStackParamList = {
   OrderPayment: {
     orderId: string;
   };
+  /**
+   * BillGate 신용카드 결제 WebView — OrderPaymentScreen 에서 신용카드 결제
+   * 제출 시 `POST /v1/payments/billgate/prepare` 응답을 그대로 넘긴다.
+   */
+  BillgateWebView: {
+    orderId: string;
+    paymentData: Record<string, string>;
+    /** @deprecated certify.jsp form POST 방식으로 전환 후 사용하지 않음. */
+    billgateScriptUrl?: string;
+  };
   Settings: undefined;
   ProfileSettings: undefined;
   LanguageSettings: undefined;

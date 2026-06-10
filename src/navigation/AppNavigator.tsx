@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { NavigationContainer, useNavigation } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef, ParamListBase, useNavigation } from '@react-navigation/native';
+import InquiryNotificationListener from '../components/InquiryNotificationListener';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, TouchableOpacity, StyleSheet, Image } from 'react-native';
@@ -63,6 +64,7 @@ import ProfileSettingsScreen from '../screens/main/profileScreen/myPageScreen/Pr
 import LanguageSettingsScreen from '../screens/main/profileScreen/LanguageSettingsScreen';
 import PaymentScreen from '../screens/main/profileScreen/settingScreen/PaymentScreen';
 import OrderPaymentScreen from '../screens/main/profileScreen/settingScreen/OrderPaymentScreen';
+import BillgateWebViewScreen from '../screens/main/profileScreen/settingScreen/BillgateWebViewScreen';
 import PaymentHistoryScreen from '../screens/main/profileScreen/settingScreen/PaymentHistoryScreen';
 import PersonalInformationScreen from '../screens/main/profileScreen/settingScreen/PersonalInformationScreen';
 import ProgressNotificationScreen from '../screens/main/profileScreen/settingScreen/ProgressNotificationScreen';
@@ -582,6 +584,14 @@ const RootNavigator = () => {
             options={{
               headerShown: false,
               title: 'Order Payment',
+            }}
+          />
+          <RootStack.Screen
+            name="BillgateWebView"
+            component={BillgateWebViewScreen}
+            options={{
+              headerShown: false,
+              title: 'Card Payment',
             }}
           />
           <RootStack.Screen 
@@ -1278,11 +1288,14 @@ const RootNavigator = () => {
   );
 };
 
+const navigationRef = createNavigationContainerRef<ParamListBase>();
+
 // Main App Navigator
 const AppNavigator = () => {
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <RootNavigator />
+      <InquiryNotificationListener navigationRef={navigationRef} />
     </NavigationContainer>
   );
 };

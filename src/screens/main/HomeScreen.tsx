@@ -269,10 +269,13 @@ const HomeScreen: React.FC = () => {
       const fetchUnreadCounts = async () => {
         try {
           lastFetchTimeRef.current = now;
-          const response = await inquiryApi.getUnreadCounts();
+          // 단일 합계만 필요하므로 가벼운 `/inquiries/unread-count` 사용.
+          // 기존 `getUnreadCounts` (plural) 는 inquiry 별 unread 까지 반환해
+          // 페이로드가 더 크다 — nav-bar 배지에는 단일 count 면 충분.
+          const response = await inquiryApi.getUnreadCount();
           if (response.success && response.data) {
-            unreadCountRef.current = response.data.totalUnread;
-            setUnreadCount(response.data.totalUnread);
+            unreadCountRef.current = response.data.count;
+            setUnreadCount(response.data.count);
           }
         } catch (error) {
           // Failed to fetch unread counts - use cached value

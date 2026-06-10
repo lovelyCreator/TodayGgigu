@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -27,21 +27,14 @@ import { getStoredToken } from '../../services/authApi';
 import { buildSignatureHeaders } from '../../services/signature';
 import { getOrderProgressStatusLabel } from '../../utils/orderProgressStatusLabel';
 import { useProfileTabletEmbedNavigation } from './profileScreen/ProfileTabletEmbedContext';
+import CachedImage from '../../components/CachedImage';
+import {
+  type OrderInquiryListItem,
+  fetchOrderInquiryList,
+  formatOrderDisplayNumber,
+} from '../../utils/messageInquiryMappers';
 
 type TabType = 'order' | 'general' | 'fileDownload';
-
-// ─── Order Inquiry Item ──────────────────────────────────
-interface OrderInquiryItem {
-  orderId: string;
-  orderNumber: string;
-  inquiryId: string;
-  status: string;
-  lastMessageAt: string;
-  createdAt: string;
-  unreadCount: number;
-  imageUrl?: string;
-  progressStatus?: string;
-}
 
 // ─── Form File Item ──────────────────────────────────────
 interface FormFile {
@@ -81,7 +74,9 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   const {
     isConnected,
     unreadCount: orderUnreadCount,
+    orderInquiryUnreadById,
     generalInquiryUnreadCount,
+    generalInquiryUnreadById,
     getUnreadCounts,
     getGeneralInquiryUnreadCounts,
     markGeneralInquiryAsRead,
@@ -130,6 +125,10 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
 
   const initialTab = initialTabOverride ?? (route.params?.initialTab === 'general' ? 'general' : 'order');
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
+  const activeTabRef = useRef<TabType>(initialTab);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
 
   // If navigated with orderId (from BuyList ? button), go directly to Chat
   useEffect(() => {
@@ -141,7 +140,7 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   }, [route.params?.orderId, route.params?.orderNumber]);
 
   // ─── Order Inquiry state ──────────────────────────────
-  const [orderInquiries, setOrderInquiries] = useState<OrderInquiryItem[]>([]);
+  const [orderInquiries, setOrderInquiries] = useState<OrderInquiryListItem[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderRefreshing, setOrderRefreshing] = useState(false);
 
@@ -160,38 +159,38 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   const [formFiles, setFormFiles] = useState<FormFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
 
-  // ─── Fetch Order Inquiries (GET /inquiries?status=confirmed) ──
+  const applyOrderUnreadMap = useCallback(
+    (items: OrderInquiryListItem[], unreadMap: Record<string, number>) =>
+      items.map((inq) => ({
+        ...inq,
+        unreadCount: unreadMap[inq.inquiryId] ?? inq.unreadCount ?? 0,
+      })),
+    [],
+  );
+
+  const applyGeneralInquiryMeta = useCallback(
+    (list: any[]) =>
+      list.map((inq) => ({
+        ...inq,
+        unreadCount: generalInquiryUnreadById[inq._id] ?? inq.unreadCount ?? 0,
+        messageCount: inq.messageCount ?? inq.messages?.length ?? 0,
+      })),
+    [generalInquiryUnreadById],
+  );
+
+  // ─── Fetch Order Inquiries (orders-proxy + inquiry API, all orders) ──
   const fetchOrderInquiries = useCallback(async () => {
     if (!isAuthenticated) return;
     try {
       setOrderLoading(true);
-      console.log('[MessageScreen] Fetching order inquiries...');
-      const response = await inquiryApi.getInquiries();
-      console.log('[MessageScreen] Order inquiries response:', JSON.stringify(response).substring(0, 500));
-      if (response.success && response.data?.inquiries) {
-        console.log('[MessageScreen] Order inquiries count:', response.data.inquiries.length);
-        const mapped = response.data.inquiries.map((inq: any) => ({
-          orderId: inq.orderId || inq.order?._id || inq._id,
-          orderNumber: inq.orderNumber || inq.order?.orderNumber || '',
-          inquiryId: inq._id,
-          status: inq.status || '',
-          lastMessageAt: inq.lastMessageAt || inq.updatedAt || inq.createdAt || '',
-          createdAt: inq.createdAt || '',
-          unreadCount: inq.unreadCount || 0,
-          imageUrl: inq.imageUrl || inq.order?.imageUrl || '',
-          progressStatus: inq.progressStatus || inq.order?.progressStatus || inq.order?.status || '',
-        }));
-        console.log('[MessageScreen] Mapped order inquiries:', JSON.stringify(mapped).substring(0, 500));
-        setOrderInquiries(mapped);
-      } else {
-        console.warn('[MessageScreen] Order inquiries failed or empty:', response.error);
-      }
+      const items = await fetchOrderInquiryList(locale);
+      setOrderInquiries(items);
     } catch (e) {
       if (__DEV__) console.warn('[MessageScreen.fetchOrderInquiries]', e);
     } finally {
       setOrderLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, locale]);
 
   // Fetch general (1:1) inquiries via REST API
   const fetchGeneralInquiries = useCallback(async () => {
@@ -203,8 +202,7 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
       console.log('[MessageScreen] General inquiries response:', JSON.stringify(response).substring(0, 500));
       if (response.success && response.data) {
         const list = response.data.inquiries || response.data.generalInquiries || [];
-        console.log('[MessageScreen] General inquiries count:', list.length, 'keys:', Object.keys(response.data));
-        setGeneralInquiriesLocal(list);
+        setGeneralInquiriesLocal(applyGeneralInquiryMeta(list));
       } else {
         console.warn('[MessageScreen] General inquiries failed or empty:', response.error);
       }
@@ -213,7 +211,7 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
     } finally {
       setGeneralLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, applyGeneralInquiryMeta]);
 
   // Fetch form files (GET /v1/form-files)
   const fetchFormFiles = useCallback(async () => {
@@ -271,37 +269,57 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
     ])
   );
 
-  // Listen for real-time order inquiry messages and update per-item unread count
+  useEffect(() => {
+    if (!Object.keys(orderInquiryUnreadById).length) return;
+    setOrderInquiries((prev) => applyOrderUnreadMap(prev, orderInquiryUnreadById));
+  }, [orderInquiryUnreadById, applyOrderUnreadMap]);
+
+  useEffect(() => {
+    if (!Object.keys(generalInquiryUnreadById).length) return;
+    setGeneralInquiriesLocal((prev) => applyGeneralInquiryMeta(prev));
+  }, [generalInquiryUnreadById, applyGeneralInquiryMeta]);
+
+  // Listen for real-time inquiry messages and update list rows
   useEffect(() => {
     onMessageReceived((data) => {
-      if (data.inquiryId) {
-        setOrderInquiries((prev) =>
-          prev.map((inq) =>
-            inq.inquiryId === data.inquiryId
-              ? {
-                  ...inq,
-                  unreadCount: data.unreadCount !== undefined ? data.unreadCount : (inq.unreadCount || 0) + 1,
-                  lastMessageAt: new Date().toISOString(),
-                }
-              : inq
-          )
-        );
-      }
+      if (!data.inquiryId) return;
+      setOrderInquiries((prev) =>
+        prev.map((inq) =>
+          inq.inquiryId === data.inquiryId
+            ? {
+                ...inq,
+                unreadCount:
+                  data.unreadCount !== undefined
+                    ? data.unreadCount
+                    : activeTabRef.current === 'order'
+                      ? inq.unreadCount
+                      : (inq.unreadCount || 0) + 1,
+                messageCount: (inq.messageCount || 0) + 1,
+                lastMessageAt: data.message?.timestamp || new Date().toISOString(),
+              }
+            : inq,
+        ),
+      );
     });
     onGeneralInquiryMessageReceived((data) => {
-      if (data.inquiryId) {
-        setGeneralInquiriesLocal((prev: any[]) =>
-          prev.map((inq: any) =>
-            inq._id === data.inquiryId
-              ? {
-                  ...inq,
-                  unreadCount: data.unreadCount !== undefined ? data.unreadCount : (inq.unreadCount || 0) + 1,
-                  lastMessageAt: new Date().toISOString(),
-                }
-              : inq
-          )
-        );
-      }
+      if (!data.inquiryId) return;
+      setGeneralInquiriesLocal((prev: any[]) =>
+        prev.map((inq: any) =>
+          inq._id === data.inquiryId
+            ? {
+                ...inq,
+                unreadCount:
+                  data.unreadCount !== undefined
+                    ? data.unreadCount
+                    : activeTabRef.current === 'general'
+                      ? inq.unreadCount
+                      : (inq.unreadCount || 0) + 1,
+                messageCount: (inq.messageCount || 0) + 1,
+                lastMessageAt: data.message?.timestamp || new Date().toISOString(),
+              }
+            : inq,
+        ),
+      );
     });
   }, [onMessageReceived, onGeneralInquiryMessageReceived]);
 
@@ -494,7 +512,12 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   // ═══════════════════════════════════════════════════════
   // ─── ORDER INQUIRY TAB ─────────────────────────────────
   // ═══════════════════════════════════════════════════════
-  const renderOrderItem = ({ item }: { item: OrderInquiryItem }) => (
+  const formatMessageCountLabel = (count: number) => {
+    const template = t('message.messageCountLabel') || 'Messages {count}';
+    return template.replace('{count}', String(count));
+  };
+
+  const renderOrderItem = ({ item }: { item: OrderInquiryListItem }) => (
     <TouchableOpacity
       style={styles.orderItem}
       activeOpacity={0.7}
@@ -507,11 +530,19 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
       }
     >
       <View>
-        <Image
-          source={require('../../assets/icons/cart_empty.png')}
-          style={styles.orderItemImage}
-          resizeMode="contain"
-        />
+        {item.imageUrl ? (
+          <CachedImage
+            uri={item.imageUrl}
+            style={styles.orderItemImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <Image
+            source={require('../../assets/icons/cart_empty.png')}
+            style={styles.orderItemImage}
+            resizeMode="contain"
+          />
+        )}
         {item.unreadCount > 0 && (
           <View style={styles.itemUnreadBadge}>
             <Text style={styles.itemUnreadBadgeText}>
@@ -521,8 +552,18 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
         )}
       </View>
       <View style={styles.orderItemInfo}>
-        <Text style={styles.orderItemNumber}>{item.orderNumber}</Text>
+        <Text style={styles.orderItemNumber}>
+          {formatOrderDisplayNumber(item.orderNumber, item.orderId)}
+        </Text>
         <Text style={styles.orderItemDate}>{formatDate(item.lastMessageAt || item.createdAt)}</Text>
+        {item.lastMessagePreview ? (
+          <Text style={styles.lastMessagePreview} numberOfLines={1}>
+            {item.lastMessagePreview}
+          </Text>
+        ) : null}
+        {item.messageCount > 0 ? (
+          <Text style={styles.messageCountText}>{formatMessageCountLabel(item.messageCount)}</Text>
+        ) : null}
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         {item.progressStatus ? (
@@ -578,6 +619,7 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   const renderGeneralItem = ({ item }: { item: GeneralInquiry }) => {
     const isClosed = item.status === 'closed' || item.status === 'resolved';
     const unread = (item as any).unreadCount || 0;
+    const messageCount = (item as any).messageCount || item.messages?.length || 0;
 
     return (
       <TouchableOpacity
@@ -599,6 +641,9 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
             )}
           </View>
           <Text style={styles.generalItemDate}>{formatDate(item.lastMessageAt || item.createdAt)}</Text>
+          {messageCount > 0 ? (
+            <Text style={styles.messageCountText}>{formatMessageCountLabel(messageCount)}</Text>
+          ) : null}
           <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '18' }]}>
             <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.status) }]} />
             <Text style={[styles.statusBadgeText, { color: getStatusColor(item.status) }]}>
@@ -865,6 +910,16 @@ const styles = StyleSheet.create({
   orderItemDate: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.gray[500],
+    marginTop: 2,
+  },
+  lastMessagePreview: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  messageCountText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.gray[400],
     marginTop: 2,
   },
   orderItemStatus: {

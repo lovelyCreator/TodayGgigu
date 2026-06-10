@@ -96,6 +96,11 @@ import {
   buildAddToCartRequestFromDetail,
   buildOrderItemCartFallback,
 } from '../../../../utils/buildAddToCartRequest';
+import {
+  isBankPaymentPendingSync,
+  prewarmPendingBankPayments,
+  clearBankPaymentPending,
+} from '../../../../utils/pendingBankPayments';
 
 type BuyListScreenNavigationProp = StackNavigationProp<RootStackParamList, 'BuyList'>;
 type BuyListScreenRouteProp = RouteProp<RootStackParamList, 'BuyList'>;
@@ -800,6 +805,9 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
     endDate: null,
   });
   const [orders, setOrders] = useState<Order[]>([]);
+  // 무통장 결제 후 "결제중" 표시를 위한 리렌더 트리거. AsyncStorage 의 cache 가
+  // 동기 read 되므로 prewarm 완료 후 한 번만 증가시키면 카드들이 다시 그려진다.
+  const [pendingBankPaymentsTick, setPendingBankPaymentsTick] = useState(0);
   const storeNameCacheRef = useRef<Map<string, string>>(new Map());
   const [viewFilterCounts, setViewFilterCounts] = useState<Record<string, number>>({});
   /** Snapshot for navigation badges — unfiltered fetch so counts stay accurate while filtering the list */
@@ -998,10 +1006,10 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   };
 
   const handleOrderInquiry = (order: Order) => {
-    // Always go to Chat — if no inquiry exists, sending a message will create one
+    // Always go to Chat — orders-proxy loads orderNoteLines; new messages create inquiry if needed
     embedNavigate('Chat', {
       inquiryId: order.inquiryId || undefined,
-      orderId: order.orderId,
+      orderId: order.id || order.orderId,
       orderNumber: order.orderNumber,
     });
   };
@@ -1331,13 +1339,20 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
         const inquiryMap = new Map<string, string>();
         if (inquiriesResponse.success && inquiriesResponse.data?.inquiries) {
           inquiriesResponse.data.inquiries.forEach((inquiry: any) => {
-            if (inquiry.order?._id) inquiryMap.set(inquiry.order._id, inquiry._id);
+            const linkedOrderId =
+              typeof inquiry.order === 'string'
+                ? inquiry.order
+                : inquiry.order?._id || inquiry.orderId || inquiry.order?.id;
+            if (linkedOrderId) inquiryMap.set(String(linkedOrderId), inquiry._id);
           });
         }
         let unreadCountsMap: { [inquiryId: string]: number } = {};
         if (unreadCountsResponse.success && unreadCountsResponse.data?.inquiries) {
           unreadCountsResponse.data.inquiries.forEach((inq: any) => {
-            if (inq._id && inq.unreadCount > 0) unreadCountsMap[inq._id] = inq.unreadCount;
+            const inquiryId = inq.inquiryId || inq._id;
+            if (inquiryId && inq.unreadCount > 0) {
+              unreadCountsMap[inquiryId] = inq.unreadCount;
+            }
           });
         }
         setUnreadCounts(unreadCountsMap);
@@ -1348,6 +1363,16 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
         }));
         setOrders(ordersWithInquiries);
         void enrichOrderStoreNames(ordersWithInquiries);
+        // backend 가 결제완료 / unpaid 가 아닌 다른 상태로 확정한 주문은
+        // "결제중" pending mark 가 더 이상 의미 없으므로 정리한다.
+        // (P_PAY_COMPLETE 등으로 진행됐거나 admin 이 취소시킨 경우.)
+        for (const o of ordersWithInquiries) {
+          const status = (o.progressStatus || '').toString();
+          const stillPending = o.status === 'unpaid' || status === 'P_PENDING' || status === 'IO_PAY_PENDING';
+          if (!stillPending) {
+            void clearBankPaymentPending(o.id);
+          }
+        }
       } catch {
         // silently fail — orders already set
         void enrichOrderStoreNames(mappedOrders);
@@ -1489,6 +1514,11 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       if (!isGuest && user) {
         fetchOrdersRef.current();
         fetchOrderCountsRef.current();
+        // 무통장 결제 신청한 주문은 admin 입금 확인 전까지 "결제중" 으로 표시.
+        // AsyncStorage 캐시를 prewarm 하고 만료된 항목은 정리한다.
+        prewarmPendingBankPayments()
+          .then(() => setPendingBankPaymentsTick((t) => t + 1))
+          .catch(() => {/* silent */});
       }
     }, [isGuest, user]),
   );
@@ -2050,14 +2080,28 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
               </TouchableOpacity>
             )}
 
-            {(canonicalStatus === 'P_PENDING' || canonicalStatus === 'IO_PAY_PENDING') && (
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={() => embedNavigate('OrderPayment', { orderId: order.id })}
-              >
-                <Text style={styles.primaryButtonText}>{t('cart.pay') || 'Pay Now'}</Text>
-              </TouchableOpacity>
-            )}
+            {(canonicalStatus === 'P_PENDING' || canonicalStatus === 'IO_PAY_PENDING') &&
+              (() => {
+                // pendingBankPaymentsTick 를 참조해 useFocusEffect 의 prewarm
+                // 직후 강제 리렌더가 정상 트리거되도록 한다 (의존성 캡처).
+                void pendingBankPaymentsTick;
+                const orderIdForPaying = order.id || (order as any).orderId || '';
+                const showPaying = isBankPaymentPendingSync(orderIdForPaying);
+                return showPaying ? (
+                  <View style={styles.payingBadge}>
+                    <Text style={styles.payingBadgeText}>
+                      {t('buyList.paying') || '결제중'}
+                    </Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    onPress={() => embedNavigate('OrderPayment', { orderId: order.id })}
+                  >
+                    <Text style={styles.primaryButtonText}>{t('cart.pay') || 'Pay Now'}</Text>
+                  </TouchableOpacity>
+                );
+              })()}
           </ScrollView>
         )}
       </View>
@@ -4573,6 +4617,21 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.white,
+    fontWeight: '600',
+  },
+  // 무통장 결제 신청 후 admin 입금 확인까지 카드에 표시되는 "결제중" 배지.
+  // 결제하기 버튼과 같은 자리에 표시되지만 비활성 (탭 불가) 형태.
+  payingBadge: {
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.gray?.[200] ?? '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payingBadgeText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
     fontWeight: '600',
   },
   cancelOrderButton: {

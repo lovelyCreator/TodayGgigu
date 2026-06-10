@@ -30,6 +30,7 @@ import {
   resolvePendingOrderPayment,
 } from '../../../../services/orderApi';
 import { useAppSelector } from '../../../../store/hooks';
+import { markBankPaymentPending } from '../../../../utils/pendingBankPayments';
 import {
   useProfileTabletEmbed,
   useProfileTabletEmbedNavigation,
@@ -272,15 +273,55 @@ const OrderPaymentScreen: React.FC<OrderPaymentScreenProps> = ({
             ? Math.ceil(parsedDepositAmount > 0 ? parsedDepositAmount : estimatedTotal)
             : Math.ceil(estimatedTotal);
 
+      // ─── 신용카드 결제: BillGate WebView 흐름 ───
+      // 일반 payOrder 대신 prepareBillgatePayment 로 paymentData 를 받아
+      // BillgateWebView 화면으로 navigate. WebView 가 BillGate 결제창을 띄우고
+      // 완료/취소 시 BuyList 로 돌아오며 결제 결과는 backend 의 RETURN_URL
+      // 콜백으로 처리된다.
+      if (selectedTab === 'credit_card') {
+        const prepareRes = await orderApi.prepareBillgatePayment(orderId, '0900');
+        if (!prepareRes.success || !prepareRes.data?.paymentData) {
+          showToast(prepareRes.error || t('profile.unitSurvey.paymentConfirmFailed'), 'error');
+          setSubmitting(false);
+          return;
+        }
+        const { paymentData, billgateScriptUrl } = prepareRes.data;
+        setSubmitting(false);
+        (navigation as any).navigate('BillgateWebView', {
+          orderId,
+          paymentData,
+          billgateScriptUrl,
+        });
+        return;
+      }
+
+      // 추가비용결제 흐름에서도 주문의 현재 shippingAddress 를 backend 에 함께
+      // 전송 — backend 가 주소를 갱신/보존하도록 보장.
+      const orderShippingAddress = (order as any)?.shippingAddress ?? undefined;
+
       const res = await orderApi.payOrder(orderId, {
         paymentMethod: selectedTab,
         amountKRW: payAmount,
         memberName: selectedTab === 'bank' ? memberName.trim() : undefined,
         lang: locale,
+        ...(orderShippingAddress && Object.keys(orderShippingAddress).length > 0
+          ? { shippingAddress: orderShippingAddress }
+          : {}),
       });
 
       if (res.success) {
         showToast(t('profile.unitSurvey.paymentConfirmSuccess'), 'success');
+        // 무통장 결제는 admin 의 입금 확인까지 시간이 걸리므로 카드에 "결제중"
+        // 라벨을 표시하기 위해 클라이언트 측에 pending mark 를 저장한다.
+        // backend 가 paid 로 확정하면 resolvePurchaseAgencyProgressStatus 가
+        // P_PAY_COMPLETE 로 우선 매핑하므로 자연스럽게 결제완료로 전환된다.
+        if (selectedTab === 'bank') {
+          try {
+            await markBankPaymentPending(orderId);
+          } catch (markErr) {
+            console.warn('[OrderPaymentScreen] markBankPaymentPending failed:', markErr);
+          }
+        }
         // 결제 완료 후 BuyList 가 발주관리·구매대행 목록을 새로고침하며
         // P_PAY_COMPLETE → 결제완료 카드로 표시한다 (useFocusEffect).
         if (embedded && profileEmbed?.isEmbedActive) {
@@ -515,7 +556,7 @@ const OrderPaymentScreen: React.FC<OrderPaymentScreenProps> = ({
             style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
             activeOpacity={0.85}
             onPress={handleSubmit}
-            disabled={submitting || selectedTab === 'credit_card'}
+            disabled={submitting}
           >
             {submitting ? (
               <ActivityIndicator size="small" color={COLORS.white} />

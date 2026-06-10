@@ -284,12 +284,12 @@ const ProfileScreen: React.FC = () => {
   // 호출한다. 네트워크는 병렬로 던지고, 호출자가 await 로 끝나기를 기다릴 수
   // 있도록 Promise<void> 를 반환한다.
   const loadProfileData = useCallback(async () => {
-    // 1) 알림 unread 카운트
+    // 1) 알림 unread 카운트 — 단일 합계만 필요하므로 lightweight 엔드포인트 사용.
     const fetchUnreadCounts = async () => {
       try {
-        const response = await inquiryApi.getUnreadCounts();
+        const response = await inquiryApi.getUnreadCount();
         if (response.success && response.data) {
-          setNotificationCount(response.data.totalUnread);
+          setNotificationCount(response.data.count);
         }
       } catch {
         // silent

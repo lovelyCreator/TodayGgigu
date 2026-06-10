@@ -32,6 +32,7 @@ import { useCreateOrderMutation } from '../../hooks/useCreateOrderMutation';
 import {
   buildOrdersProxyCreateRequest,
   buildOrdersProxyLineItems,
+  buildShippingAddressFromAddress,
   mapLocaleToOrdersLang,
   mergeOrderSourceItems,
   orderApi,
@@ -1697,9 +1698,17 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
         return;
       }
 
+      // 선택된 주소 객체 자체를 풀-shape 로 함께 전송 — backend 가 addressId
+      // 조회 누락 시에도 주소 보존을 보장.
+      const selectedAddrObj = pickPreferredAddress(addressesForCustoms, selectedAddressId);
+      const shippingAddress = buildShippingAddressFromAddress(selectedAddrObj, {
+        customerClearanceType: selectedAddrObj?.customerClearanceType,
+      });
+
       const proxyRequest = buildOrdersProxyCreateRequest({
         cartItemIds,
         addressId: selectedAddressId,
+        shippingAddress,
         businessType: basicInfoSelections.businessType,
         logisticsCenter: basicInfoSelections.logisticsCenter,
         transportMethod: basicInfoSelections.transportMethod,

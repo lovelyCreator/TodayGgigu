@@ -22,6 +22,7 @@ import { COLORS, FONTS, SHADOWS, SPACING, BORDER_RADIUS, IMAGE_CONFIG, BACK_NAVI
 import { RootStackParamList } from '../../../types';
 import { launchCamera, launchImageLibrary, MediaType, ImagePickerResponse, CameraOptions, ImageLibraryOptions } from 'react-native-image-picker';
 import { requestCameraPermission, requestPhotoLibraryPermission } from '../../../utils/permissions';
+import { stripChatHtml } from '../../../utils/stripChatHtml';
 import { useGeneralInquiry } from '../../../hooks/useGeneralInquiry';
 import { useSocket } from '../../../context/SocketContext';
 import { useToast } from '../../../context/ToastContext';
@@ -510,13 +511,40 @@ const GeneralInquiryChatScreen: React.FC = () => {
     }, 100);
   };
 
-  // REST fallback for sending messages
+  // REST 로 메시지를 저장하고, 성공 시 같은 페이로드로 소켓 emit 해 admin/web
+  // 의 'general-inquiry:message-received' 구독자가 실시간으로 알림을 받게 한다.
+  // 소켓 emit 이 빠지면 메시지가 DB 에는 저장되지만 admin 측이 새로고침할 때
+  // 까지 보이지 않는 문제가 발생한다 — 이것이 사용자가 보고한 증상.
   const sendViaRest = async (inquiryId: string, messageText: string, optimisticId: string, attachments: Array<{ uri: string; type: string; name: string }> = []) => {
     try {
       const response = await inquiryApi.sendGeneralInquiryMessage(inquiryId, messageText, attachments);
       if (!response.success) {
         setMessages(prev => prev.filter(m => m.id !== optimisticId));
         showToast(response.error || t('inquiry.failedToSend'), 'error');
+        return;
+      }
+      // REST 저장 성공 → admin/web 클라이언트에 실시간 broadcast.
+      try {
+        if (socketService.isConnected()) {
+          sendGeneralInquiryMessage(
+            inquiryId,
+            messageText,
+            attachments.map((a) => ({ type: 'image', url: a.uri, name: a.name })),
+          );
+        } else {
+          console.log('[GeneralInquiryChat] Socket not connected, attempting reconnect for broadcast');
+          try { await connect(); } catch (_) {}
+          if (socketService.isConnected()) {
+            sendGeneralInquiryMessage(
+              inquiryId,
+              messageText,
+              attachments.map((a) => ({ type: 'image', url: a.uri, name: a.name })),
+            );
+          }
+        }
+      } catch (socketErr) {
+        // 소켓 emit 실패는 fatal 이 아님 — REST 저장은 이미 성공.
+        console.warn('[GeneralInquiryChat] Socket broadcast after REST send failed (non-fatal):', socketErr);
       }
     } catch (error) {
       console.error('[GeneralInquiryChat] REST sendMessage error:', error);
@@ -567,11 +595,16 @@ const GeneralInquiryChatScreen: React.FC = () => {
                 ))}
               </View>
             )}
-            {message.text?.trim() ? (
-              <Text style={isUser ? styles.userMessageText : styles.adminMessageText}>
-                {message.text}
-              </Text>
-            ) : null}
+            {(() => {
+              // admin/web 리치 에디터가 보내는 HTML 마크업(<div><br></div> 등) 을
+              // 표시 직전에 제거. 일반 텍스트/숫자만 보낸 경우엔 원문 그대로 유지.
+              const cleaned = stripChatHtml(message.text);
+              return cleaned ? (
+                <Text style={isUser ? styles.userMessageText : styles.adminMessageText}>
+                  {cleaned}
+                </Text>
+              ) : null;
+            })()}
           </View>
           {isUser && (
             (user as any)?.avatar ? (

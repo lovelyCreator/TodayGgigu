@@ -1,5 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
-import { socketService, GeneralInquiry, SocketMessage, BroadcastNote } from '../services/socketService';
+import {
+  socketService,
+  GeneralInquiry,
+  SocketMessage,
+  BroadcastNote,
+  OrderNoteEvent,
+  OrderNoteConfirmedEvent,
+} from '../services/socketService';
 import { useAuth } from './AuthContext';
 import { getStoredToken } from '../services/authApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -30,9 +37,11 @@ interface SocketContextType {
   inquiries: GeneralInquiry[];
   currentInquiry: GeneralInquiry | null;
   unreadCount: number;
+  orderInquiryUnreadById: Record<string, number>;
   generalInquiries: GeneralInquiry[];
   currentGeneralInquiry: GeneralInquiry | null;
   generalInquiryUnreadCount: number;
+  generalInquiryUnreadById: Record<string, number>;
   // Order Inquiry Event handlers
   onInquiryCreated: (callback: (inquiry: GeneralInquiry) => void) => void;
   onMessageReceived: (callback: (data: { message: SocketMessage; inquiryId: string; unreadCount?: number; totalUnreadCount?: number }) => void) => void;
@@ -51,6 +60,20 @@ interface SocketContextType {
   notes: BroadcastNote[];
   onNoteReceived: (callback: (note: BroadcastNote) => void) => void;
   onNoteDeleted: (callback: (noteId: string) => void) => void;
+  // Order Note (주문 단위 메시지 — 주문문의 페지의 양방향 채널)
+  subscribeToOrderNotes: (orderId: string) => void;
+  unsubscribeFromOrderNotes: (orderId: string) => void;
+  sendOrderNote: (
+    orderId: string,
+    value: string,
+    extra?: { orderNumber?: string; name?: string },
+  ) => void;
+  confirmOrderNotes: (
+    orderId: string,
+    extra?: { orderNumber?: string; noteIds?: string[] },
+  ) => void;
+  onOrderNoteReceived: (callback: (data: OrderNoteEvent) => void) => void;
+  onOrderNoteConfirmed: (callback: (data: OrderNoteConfirmedEvent) => void) => void;
   // Remove listeners
   removeListeners: () => void;
 }
@@ -64,14 +87,20 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [inquiries, setInquiries] = useState<GeneralInquiry[]>([]);
   const [currentInquiry, setCurrentInquiry] = useState<GeneralInquiry | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [orderInquiryUnreadById, setOrderInquiryUnreadById] = useState<Record<string, number>>({});
   const [generalInquiries, setGeneralInquiries] = useState<GeneralInquiry[]>([]);
   const [currentGeneralInquiry, setCurrentGeneralInquiry] = useState<GeneralInquiry | null>(null);
   const [generalInquiryUnreadCount, setGeneralInquiryUnreadCount] = useState(0);
+  const [generalInquiryUnreadById, setGeneralInquiryUnreadById] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState<BroadcastNote[]>([]);
   
   // Callback refs for note event handlers
   const onNoteReceivedCallbackRef = React.useRef<((note: BroadcastNote) => void) | null>(null);
   const onNoteDeletedCallbackRef = React.useRef<((noteId: string) => void) | null>(null);
+
+  // Callback refs for order-note event handlers (주문문의 채널)
+  const onOrderNoteReceivedCallbackRef = React.useRef<((data: OrderNoteEvent) => void) | null>(null);
+  const onOrderNoteConfirmedCallbackRef = React.useRef<((data: OrderNoteConfirmedEvent) => void) | null>(null);
   
   // Callback refs for order inquiry event handlers
   const onInquiryCreatedCallbackRef = React.useRef<((inquiry: GeneralInquiry) => void) | null>(null);
@@ -141,9 +170,11 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setInquiries([]);
     setCurrentInquiry(null);
     setUnreadCount(0);
+    setOrderInquiryUnreadById({});
     setGeneralInquiries([]);
     setCurrentGeneralInquiry(null);
     setGeneralInquiryUnreadCount(0);
+    setGeneralInquiryUnreadById({});
     setNotes([]);
   }, []);
 
@@ -246,6 +277,11 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     socket.on('user:inquiry:unread-counts:response', (data: { totalUnread: number; inquiries: Array<{ inquiryId: string; unreadCount: number }> }) => {
       // console.log('Unread counts:', data);
       setUnreadCount(data.totalUnread);
+      const byId: Record<string, number> = {};
+      for (const item of data.inquiries || []) {
+        byId[item.inquiryId] = item.unreadCount ?? 0;
+      }
+      setOrderInquiryUnreadById(byId);
       if (onUnreadCountUpdatedCallbackRef.current) {
         onUnreadCountUpdatedCallbackRef.current(data.totalUnread);
       }
@@ -274,6 +310,10 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       // Save unread count for this inquiry to AsyncStorage (even when BuyListScreen is not open)
       if (data.inquiryId && data.unreadCount !== undefined) {
+        setOrderInquiryUnreadById((prev) => ({
+          ...prev,
+          [data.inquiryId]: data.unreadCount!,
+        }));
         AsyncStorage.getItem(STORAGE_KEYS.INQUIRY_UNREAD_COUNTS)
           .then((savedData) => {
             const savedCounts: { [inquiryId: string]: number } = savedData ? JSON.parse(savedData) : {};
@@ -348,21 +388,52 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       );
     });
 
-    socket.on('inquiry:admin-assigned', (data: { 
-      inquiryId: string; 
+    socket.on('inquiry:admin-assigned', (data: {
+      inquiryId: string;
       assignedAdmin: { _id: string; name: string };
     }) => {
       // console.log('Admin assigned to inquiry:', data);
-      setInquiries(prev => 
-        prev.map(inq => inq._id === data.inquiryId ? { 
-          ...inq, 
-          assignedAdmin: { 
+      setInquiries(prev =>
+        prev.map(inq => inq._id === data.inquiryId ? {
+          ...inq,
+          assignedAdmin: {
             _id: data.assignedAdmin._id,
             name: data.assignedAdmin.name,
-            email: inq.assignedAdmin?.email || '' 
-          } 
+            email: inq.assignedAdmin?.email || ''
+          }
         } : inq)
       );
+    });
+
+    // ========== Order Note Events (주문문의 양방향 채널) ==========
+
+    /** Admin 이 보낸 새 note 가 user 세션에 push 됨. */
+    socket.on('user:order-note:received', (data: OrderNoteEvent) => {
+      console.log('[Socket][OrderNote] received:', {
+        orderId: data?.orderId,
+        value: data?.value?.toString().substring(0, 40),
+        name: data?.name,
+      });
+      if (onOrderNoteReceivedCallbackRef.current) {
+        try { onOrderNoteReceivedCallbackRef.current(data); } catch (cbErr) {
+          console.warn('[Socket][OrderNote] onOrderNoteReceived callback threw:', cbErr);
+        }
+      }
+    });
+
+    /** User (혹은 다른 세션) 가 note 들을 확인 처리했음을 broadcast. */
+    socket.on('user:order-note:confirmed', (data: OrderNoteConfirmedEvent) => {
+      console.log('[Socket][OrderNote] confirmed:', {
+        orderId: data?.orderId,
+        orderNumber: data?.orderNumber,
+        confirmedBy: data?.confirmedBy,
+        confirmedCount: data?.confirmedCount,
+      });
+      if (onOrderNoteConfirmedCallbackRef.current) {
+        try { onOrderNoteConfirmedCallbackRef.current(data); } catch (cbErr) {
+          console.warn('[Socket][OrderNote] onOrderNoteConfirmed callback threw:', cbErr);
+        }
+      }
     });
 
     // ========== General Inquiry Events ==========
@@ -380,6 +451,11 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     socket.on('user:general-inquiry:unread-counts:response', (data: { totalUnread: number; inquiries: Array<{ inquiryId: string; unreadCount: number }> }) => {
       // console.log('General inquiry unread counts:', data);
       setGeneralInquiryUnreadCount(data.totalUnread);
+      const byId: Record<string, number> = {};
+      for (const item of data.inquiries || []) {
+        byId[item.inquiryId] = item.unreadCount ?? 0;
+      }
+      setGeneralInquiryUnreadById(byId);
       if (onGeneralInquiryUnreadCountUpdatedCallbackRef.current) {
         onGeneralInquiryUnreadCountUpdatedCallbackRef.current(data.totalUnread);
       }
@@ -472,6 +548,13 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       if (data.totalUnreadCount !== undefined) {
         setGeneralInquiryUnreadCount(data.totalUnreadCount);
+      }
+
+      if (data.inquiryId && data.unreadCount !== undefined) {
+        setGeneralInquiryUnreadById((prev) => ({
+          ...prev,
+          [data.inquiryId]: data.unreadCount!,
+        }));
       }
       
       // Update inquiry with new message
@@ -679,6 +762,9 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     // Note broadcast listeners
     socket.removeAllListeners('note:broadcast');
     socket.removeAllListeners('note:deleted');
+    // Order note listeners
+    socket.removeAllListeners('user:order-note:received');
+    socket.removeAllListeners('user:order-note:confirmed');
   }, []);
 
   const userId = user?.id ?? user?.email ?? null;
@@ -759,6 +845,47 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     onNoteDeletedCallbackRef.current = callback;
   }, []);
 
+  // ========== Order Note (주문문의) socket bindings ==========
+  const subscribeToOrderNotes = useCallback((orderId: string) => {
+    console.log('[Socket][OrderNote] subscribe:', orderId);
+    socketService.subscribeToOrderNotes(orderId);
+  }, []);
+
+  const unsubscribeFromOrderNotes = useCallback((orderId: string) => {
+    console.log('[Socket][OrderNote] unsubscribe:', orderId);
+    socketService.unsubscribeFromOrderNotes(orderId);
+  }, []);
+
+  const sendOrderNote = useCallback(
+    (orderId: string, value: string, extra?: { orderNumber?: string; name?: string }) => {
+      console.log('[Socket][OrderNote] send:', { orderId, value: value.substring(0, 40) });
+      socketService.sendOrderNote(orderId, value, extra);
+    },
+    [],
+  );
+
+  const confirmOrderNotes = useCallback(
+    (orderId: string, extra?: { orderNumber?: string; noteIds?: string[] }) => {
+      console.log('[Socket][OrderNote] confirm:', { orderId, noteIds: extra?.noteIds?.length ?? 0 });
+      socketService.confirmOrderNotes(orderId, extra);
+    },
+    [],
+  );
+
+  const onOrderNoteReceived = useCallback(
+    (callback: (data: OrderNoteEvent) => void) => {
+      onOrderNoteReceivedCallbackRef.current = callback;
+    },
+    [],
+  );
+
+  const onOrderNoteConfirmed = useCallback(
+    (callback: (data: OrderNoteConfirmedEvent) => void) => {
+      onOrderNoteConfirmedCallbackRef.current = callback;
+    },
+    [],
+  );
+
   const value: SocketContextType = {
     isConnected,
     isConnecting,
@@ -781,9 +908,11 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     inquiries,
     currentInquiry,
     unreadCount,
+    orderInquiryUnreadById,
     generalInquiries,
     currentGeneralInquiry,
     generalInquiryUnreadCount,
+    generalInquiryUnreadById,
     onInquiryCreated,
     onMessageReceived,
     onInquiryUpdated,
@@ -799,6 +928,13 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     notes,
     onNoteReceived,
     onNoteDeleted,
+    // Order note (주문문의)
+    subscribeToOrderNotes,
+    unsubscribeFromOrderNotes,
+    sendOrderNote,
+    confirmOrderNotes,
+    onOrderNoteReceived,
+    onOrderNoteConfirmed,
     removeListeners,
   };
 

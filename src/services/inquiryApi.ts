@@ -136,6 +136,32 @@ export interface UnreadCountsResponse {
   }>;
 }
 
+/**
+ * Response of `GET /v1/inquiries/unread-count` (singular).
+ * Returns just the aggregate count — used for the nav-bar / 메시지 탭 배지.
+ */
+export interface UnreadCountResponse {
+  count: number;
+}
+
+/**
+ * Response of `GET /v1/inquiries/orders` — list of orders that have inquiries.
+ * The server returns these fields per row (per the user's API sample).
+ * `orderNumber` and `orderProgressStatus` are optional because some orphan
+ * inquiries don't carry an attached order yet.
+ */
+export interface OrderInquiryRow {
+  orderId: string;
+  orderNumber?: string;
+  inquiryId: string;
+  status: string;
+  orderProgressStatus?: string;
+  createdAt: string;
+  unreadCount: number;
+  lastMessage?: string;
+  lastMessageAt?: string;
+}
+
 export interface CreateInquiryRequest {
   orderId: string;
   message: string;
@@ -165,21 +191,16 @@ export const inquiryApi = {
       const url = `${API_BASE_URL}/inquiries`;
       console.log('[REST][OrderInquiry] createInquiry POST', url, { orderId, message: message.substring(0, 50), attachments: attachments.length });
 
-      let response: Response;
-      if (attachments.length > 0) {
-        const formData = new FormData();
-        formData.append('orderId', orderId);
-        formData.append('message', message);
-        attachments.forEach((file) => {
-          formData.append('attachments', { uri: file.uri, type: file.type, name: file.name } as any);
-        });
-        response = await authFetchFormData(url, formData);
-      } else {
-        response = await authFetch(url, {
-          method: 'POST',
-          body: JSON.stringify({ orderId, message }),
-        });
-      }
+      // 백엔드는 web 클라이언트와 동일하게 multipart/form-data 로 받는다.
+      // 첨부가 없어도 항상 FormData 로 보낸다 — JSON 본문은 backend 가 메시지
+      // 본문을 읽지 못해 안드로이드에서만 동작하지 않던 문제를 차단.
+      const formData = new FormData();
+      formData.append('orderId', orderId);
+      formData.append('message', message);
+      attachments.forEach((file) => {
+        formData.append('attachments', { uri: file.uri, type: file.type, name: file.name } as any);
+      });
+      const response = await authFetchFormData(url, formData);
 
       console.log('[REST][OrderInquiry] createInquiry response status:', response.status);
       const responseText = await response.text();
@@ -255,6 +276,12 @@ export const inquiryApi = {
     try {
       console.log('[REST][OrderInquiry] sendMessage:', inquiryId, message.substring(0, 50), 'attachments:', attachments.length);
       const url = `${API_BASE_URL}/inquiries/${inquiryId}/messages`;
+      // ★ 첨부 없으면 JSON, 있으면 FormData.
+      //
+      // 정상 동작하는 레퍼런스 앱(todaymall.kr)의 로그를 분석한 결과 bodyHash
+      // 가 계산되어 있었음 — 이는 JSON 본문을 의미한다 (FormData 는 hash 안 됨).
+      // 그리고 backend 의 admin sync 로직이 Content-Type 별로 분기할 가능성이
+      // 있음 (JSON 만 orderNoteLines 로 server-side sync).
       let response: Response;
       if (attachments.length > 0) {
         const formData = new FormData();
@@ -264,7 +291,10 @@ export const inquiryApi = {
         });
         response = await authFetchFormData(url, formData);
       } else {
-        response = await authFetch(url, { method: 'POST', body: JSON.stringify({ message }) });
+        response = await authFetch(url, {
+          method: 'POST',
+          body: JSON.stringify({ message }),
+        });
       }
       return parseResponse(response, 'OrderInquiry.sendMessage');
     } catch (error: any) {
@@ -272,10 +302,26 @@ export const inquiryApi = {
     }
   },
 
-  markAsRead: async (inquiryId: string): Promise<ApiResponse<{ inquiry: GeneralInquiry }>> => {
+  /**
+   * Inquiry 의 모든 메시지를 현재 사용자가 읽음 처리.
+   * 백엔드 엔드포인트: `POST /v1/inquiries/{inquiryId}/mark-read?lang={ko|en|zh}`
+   *   Body: `{}` (사용자 식별은 auth token 에서 추출)
+   *   응답: 갱신된 inquiry 문서 (messages[].readBy 가 갱신됨)
+   *
+   * `lang` 쿼리 파라미터는 admin 측에 보낼 시스템 메시지(예: '관리자가 메시지를
+   * 읽음으로 표시했습니다') 의 로케일을 결정. 빈 값이면 백엔드 default(en).
+   */
+  markAsRead: async (
+    inquiryId: string,
+    lang?: string,
+  ): Promise<ApiResponse<{ inquiry: GeneralInquiry }>> => {
     try {
-      const url = `${API_BASE_URL}/inquiries/${inquiryId}/mark-read`;
-      const response = await authFetch(url, { method: 'POST' });
+      const langParam = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+      const url = `${API_BASE_URL}/inquiries/${inquiryId}/mark-read${langParam}`;
+      const response = await authFetch(url, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
       return parseResponse(response, 'OrderInquiry.markAsRead');
     } catch (error: any) {
       return { success: false, error: error.message || 'An unexpected error occurred.' };
@@ -318,19 +364,17 @@ export const inquiryApi = {
     try {
       console.log('[REST] createGeneralInquiry:', { subject: data.subject, category: data.category, attachments: attachments.length });
       const url = `${API_BASE_URL}/general-inquiries`;
-      let response: Response;
-      if (attachments.length > 0) {
-        const formData = new FormData();
-        formData.append('message', data.message);
-        if (data.subject) formData.append('subject', data.subject);
-        if (data.category) formData.append('category', data.category);
-        attachments.forEach((file) => {
-          formData.append('attachments', { uri: file.uri, type: file.type, name: file.name } as any);
-        });
-        response = await authFetchFormData(url, formData);
-      } else {
-        response = await authFetch(url, { method: 'POST', body: JSON.stringify(data) });
-      }
+      // 백엔드는 web 클라이언트와 동일하게 multipart/form-data 로 받는다.
+      // 첨부가 없어도 항상 FormData 로 보낸다 — JSON 본문은 backend 가 본문을
+      // 읽지 못해 안드로이드에서만 동작하지 않던 문제를 차단.
+      const formData = new FormData();
+      formData.append('message', data.message);
+      if (data.subject) formData.append('subject', data.subject);
+      if (data.category) formData.append('category', data.category);
+      attachments.forEach((file) => {
+        formData.append('attachments', { uri: file.uri, type: file.type, name: file.name } as any);
+      });
+      const response = await authFetchFormData(url, formData);
       return parseResponse(response, 'GeneralInquiry.createGeneralInquiry');
     } catch (error: any) {
       return { success: false, error: error.message || 'An unexpected error occurred.' };
@@ -341,17 +385,13 @@ export const inquiryApi = {
     try {
       console.log('[REST] sendGeneralInquiryMessage:', inquiryId, 'attachments:', attachments.length);
       const url = `${API_BASE_URL}/general-inquiries/${inquiryId}/messages`;
-      let response: Response;
-      if (attachments.length > 0) {
-        const formData = new FormData();
-        formData.append('message', message);
-        attachments.forEach((file) => {
-          formData.append('attachments', { uri: file.uri, type: file.type, name: file.name } as any);
-        });
-        response = await authFetchFormData(url, formData);
-      } else {
-        response = await authFetch(url, { method: 'POST', body: JSON.stringify({ message }) });
-      }
+      // 항상 multipart/form-data 로 보낸다 (위와 같은 이유).
+      const formData = new FormData();
+      formData.append('message', message);
+      attachments.forEach((file) => {
+        formData.append('attachments', { uri: file.uri, type: file.type, name: file.name } as any);
+      });
+      const response = await authFetchFormData(url, formData);
       return parseResponse(response, 'GeneralInquiry.sendMessage');
     } catch (error: any) {
       return { success: false, error: error.message || 'An unexpected error occurred.' };
@@ -601,9 +641,69 @@ export const inquiryApi = {
   },
 
   /**
-   * Get list of orders that have inquiries (aggregated for user)
+   * 단일 합계 미확인 메시지 수 조회 — admin/web 의 nav-bar 배지에 사용.
+   *
+   * 백엔드 엔드포인트: `GET /v1/inquiries/unread-count` (singular)
+   *   응답: `{ data: { count: number } }`
+   *
+   * 기존 `getUnreadCounts` (plural) 는 inquiry 별 unread 를 반환하므로,
+   * 단순 배지 숫자만 필요한 곳에서는 이 함수가 더 가볍다.
    */
-  getOrderInquiries: async (): Promise<ApiResponse<{ orders: Array<{ orderId: string; orderNumber: string; inquiryId: string; status: string; lastMessageAt: string; createdAt: string; unreadCount: number }> }>> => {
+  getUnreadCount: async (): Promise<ApiResponse<UnreadCountResponse>> => {
+    try {
+      const token = await getStoredToken();
+      if (!token) {
+        return { success: false, error: 'No authentication token found. Please log in again.' };
+      }
+      const url = `${API_BASE_URL}/inquiries/unread-count`;
+      const signatureHeaders = await buildSignatureHeaders('GET', url);
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+          ...signatureHeaders,
+        },
+      });
+      const responseText = await response.text();
+      let responseData: any;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch {
+        return { success: false, error: 'Invalid response from server. Please try again.' };
+      }
+      if (!response.ok) {
+        return {
+          success: false,
+          error: responseData?.message || `Request failed with status ${response.status}`,
+        };
+      }
+      if (responseData.status !== 'success') {
+        return {
+          success: false,
+          error: responseData?.message || 'Failed to get unread count',
+        };
+      }
+      return {
+        success: true,
+        message: responseData.message || 'Unread count retrieved successfully',
+        data: { count: Number(responseData?.data?.count ?? 0) },
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'An unexpected error occurred. Please try again.' };
+    }
+  },
+
+  /**
+   * Get list of orders that have inquiries (aggregated for user).
+   * 백엔드 엔드포인트: `GET /v1/inquiries/orders`
+   *   응답: `{ data: { orders: OrderInquiryRow[] } }`
+   * 각 행에는 `orderId, inquiryId, status, createdAt, unreadCount` 가 필수이고
+   * `orderNumber, orderProgressStatus, lastMessage` 는 inquiry-only orphan
+   * 케이스를 제외하면 채워진다.
+   */
+  getOrderInquiries: async (): Promise<ApiResponse<{ orders: OrderInquiryRow[] }>> => {
     try {
       const token = await getStoredToken();
 
@@ -614,7 +714,7 @@ export const inquiryApi = {
         };
       }
 
-      const url = `${API_BASE_URL}/v1/inquiries/orders`;
+      const url = `${API_BASE_URL}/inquiries/orders`;
       const signatureHeaders = await buildSignatureHeaders('GET', url);
       const response = await fetch(url, {
         method: 'GET',

@@ -16,7 +16,9 @@ import { RootStackParamList } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { useAuth } from '../../../context/AuthContext';
 import { inquiryApi } from '../../../services/inquiryApi';
+import { orderApi } from '../../../services/orderApi';
 import { useTranslation } from '../../../hooks/useTranslation';
+import { useAppSelector } from '../../../store/hooks';
 
 type OrderInquiryScreenNavigationProp = StackNavigationProp<RootStackParamList, 'OrderInquiry'>;
 type OrderInquiryScreenRouteProp = RouteProp<RootStackParamList, 'OrderInquiry'>;
@@ -27,7 +29,8 @@ const OrderInquiryScreen: React.FC = () => {
   const { showToast } = useToast();
   const { user } = useAuth();
   const { t } = useTranslation();
-  
+  const locale = useAppSelector((s) => s.i18n.locale) as string;
+
   const [formData, setFormData] = useState({
     orderId: route.params?.orderId || '',
     orderNumber: route.params?.orderNumber || '',
@@ -83,7 +86,21 @@ const OrderInquiryScreen: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const orderIdToSend = formData.orderId || formData.orderNumber;
+      let orderIdToSend = formData.orderId.trim();
+      let resolvedOrderNumber = formData.orderNumber.trim();
+
+      if (!resolvedOrderNumber) {
+        showToast(t('chat.orderIdRequired'), 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const proxyRes = await orderApi.getOrderByOrderNumber(resolvedOrderNumber, locale);
+      const proxyOrder = proxyRes.success ? proxyRes.data?.orders?.[0] : undefined;
+      if (proxyOrder) {
+        orderIdToSend = String(proxyOrder._id ?? proxyOrder.id ?? orderIdToSend);
+        resolvedOrderNumber = proxyOrder.orderNumber || resolvedOrderNumber;
+      }
 
       if (!orderIdToSend) {
         showToast(t('chat.orderIdRequired'), 'error');
@@ -105,8 +122,8 @@ const OrderInquiryScreen: React.FC = () => {
       if (inquiryId) {
         navigation.replace('Chat', {
           inquiryId,
-          orderId: response.data?.inquiry?.order?._id || formData.orderId,
-          orderNumber: response.data?.inquiry?.order?.orderNumber || formData.orderNumber,
+          orderId: response.data?.inquiry?.order?._id || orderIdToSend,
+          orderNumber: response.data?.inquiry?.order?.orderNumber || resolvedOrderNumber,
         });
         return;
       }

@@ -37,7 +37,7 @@ const CustomerServiceScreen: React.FC<CustomerServiceScreenProps> = ({
     navigation.goBack();
   };
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
-  const { onMessageReceived, onUnreadCountUpdated, getUnreadCounts, unreadCount } = useSocket();
+  const { onMessageReceived, onUnreadCountUpdated, unreadCount } = useSocket();
   const [totalUnreadCount, setTotalUnreadCount] = useState<number>(0);
   
   // Translation function
@@ -55,9 +55,10 @@ const CustomerServiceScreen: React.FC<CustomerServiceScreenProps> = ({
     React.useCallback(() => {
       const fetchUnreadCounts = async () => {
         try {
-          const response = await inquiryApi.getUnreadCounts();
+          // 단일 합계만 필요하므로 lightweight `/inquiries/unread-count` 사용.
+          const response = await inquiryApi.getUnreadCount();
           if (response.success && response.data) {
-            setTotalUnreadCount(response.data.totalUnread);
+            setTotalUnreadCount(response.data.count);
             // Note: onUnreadCountUpdated is a callback registration function, not a direct update function
             // The socket context will handle updates via its own event listeners
           }

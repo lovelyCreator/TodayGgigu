@@ -42,6 +42,7 @@ import {
   getAddressSaveSuccessMessage,
   resolveAddressSaveError,
 } from '../../../../services/addressApi';
+import { buildShippingAddressFromAddress } from '../../../../services/orderApi';
 
 interface PaymentScreenParams {
   items: Array<{
@@ -1088,6 +1089,10 @@ const PaymentScreen: React.FC = () => {
         locale,
       );
 
+      // 선택된 주소 객체를 풀-shape 로 함께 전송 — addressId 만으로 backend 가
+      // 조회 실패할 경우에도 주소 정보가 보존되도록 보장.
+      const shippingAddress = buildShippingAddressFromAddress(selectedAddress as any);
+
       const orderRequest = {
         cartItems,
         quantities,
@@ -1101,6 +1106,7 @@ const PaymentScreen: React.FC = () => {
         flow: 'general' as const,
         paymentMethod,
         addressId: selectedAddress.id,
+        ...(shippingAddress ? { shippingAddress } : {}),
         ...(allNotes && { notes: allNotes }),
         ...(enteredPoints > 0 && { pointsToUse: enteredPoints }),
         ...(paymentMethod === 'bank' && { memberName: memberName.trim() }),
@@ -1118,11 +1124,15 @@ const PaymentScreen: React.FC = () => {
       (sum, it) => sum + (Array.isArray(it.designatedShooting) ? it.designatedShooting.length : 0),
       0
     );
+    // direct purchase 흐름에서도 풀-주소 객체를 함께 전송 — backend 보존 보장.
+    const directShippingAddress = buildShippingAddressFromAddress(selectedAddress as any);
+
     const directRequest = {
       items: directPurchaseItems,
       designatedShootingImageCount: designatedShootingCount || undefined,
       estimatedShippingCostBySeller: estimatedShippingCostBySeller || {},
       addressId: selectedAddress.id,
+      ...(directShippingAddress ? { shippingAddress: directShippingAddress } : {}),
       paymentMethod,
       serviceCode: '',
       transferMethod,

@@ -78,6 +78,8 @@ export interface CreateOrderRequest {
   flow: 'general';
   paymentMethod: 'deposit' | 'bank' | 'card';
   addressId: string;
+  /** 풀-주소 객체. addressId 와 함께 명시 전송해 backend 보존성을 보장. */
+  shippingAddress?: OrderShippingAddressInput;
   notes?: string;
   /** 협상내역 — uploaded image URLs from device attachments. */
   negotiationContentImages?: string[];
@@ -123,10 +125,72 @@ export interface OrdersProxyLineItem {
 }
 
 /** Web orders-proxy create body (matches working web checkout). */
+/**
+ * Backend 의 order.shippingAddress 와 동일한 shape — 응답 JSON 에서 확인된
+ * 정식 필드 목록. 클라이언트가 주문 생성 / 결제 시 함께 명시적으로 전송해
+ * backend 가 addressId 만으로 조회하지 못하는 경우에도 주소를 보존하도록.
+ */
+export interface OrderShippingAddressInput {
+  recipient: string;
+  contact: string;
+  /** 'business' | 'personal' */
+  customerClearanceType?: string;
+  /** P-prefixed personal customs code (개인통관고유부호) */
+  personalCustomsCode?: string;
+  detailedAddress: string;
+  zipCode: string;
+  note?: string;
+  noteZh?: string;
+  country?: string;
+  province?: string;
+  city?: string;
+  district?: string;
+}
+
+/**
+ * 클라이언트의 `Address` 객체를 backend 의 `OrderShippingAddressInput` shape
+ * 으로 매핑한다. `customerClearanceType` 은 customs 분류 (business/personal),
+ * `personalCustomsCode` 는 P-prefixed code 로 Address 확장 필드에 들어 있다.
+ *
+ * 일부 필드는 Address 인터페이스에 없을 수 있어 optional 캐스팅으로 안전하게
+ * 접근. 없으면 빈 값으로 backend 가 기존 값을 보존.
+ */
+export const buildShippingAddressFromAddress = (
+  address: Record<string, any> | null | undefined,
+  options?: { customerClearanceType?: string },
+): OrderShippingAddressInput | undefined => {
+  if (!address) return undefined;
+  const recipient = String(address.name ?? address.recipient ?? '').trim();
+  const contact = String(address.phone ?? address.contact ?? '').trim();
+  const detailedAddress = String(
+    address.detailedAddress ?? address.street ?? address.address ?? '',
+  ).trim();
+  const zipCode = String(address.zipCode ?? address.zipcode ?? '').trim();
+  if (!recipient && !detailedAddress && !zipCode) return undefined;
+  return {
+    recipient,
+    contact,
+    customerClearanceType:
+      options?.customerClearanceType ?? address.customerClearanceType ?? undefined,
+    personalCustomsCode:
+      address.personalCustomsCode ?? address.customsCode ?? undefined,
+    detailedAddress,
+    zipCode,
+    note: address.note ?? '',
+    noteZh: address.noteZh ?? '',
+    country: address.country ?? undefined,
+    province: address.state ?? address.province ?? undefined,
+    city: address.city ?? undefined,
+    district: address.district ?? undefined,
+  };
+};
+
 export interface OrdersProxyCreateRequest {
   orderType: string;
   cartItemIds: string[];
   addressId: string;
+  /** 클라이언트가 풀-주소 객체를 명시 전송 — backend 가 addressId 조회에 실패해도 보존. */
+  shippingAddress?: OrderShippingAddressInput;
   dispatchmethod: string;
   dispatchmethodship: string;
   items: OrdersProxyLineItem[];
@@ -428,6 +492,9 @@ export const buildOrdersProxyLineItems = (
 export type BuildOrdersProxyCreateParams = {
   cartItemIds: string[];
   addressId: string;
+  /** 풀-주소 객체. backend 가 addressId 만으로 조회 가능하지만 명시 전송으로
+   *  주소 정보가 누락되지 않도록 보장. */
+  shippingAddress?: OrderShippingAddressInput;
   /** From GET /center-manage/meta — Korean labels as on web */
   businessType: string;
   logisticsCenter: string;
@@ -453,6 +520,10 @@ export const buildOrdersProxyCreateRequest = (
     orderType,
     cartItemIds: params.cartItemIds,
     addressId: params.addressId,
+    // 풀-주소 객체 명시 전송 — backend 가 addressId 만으로 조회하지 못하는
+    // 경우에도 주소가 보존되도록 보장. 안드로이드에서 주문 생성 시 응답
+    // 에 shippingAddress 가 비어 들어오던 문제를 막는다.
+    ...(params.shippingAddress ? { shippingAddress: params.shippingAddress } : {}),
     dispatchmethod: mapPurchasePaymentToDispatchMethod(params.purchasePayment),
     dispatchmethodship: mapShippingPaymentToDispatchMethodShip(params.shippingPayment),
     items: params.items,
@@ -504,6 +575,8 @@ export const convertLegacyCreateOrderToProxy = (
     orderType: req.orderType,
     cartItemIds: req.cartItems,
     addressId: req.addressId,
+    // legacy → proxy 변환 시에도 풀-주소 보존.
+    ...(req.shippingAddress ? { shippingAddress: req.shippingAddress } : {}),
     dispatchmethod,
     dispatchmethodship,
     items,
@@ -915,11 +988,22 @@ export interface GetOrdersResponse {
 
 /** Query params for GET /orders-proxy */
 export type ViewFilterType = 'all' | 'unpaid' | 'to_be_shipped' | 'shipped' | 'processed';
+export interface OrderNoteLine {
+  noteId?: string;
+  value: string;
+  name?: string;
+  senderType?: 'admin' | 'user' | string;
+  isConfirmed?: string;
+  createDate?: string;
+}
+
 export interface GetOrdersParams {
   page?: number;
   pageSize?: number;
   lang?: string;
   search?: string;
+  /** Exact order number lookup (GET /orders-proxy?orderNumber=...) */
+  orderNumber?: string;
   datePeriod?: string;
   platform?: string;
   viewFilter?: ViewFilterType;
@@ -1298,6 +1382,7 @@ export const orderApi = {
       searchParams.set('pagesize', String(p.pageSize ?? 10));
       searchParams.set('lang', mapLocaleToOrdersLang(p.lang));
       if (p.search) searchParams.set('search', p.search);
+      if (p.orderNumber) searchParams.set('orderNumber', p.orderNumber.trim());
       if (p.datePeriod) searchParams.set('datePeriod', p.datePeriod);
       if (p.platform) searchParams.set('platform', p.platform);
       if (p.viewFilter) searchParams.set('viewFilter', p.viewFilter);
@@ -1313,14 +1398,27 @@ export const orderApi = {
       const query = searchParams.toString();
       const url = `${ORDERS_PROXY_BASE_URL}/orders-proxy?${query}`;
 
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
-        },
-      });
+      // 401 (Token expired) 시 refresh + retry — orderApi 의 다른 함수들과
+      // 동일한 패턴. 이 처리가 누락되어 BuyListScreen 진입 시 access token 이
+      // 만료된 경우 "Token expired" Alert 가 노출되던 문제 해결.
+      const doFetch = async (bearer: string) =>
+        fetch(url, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${bearer}`,
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+          },
+        });
+
+      let response = await doFetch(token);
+      if (response.status === 401) {
+        const newToken = await refreshAccessToken();
+        if (newToken) {
+          token = newToken;
+          response = await doFetch(newToken);
+        }
+      }
 
       const responseText = await response.text();
       let responseData: any;
@@ -1377,6 +1475,177 @@ export const orderApi = {
         success: false,
         error: errorMessage,
       };
+    }
+  },
+
+  /** Fetch a single order by order number via orders-proxy */
+  getOrderByOrderNumber: async (
+    orderNumber: string,
+    lang?: string,
+  ): Promise<ApiResponse<GetOrdersResponse>> => {
+    const trimmed = orderNumber.trim();
+    if (!trimmed) {
+      return { success: false, error: 'Order number is required.' };
+    }
+    return orderApi.getOrders({
+      page: 1,
+      pageSize: 50,
+      lang,
+      orderNumber: trimmed,
+    });
+  },
+
+  /**
+   * Resolve an order via orders-proxy (includes orderNoteLines).
+   * Tries orderNumber first, then search by order id, then GET /orders/:id fallback.
+   */
+  getOrderFromProxy: async (
+    params: { orderId?: string; orderNumber?: string },
+    lang?: string,
+  ): Promise<ApiResponse<{ order: Order | null }>> => {
+    const ordersLang = mapLocaleToOrdersLang(lang);
+    const orderNumber = params.orderNumber?.trim();
+    const orderId = params.orderId?.trim();
+
+    if (orderNumber) {
+      const byNumber = await orderApi.getOrders({
+        page: 1,
+        pageSize: 50,
+        lang: ordersLang,
+        orderNumber,
+      });
+      const match = byNumber.success
+        ? byNumber.data?.orders?.find((o) => o.orderNumber === orderNumber) ??
+          byNumber.data?.orders?.[0]
+        : undefined;
+      if (match) {
+        return { success: true, data: { order: match } };
+      }
+    }
+
+    if (orderId) {
+      const bySearch = await orderApi.getOrders({
+        page: 1,
+        pageSize: 50,
+        lang: ordersLang,
+        search: orderId,
+        datePeriod: 'last_6_months',
+        viewFilter: 'all',
+      });
+      const searchMatch = bySearch.success
+        ? bySearch.data?.orders?.find(
+            (o) => String(o.id ?? o._id ?? '') === orderId,
+          )
+        : undefined;
+      if (searchMatch) {
+        return { success: true, data: { order: searchMatch } };
+      }
+
+      const byId = await orderApi.getOrderById(orderId, lang);
+      if (byId.success && byId.data?.order) {
+        return { success: true, data: { order: byId.data.order } };
+      }
+    }
+
+    return { success: false, error: 'Order not found.' };
+  },
+
+  /**
+   * 주문문의(orderNoteLines) 에 새 메시지를 한 줄 추가한다.
+   *
+   * 백엔드 엔드포인트: `POST https://todayggigu.kr/api/orders-proxy`
+   *   Body: `{ orderId, orderNoteLines: { message, username } }`
+   *   응답: 갱신된 order 문서 전체 (`orderNoteLines[]` 에 새 노트가 append).
+   *
+   * 사용자가 주문문의 채팅에서 메시지를 보낼 때 backend 가 orderNoteLines 에
+   * 영속화하는 정식 경로. 기존의 inquiries/:id/messages (Inquiry 컬렉션) 는
+   * inquiry 단위 thread 이고, 이 함수는 주문 문서 단위 thread.
+   *
+   * 401 시 refreshAccessToken + 재시도 (다른 orders-proxy 호출과 동일 패턴).
+   */
+  appendOrderNoteLine: async (
+    orderId: string,
+    message: string,
+    username: string,
+  ): Promise<ApiResponse<{ order: any }>> => {
+    try {
+      let token = await getStoredToken();
+      if (!token) {
+        return { success: false, error: 'Authentication required. Please log in again.' };
+      }
+      // ★ 사용자가 명시한 정확한 API 명세 (HTTP method 가 PATCH 였던 게 핵심):
+      //   URL: https://todayggigu.kr/api/orders-proxy
+      //   Method: PATCH
+      //   Body: { orderId, orderNoteLines: { message, username } }
+      //   응답: "Manual order updated successfully" (200) — 노트 append 됨
+      //
+      // POST 로 보내면 createCrossOrder 라우팅 (새 주문 생성), PATCH 면
+      // manual order update 라우팅 (기존 주문의 orderNoteLines append).
+      const url = `${ORDERS_PROXY_BASE_URL}/orders-proxy`;
+      const payload = {
+        orderId,
+        orderNoteLines: { message, username },
+      };
+      const body = JSON.stringify(payload);
+      console.log('[REST][orders-proxy] appendOrderNoteLine PATCH', url, {
+        orderId,
+        messagePreview: message.substring(0, 40),
+        username,
+        bodyBytes: body.length,
+      });
+
+      const doFetch = async (bearer: string) =>
+        fetch(url, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${bearer}`,
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+          },
+          body,
+        });
+
+      let response = await doFetch(token);
+      console.log('[REST][orders-proxy] appendOrderNoteLine response status:', response.status);
+      if (response.status === 401) {
+        const newToken = await refreshAccessToken();
+        if (newToken) {
+          token = newToken;
+          response = await doFetch(newToken);
+          console.log('[REST][orders-proxy] appendOrderNoteLine retry status:', response.status);
+        }
+      }
+
+      const responseText = await response.text();
+      console.log('[REST][orders-proxy] appendOrderNoteLine response body:', responseText.substring(0, 400));
+      let responseData: any;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch {
+        return { success: false, error: 'Invalid response from server. Please try again.' };
+      }
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error:
+            responseData?.message ||
+            responseData?.error ||
+            `Request failed with status ${response.status}`,
+        };
+      }
+
+      if (responseData.status && responseData.status !== 'success') {
+        return {
+          success: false,
+          error: responseData?.message || responseData?.error || 'Failed to append order note',
+        };
+      }
+
+      return { success: true, data: responseData.data };
+    } catch (error: any) {
+      console.error('[orderApi] appendOrderNoteLine error:', error);
+      return { success: false, error: error?.message || 'An unexpected error occurred.' };
     }
   },
 
@@ -1563,6 +1832,55 @@ export const orderApi = {
           },
         },
       };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'An unexpected error occurred.' };
+    }
+  },
+
+  /**
+   * GET /orders/:id — return the **raw** order document without normalization.
+   *
+   * `normalizeProxyOrder` strips/renames fields (e.g., `price` instead of
+   * `userPrice`/`sellerPrice`) which breaks subsequent PUT-like updates that
+   * need the original shape (such as `/orders-proxy` POST that runs full
+   * validation on `items[].subject`, `items[].sellerPrice`, etc.).
+   *
+   * Use this when you need to round-trip the entire order document back to
+   * the backend — `appendOrderNoteLine` is the main caller.
+   */
+  getOrderRaw: async (
+    orderId: string,
+    lang?: string,
+  ): Promise<ApiResponse<{ order: Record<string, any> }>> => {
+    try {
+      const token = await getStoredToken();
+      if (!token) return { success: false, error: 'No authentication token found.' };
+      const langParam = mapLocaleToOrdersLang(lang);
+      const url = `${API_BASE_URL}/orders/${encodeURIComponent(orderId)}?lang=${encodeURIComponent(langParam)}`;
+      const signatureHeaders = await buildSignatureHeaders('GET', url);
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+          ...signatureHeaders,
+        },
+      });
+      const responseText = await response.text();
+      let responseData: any;
+      try { responseData = JSON.parse(responseText); } catch {
+        return { success: false, error: 'Invalid response from server.' };
+      }
+      if (!response.ok) {
+        return { success: false, error: responseData?.message || `Status ${response.status}` };
+      }
+      if (responseData.status !== 'success') {
+        return { success: false, error: responseData?.message || 'Failed to get order' };
+      }
+      const rawOrder = responseData.data?.order ?? responseData.data;
+      if (!rawOrder) return { success: false, error: 'Order payload missing.' };
+      return { success: true, data: { order: rawOrder } };
     } catch (error: any) {
       return { success: false, error: error.message || 'An unexpected error occurred.' };
     }
@@ -1828,6 +2146,8 @@ export const orderApi = {
       amountKRW: number;
       memberName?: string;
       lang?: string;
+      /** 풀-주소 객체. 결제 단계에서도 주소가 보존되도록 함께 전송. */
+      shippingAddress?: OrderShippingAddressInput;
     },
   ): Promise<ApiResponse<{ order?: any; amountPaid?: number; newStatus?: string }>> => {
     try {
@@ -1844,6 +2164,11 @@ export const orderApi = {
       };
       if (payload.memberName?.trim()) {
         body.memberName = payload.memberName.trim();
+      }
+      // 추가비용결제대기 / 추가비용결제완료 흐름에서도 풀-주소를 함께 보내
+      // 백엔드가 주소 변경 누락 없이 동기화하도록 한다.
+      if (payload.shippingAddress) {
+        body.shippingAddress = payload.shippingAddress;
       }
 
       const lang = mapLocaleToOrdersLang(payload.lang);
@@ -1863,6 +2188,56 @@ export const orderApi = {
       return {
         success: true,
         message: responseData.message || 'Payment submitted successfully',
+        data: responseData.data,
+      };
+    } catch (error: any) {
+      const serverMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message;
+      return {
+        success: false,
+        error: serverMessage || 'An unexpected error occurred. Please try again.',
+      };
+    }
+  },
+
+  /**
+   * 신용카드 결제 prepare — BillGate 결제창 진입을 위한 paymentData 를 받는다.
+   *
+   * 백엔드 endpoint: POST /v1/payments/billgate/prepare
+   *   Body: { orderId, serviceCode }
+   *   응답: { paymentData: {SERVICE_ID, SERVICE_TYPE, SERVICE_CODE, AMOUNT,
+   *                         ORDER_ID, ORDER_DATE, ITEM_NAME, ITEM_CODE,
+   *                         USER_ID, USER_NAME, USER_EMAIL, RETURN_URL,
+   *                         CANCEL_URL, WEBAPI_FLAG, CANCEL_FLAG, CHARSET,
+   *                         RESERVED1, RESERVED2, RESERVED3, HASH_KEY,
+   *                         INSTALLMENT_PERIOD},
+   *           billgateScriptUrl: "https://pay.billgate.net/..." }
+   *
+   * 이 응답을 WebView 에 주입해 BillGate gx_web_client.js 가 결제 UI 를 띄운다.
+   */
+  prepareBillgatePayment: async (
+    orderId: string,
+    serviceCode: string = '0900',
+  ): Promise<ApiResponse<{ paymentData: Record<string, string>; billgateScriptUrl: string }>> => {
+    try {
+      const url = `${API_BASE_URL}/payments/billgate/prepare`;
+      const body = { orderId, serviceCode };
+      const response = await axiosWithAuth('POST', url, { data: body });
+      const responseData = response.data;
+      if (!responseData) {
+        return { success: false, error: 'Invalid response from server.' };
+      }
+      if (responseData.status && responseData.status !== 'success') {
+        return {
+          success: false,
+          error: responseData?.message || responseData?.error || 'Failed to prepare BillGate payment',
+        };
+      }
+      return {
+        success: true,
+        message: responseData.message || 'BillGate payment data prepared',
         data: responseData.data,
       };
     } catch (error: any) {

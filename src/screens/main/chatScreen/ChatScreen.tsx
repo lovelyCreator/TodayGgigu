@@ -32,6 +32,12 @@ import { SocketMessage, socketService } from '../../../services/socketService';
 import { inquiryApi } from '../../../services/inquiryApi';
 import { orderApi } from '../../../services/orderApi';
 import { getOrderProgressStatusLabel } from '../../../utils/orderProgressStatusLabel';
+import {
+  fetchOrderFromProxy,
+  mergeChatMessages,
+  orderNoteLinesToChatMessages,
+} from '../../../utils/messageInquiryMappers';
+import { stripChatHtml } from '../../../utils/stripChatHtml';
 
 type ChatRouteProp = RouteProp<RootStackParamList, 'Chat'>;
 type ChatScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Chat'>;
@@ -97,10 +103,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     connect,
     subscribeToInquiry,
     unsubscribeFromInquiry,
-    sendInquiryMessage,
     markInquiryAsRead,
     createInquiry,
     getUnreadCounts,
+    // Order note (주문문의) — admin → user 단방향 수신 + 읽음 확인.
+    // user → admin 방향은 REST POST /orders-proxy 단독 경로이므로 `sendOrderNote`
+    // 소켓 emit 은 제거됨 (backend 에 해당 핸들러 없음으로 추정).
+    subscribeToOrderNotes,
+    unsubscribeFromOrderNotes,
+    confirmOrderNotes,
+    onOrderNoteReceived,
+    onOrderNoteConfirmed,
     onInquiryCreated,
     onMessageReceived,
     onMessagesRead,
@@ -108,17 +121,19 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   } = useSocket();
   const { showToast } = useToast();
   const { user } = useAuth();
-  
+  const locale = useAppSelector((s) => s.i18n.locale) as string;
+
+  const routeInquiryId = embedded ? embeddedParams?.inquiryId : route.params?.inquiryId;
+  const routeOrderId = embedded ? embeddedParams?.orderId : route.params?.orderId;
+  const routeOrderNumber = embedded ? embeddedParams?.orderNumber : route.params?.orderNumber;
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [showMoreModal, setShowMoreModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [inquiryId, setInquiryId] = useState<string | null>(
-    (embedded ? embeddedParams?.inquiryId : route.params?.inquiryId) || null,
-  );
-  const [orderNumber, setOrderNumber] = useState<string | null>(
-    (embedded ? embeddedParams?.orderNumber : route.params?.orderNumber) || null,
-  );
+  const [inquiryId, setInquiryId] = useState<string | null>(routeInquiryId || null);
+  const [orderNumber, setOrderNumber] = useState<string | null>(routeOrderNumber || null);
+  const [resolvedOrderId, setResolvedOrderId] = useState<string | null>(routeOrderId || null);
   const [orderData, setOrderData] = useState<any>(null);
   const [showOrderDetail, setShowOrderDetail] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<Array<{ uri: string; type: string; name: string }>>([]);
@@ -140,114 +155,172 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     };
   };
 
-  // Note: Messages are now loaded via REST API, not from currentInquiry
+  const noteLinesToMessages = (order: Record<string, any> | null): Message[] =>
+    orderNoteLinesToChatMessages(order?.orderNoteLines).map((note) => ({
+      id: note.id,
+      text: note.text,
+      isUser: note.isUser,
+      timestamp: note.timestamp,
+      senderName: note.senderName,
+    }));
 
-  // Fetch chat history via REST API on mount
+  // Load order (orders-proxy) + inquiry history; orderNoteLines are the base thread
   useEffect(() => {
-    console.log('[ChatScreen] Mount effect - params:', { inquiryId: route.params?.inquiryId, orderId: route.params?.orderId, orderNumber: route.params?.orderNumber });
+    if (hasFetchedInquiryRef.current) return;
+    if (!routeInquiryId && !routeOrderId && !routeOrderNumber) return;
+
+    hasFetchedInquiryRef.current = true;
+
     const fetchChatHistory = async () => {
-      // If we have an inquiryId in route params, fetch that inquiry details (only once)
-      if (route.params?.inquiryId && !hasFetchedInquiryRef.current) {
-        hasFetchedInquiryRef.current = true;
-        setIsLoading(true);
-        try {
-          const response = await inquiryApi.getInquiry(route.params.inquiryId);
-          console.log('[ChatScreen] getInquiry response:', JSON.stringify(response).substring(0, 500));
+      setIsLoading(true);
+      try {
+        let proxyOrder: Record<string, any> | null = null;
+        let inquiryMessages: Message[] = [];
+        let loadedInquiryId: string | null = routeInquiryId || null;
+
+        proxyOrder = await fetchOrderFromProxy(
+          {
+            orderNumber: routeOrderNumber || orderNumber || undefined,
+            orderId: routeOrderId || undefined,
+          },
+          locale,
+        );
+
+        if (proxyOrder) {
+          setOrderData(proxyOrder);
+          if (proxyOrder.orderNumber) setOrderNumber(proxyOrder.orderNumber);
+          const proxyOrderId = String(proxyOrder._id ?? proxyOrder.id ?? '');
+          if (proxyOrderId) setResolvedOrderId(proxyOrderId);
+        }
+
+        if (routeInquiryId) {
+          const response = await inquiryApi.getInquiry(routeInquiryId);
           if (response.success && response.data?.inquiry) {
             const inquiry = response.data.inquiry;
-            console.log('[ChatScreen] Inquiry loaded, id:', inquiry._id, 'messages:', inquiry.messages?.length || 0);
+            loadedInquiryId = inquiry._id;
             setInquiryId(inquiry._id);
 
-            // Store order data from inquiry
-            if (inquiry.order) {
-              setOrderData(inquiry.order);
-              if (inquiry.order.orderNumber) {
-                setOrderNumber(inquiry.order.orderNumber);
+            if (!proxyOrder) {
+              const inquiryOrderId =
+                typeof inquiry.order === 'string'
+                  ? inquiry.order
+                  : String(inquiry.order?._id ?? inquiry.orderId ?? '');
+              const inquiryOrderNumber =
+                typeof inquiry.order === 'object' && inquiry.order
+                  ? inquiry.order.orderNumber
+                  : undefined;
+
+              if (typeof inquiry.order === 'object' && inquiry.order) {
+                setOrderData(inquiry.order);
+              }
+              if (inquiryOrderNumber) setOrderNumber(inquiryOrderNumber);
+              if (inquiryOrderId) setResolvedOrderId(inquiryOrderId);
+
+              proxyOrder = await fetchOrderFromProxy(
+                {
+                  orderNumber: inquiryOrderNumber || routeOrderNumber || orderNumber || undefined,
+                  orderId: inquiryOrderId || routeOrderId || undefined,
+                },
+                locale,
+              );
+              if (proxyOrder) {
+                setOrderData(proxyOrder);
+                if (proxyOrder.orderNumber) setOrderNumber(proxyOrder.orderNumber);
+                const proxyOrderId = String(proxyOrder._id ?? proxyOrder.id ?? '');
+                if (proxyOrderId) setResolvedOrderId(proxyOrderId);
               }
             }
 
-            // Convert and set messages
-            if (inquiry.messages && inquiry.messages.length > 0) {
-              // Sort messages by timestamp (oldest first) and convert
-              const sortedMessages = [...inquiry.messages].sort((a, b) => {
-                const timeA = new Date(a.timestamp).getTime();
-                const timeB = new Date(b.timestamp).getTime();
-                return timeA - timeB;
-              });
-              const convertedMessages = sortedMessages.map(convertSocketMessage);
-              setMessages(convertedMessages);
-              
-              // Scroll to bottom after messages are loaded
-              setTimeout(() => {
-                scrollViewRef.current?.scrollToEnd({ animated: false });
-              }, 100);
+            if (inquiry.messages?.length) {
+              inquiryMessages = [...inquiry.messages]
+                .sort(
+                  (a, b) =>
+                    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+                )
+                .map(convertSocketMessage);
             }
-            
-            // Subscribe to socket for new messages
+
             if (isConnected) {
               subscribeToInquiry(inquiry._id);
-              // Mark as read via REST API
-              await inquiryApi.markAsRead(inquiry._id);
+              // mark-read 엔드포인트는 lang 쿼리 파라미터를 받아 admin 측
+              // 시스템 메시지 로케일을 결정. 누락 시 default(en) 로 떨어짐.
+              await inquiryApi.markAsRead(inquiry._id, locale);
             }
           } else {
             showToast(response.error || 'Failed to load chat history', 'error');
           }
-        } catch (error) {
-          // console.error('Error fetching inquiry:', error);
-          showToast('Failed to load chat history', 'error');
-        } finally {
-          setIsLoading(false);
-        }
-      } else if (route.params?.orderId && !hasFetchedInquiryRef.current) {
-        // No inquiry yet, but try to fetch existing inquiry for this order
-        hasFetchedInquiryRef.current = true;
-        try {
-          const response = await inquiryApi.getInquiryDetailByOrderId(route.params.orderId);
-          if (response.success && response.data) {
-            if (response.data.order) {
-              setOrderData(response.data.order);
-            }
-            if (response.data.inquiry) {
-              setInquiryId(response.data.inquiry._id);
-              if (response.data.inquiry.messages?.length > 0) {
-                const sortedMessages = [...response.data.inquiry.messages].sort((a: any, b: any) =>
-                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        } else {
+          const lookupOrderId =
+            String(proxyOrder?._id ?? proxyOrder?.id ?? '') || routeOrderId || '';
+          if (lookupOrderId) {
+            const response = await inquiryApi.getInquiryDetailByOrderId(lookupOrderId);
+            if (response.success && response.data) {
+              if (!proxyOrder && response.data.order) {
+                const detailOrderNumber = response.data.order.orderNumber;
+                if (detailOrderNumber) setOrderNumber(detailOrderNumber);
+                proxyOrder = await fetchOrderFromProxy(
+                  {
+                    orderNumber: detailOrderNumber || routeOrderNumber || orderNumber || undefined,
+                    orderId: lookupOrderId,
+                  },
+                  locale,
                 );
-                setMessages(sortedMessages.map(convertSocketMessage));
+                if (proxyOrder) {
+                  setOrderData(proxyOrder);
+                } else {
+                  setOrderData(response.data.order);
+                }
+              }
+              if (response.data.inquiry) {
+                loadedInquiryId = response.data.inquiry._id;
+                setInquiryId(response.data.inquiry._id);
+                if (response.data.inquiry.messages?.length) {
+                  inquiryMessages = [...response.data.inquiry.messages]
+                    .sort(
+                      (a: SocketMessage, b: SocketMessage) =>
+                        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+                    )
+                    .map(convertSocketMessage);
+                }
               }
             }
           }
-        } catch (e) {
-          console.log('[ChatScreen] No existing inquiry for order, ready to create');
         }
+
+        const noteMessages = noteLinesToMessages(proxyOrder);
+        const merged = mergeChatMessages(noteMessages, inquiryMessages).map((msg) => ({
+          id: msg.id,
+          text: msg.text,
+          isUser: msg.isUser,
+          timestamp: msg.timestamp,
+          senderName: msg.senderName,
+        }));
+        setMessages(merged);
+
+        if (loadedInquiryId && isConnected) {
+          subscribeToInquiry(loadedInquiryId);
+        }
+
+        setTimeout(() => {
+          scrollViewRef.current?.scrollToEnd({ animated: false });
+        }, 100);
+      } catch {
+        showToast('Failed to load chat history', 'error');
+      } finally {
+        setIsLoading(false);
       }
     };
 
     fetchChatHistory();
-  }, [route.params?.inquiryId, route.params?.orderId, isConnected, inquiryId, subscribeToInquiry, showToast]);
-
-  // Fetch order detail data
-  useEffect(() => {
-    const fetchOrderDetail = async () => {
-      const orderId = route.params?.orderId;
-      if (!orderId || orderData) return;
-      try {
-        const response = await orderApi.getOrderById(orderId);
-        console.log('[ChatScreen] Order detail API response:', JSON.stringify(response).substring(0, 500));
-        if (response.success && response.data) {
-          const order = response.data.order || response.data;
-          console.log('[ChatScreen] Order detail loaded, keys:', Object.keys(order), 'items:', order.items?.length);
-          setOrderData(order);
-          if (order.orderNumber && !orderNumber) {
-            setOrderNumber(order.orderNumber);
-          }
-        }
-      } catch (e) {
-        console.log('[ChatScreen] Failed to fetch order detail');
-      }
-    };
-    fetchOrderDetail();
-  }, [route.params?.orderId]);
+  }, [
+    routeInquiryId,
+    routeOrderId,
+    routeOrderNumber,
+    locale,
+    isConnected,
+    subscribeToInquiry,
+    showToast,
+  ]);
 
   // Try socket connection once on mount
   const socketAttemptedRef = useRef(false);
@@ -297,17 +370,44 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       };
 
       // Listen for new messages
-      const handleMessageReceived = (data: { 
-        message: SocketMessage; 
-        inquiryId: string; 
-        unreadCount?: number; 
+      const handleMessageReceived = (data: {
+        message: SocketMessage;
+        inquiryId: string;
+        unreadCount?: number;
         totalUnreadCount?: number;
       }) => {
         if (data.inquiryId === inquiryId) {
           const newMessage = convertSocketMessage(data.message);
           setMessages(prev => {
-            const messageExists = prev.some(msg => msg.id === newMessage.id);
-            if (messageExists) {
+            // 1) 같은 id 가 이미 있으면 추가 안 함.
+            if (prev.some(msg => msg.id === newMessage.id)) return prev;
+            // 2) optimistic temp 메시지(`temp-…` id) 와 같은 본문 + 같은 발신자
+            //    + 5초 이내 timestamp 면 temp 를 서버 메시지로 교체.
+            //    REST 저장 후 socket echo 가 돌아오면서 temp 와 별도 id 로
+            //    중복 표시되던 문제(스크린샷 증상)를 차단.
+            const tsMs = new Date(newMessage.timestamp).getTime();
+            const tempIdx = prev.findIndex(
+              (m) =>
+                String(m.id).startsWith('temp-') &&
+                m.isUser === newMessage.isUser &&
+                m.text === newMessage.text &&
+                Math.abs(new Date(m.timestamp).getTime() - tsMs) < 5000,
+            );
+            if (tempIdx >= 0) {
+              const next = prev.slice();
+              next[tempIdx] = newMessage;
+              return next;
+            }
+            // 3) temp 가 없어도 서버 echo 가 두 번 도착하는 케이스 — 같은 본문 +
+            //    같은 발신자 + 5초 이내면 중복으로 간주.
+            if (
+              prev.some(
+                (m) =>
+                  m.isUser === newMessage.isUser &&
+                  m.text === newMessage.text &&
+                  Math.abs(new Date(m.timestamp).getTime() - tsMs) < 5000,
+              )
+            ) {
               return prev;
             }
             return [...prev, newMessage];
@@ -367,16 +467,171 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     showToast,
   ]);
 
-  // REST API fallback for sending messages when socket is not connected
-  const sendMessageViaRest = async (targetInquiryId: string, messageText: string, optimisticMessageId: string, attachments: Array<{ uri: string; type: string; name: string }> = []) => {
-    try {
-      console.log('[ChatScreen] Sending message via REST API, inquiryId:', targetInquiryId, 'attachments:', attachments.length);
-      const response = await inquiryApi.sendMessage(targetInquiryId, messageText, attachments);
-      console.log('[ChatScreen] REST sendMessage response:', JSON.stringify(response).substring(0, 300));
-      if (!response.success) {
-        setMessages(prev => prev.filter(msg => msg.id !== optimisticMessageId));
-        showToast(response.error || t('inquiry.failedToSend'), 'error');
+  // ─── Order-note 채널 구독 + admin → user push 수신 ─────────────────
+  //
+  // 주문문의 페지는 orderId 단위로도 메시지 채널을 운영한다 (admin 측 web
+  // 콘솔의 OrderNote 위젯에서 보내는 메시지). 화면 진입 시 orderId 로 구독,
+  // 화면 이탈 시 해제. admin 이 보낸 새 note 가 socket 으로 push 되면
+  // 채팅 메시지 목록에 즉시 prepend 한다.
+  useEffect(() => {
+    const orderId = resolvedOrderId || routeOrderId || orderData?._id || orderData?.id;
+    if (!orderId) return;
+    if (!isConnected) return;
+
+    subscribeToOrderNotes(String(orderId));
+    // 화면 진입 = admin 이 보낸 note 들을 user 가 본 것으로 간주 → 확인 broadcast.
+    // 이로 인해 admin web 의 OrderNote 위젯의 '미확인' 카운트가 0 으로 떨어진다.
+    confirmOrderNotes(String(orderId), { orderNumber: orderNumber || undefined });
+
+    onOrderNoteReceived((data) => {
+      // 같은 주문이 아니면 무시 — 다른 ChatScreen 인스턴스가 활성화돼 있을 수 있다.
+      if (String(data?.orderId) !== String(orderId)) return;
+
+      // 발신자 판별 — 'admin' 인 경우만 admin 메시지로 추가하고, 그 외에는
+      // 무시한다. 사용자가 직접 보낸 메시지는 이미 optimistic UI + inquiry
+      // 채널 echo 로 화면에 추가되므로, order-note 채널의 echo 까지 받으면
+      // 같은 메시지가 2~3번 중복으로 표시되는 문제(스크린샷의 증상)가 발생.
+      const senderType = String(data?.senderType ?? '').toLowerCase();
+      const senderName = String(data?.name ?? '').toLowerCase();
+      const isAdminMessage = senderType === 'admin' || senderName === 'admin';
+      if (!isAdminMessage) {
+        console.log(
+          '[ChatScreen] OrderNote received from non-admin (skip echo):',
+          { name: data?.name, senderType: data?.senderType },
+        );
+        return;
       }
+
+      console.log('[ChatScreen] OrderNote received from admin:', {
+        orderId: data.orderId,
+        value: data?.value?.toString().substring(0, 40),
+        name: data?.name,
+      });
+      const valueStr = String(data.value || '');
+      const ts = data.date ? new Date(data.date) : new Date();
+      const newMessage: Message = {
+        id: data.noteId || `note-${ts.getTime()}-${Math.random().toString(36).substring(2, 8)}`,
+        text: valueStr,
+        isUser: false,
+        timestamp: ts,
+        sentAt: Date.now(),
+        senderName: data.name,
+        readBy: [],
+        attachments: [],
+      };
+      setMessages((prev) => {
+        // 1) 같은 noteId 가 이미 있으면 추가 안 함.
+        if (newMessage.id && prev.some((m) => m.id === newMessage.id)) return prev;
+        // 2) noteId 가 없거나 다른데 같은 본문 + 5초 이내 timestamp 인 메시지가
+        //    이미 있으면 추가 안 함 — 서버가 노트 id 를 다르게 발급한 echo
+        //    중복 케이스를 차단.
+        const tsMs = ts.getTime();
+        if (
+          prev.some(
+            (m) =>
+              !m.isUser &&
+              m.text === valueStr &&
+              Math.abs(new Date(m.timestamp).getTime() - tsMs) < 5000,
+          )
+        ) {
+          return prev;
+        }
+        return [...prev, newMessage];
+      });
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+
+    onOrderNoteConfirmed((data) => {
+      if (String(data?.orderId) !== String(orderId)) return;
+      console.log('[ChatScreen] OrderNote confirmed broadcast:', {
+        orderId: data.orderId,
+        confirmedBy: data.confirmedBy,
+        confirmedCount: data.confirmedCount,
+      });
+      // 단순 로깅 — 필요한 경우 여기서 read receipt UI 갱신을 트리거할 수 있음.
+    });
+
+    return () => {
+      unsubscribeFromOrderNotes(String(orderId));
+    };
+  }, [
+    resolvedOrderId,
+    routeOrderId,
+    orderData?._id,
+    orderData?.id,
+    orderNumber,
+    isConnected,
+    subscribeToOrderNotes,
+    unsubscribeFromOrderNotes,
+    confirmOrderNotes,
+    onOrderNoteReceived,
+    onOrderNoteConfirmed,
+  ]);
+
+  // REST API for sending messages — persists to DB. After success, ALSO
+  // emit the socket event so admin / web clients subscribed to this inquiry
+  // receive the new message in real time. Without the socket emit, the
+  // message is saved in DB but admin doesn't see it until they refresh —
+  // which is exactly the symptom the user reported.
+  const sendMessageViaRest = async (_targetInquiryId: string, messageText: string, optimisticMessageId: string, attachments: Array<{ uri: string; type: string; name: string }> = []) => {
+    // ─── 송신 경로: PATCH /api/orders-proxy 단독 ─────────────────────
+    //
+    // 사용자가 명시한 정확한 API 명세:
+    //   URL: https://todayggigu.kr/api/orders-proxy
+    //   Method: PATCH
+    //   Body: { orderId, orderNoteLines: { message, username } }
+    //   응답: "Manual order updated successfully" — 노트 append 됨.
+    //
+    // 결정적 발견: HTTP method 가 POST 가 아니라 **PATCH** 였다.
+    //   - POST → createCrossOrder 라우팅 (새 주문 생성)
+    //   - PATCH → manual order update 라우팅 (기존 주문 orderNoteLines append)
+    //
+    // 사용자 지시: "메세지 전송에 관하여 api 이제 입력하는거로 하고 나머지는
+    // 리용하지 말라" → inquiries/messages 호출은 모두 제거.
+    const orderContextId = resolvedOrderId || routeOrderId || orderData?._id || orderData?.id;
+
+    if (!orderContextId) {
+      // orderId 가 없으면 주문문의 모드가 아님 → 메시지 전송 불가.
+      setMessages(prev => prev.filter(msg => msg.id !== optimisticMessageId));
+      showToast(t('inquiry.failedToSend'), 'error');
+      return;
+    }
+
+    if (attachments.length > 0) {
+      // 첨부파일은 orders-proxy 의 orderNoteLines 가 처리하지 않음.
+      // 현재 사용자 지시로 다른 endpoint 사용 불가 → 안내만 표시.
+      console.warn('[ChatScreen] attachments not supported via orders-proxy PATCH (ignored)');
+    }
+
+    const username =
+      (user as any)?.user_id ||
+      (user as any)?.userInfo?.userName ||
+      (user as any)?.name ||
+      user?.email ||
+      'user';
+
+    try {
+      const proxyRes = await orderApi.appendOrderNoteLine(
+        String(orderContextId),
+        messageText,
+        String(username),
+      );
+      console.log('[ChatScreen] orders-proxy appendOrderNoteLine:',
+        proxyRes.success ? 'ok' : `error: ${proxyRes.error}`);
+
+      if (!proxyRes.success) {
+        setMessages(prev => prev.filter(msg => msg.id !== optimisticMessageId));
+        showToast(proxyRes.error || t('inquiry.failedToSend'), 'error');
+        return;
+      }
+
+      // ─── 소켓 broadcast 단계 ───────────────────────────────────────
+      //
+      // PATCH /api/orders-proxy 가 성공하면 backend 가 자체적으로
+      // `user:order-note:received` socket broadcast 를 admin / 다른 user 세션
+      // 에게 발사한다. 따라서 client 측 추가 emit 은 불필요.
     } catch (error) {
       console.error('[ChatScreen] REST sendMessage error:', error);
       setMessages(prev => prev.filter(msg => msg.id !== optimisticMessageId));
@@ -390,7 +645,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const messageText = inputText.trim() || (pendingAttachments.length > 0 ? ' ' : '');
     const attachmentsToSend = [...pendingAttachments];
 
-    console.log('[ChatScreen] handleSendMessage called, inquiryId:', inquiryId, 'orderId:', route.params?.orderId, 'attachments:', attachmentsToSend.length);
+    const createOrderId = resolvedOrderId || routeOrderId || orderData?._id || orderData?.id;
+    console.log('[ChatScreen] handleSendMessage called, inquiryId:', inquiryId, 'orderId:', createOrderId, 'attachments:', attachmentsToSend.length);
 
     // Send message to existing inquiry
     if (inquiryId) {
@@ -418,11 +674,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
-    } else if (route.params?.orderId) {
+    } else if (createOrderId) {
       // No inquiry yet — create one via REST API
       setInputText('');
       setPendingAttachments([]);
-      console.log('[ChatScreen] Creating new inquiry via REST API, orderId:', route.params.orderId);
+      console.log('[ChatScreen] Creating new inquiry via REST API, orderId:', createOrderId);
 
       const sentMessage: Message = {
         id: `temp-${Date.now()}`,
@@ -438,7 +694,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       setMessages(prev => [...prev, sentMessage]);
 
       try {
-        const response = await inquiryApi.createInquiry(route.params.orderId, messageText, attachmentsToSend);
+        const response = await inquiryApi.createInquiry(String(createOrderId), messageText, attachmentsToSend);
         console.log('[ChatScreen] Create inquiry REST response:', JSON.stringify(response).substring(0, 300));
         if (response.success && response.data?.inquiry) {
           const newInquiry = response.data.inquiry;
@@ -714,11 +970,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 ))}
               </View>
             )}
-            {message.text?.trim() ? (
-              <Text style={isUser ? styles.userMessageText : styles.adminMessageText}>
-                {message.text}
-              </Text>
-            ) : null}
+            {(() => {
+              // admin/web 리치 에디터가 보내는 HTML 마크업(<div><br></div> 등) 을
+              // 표시 직전에 제거. 일반 텍스트/숫자만 보낸 경우엔 원문 그대로 유지.
+              const cleaned = stripChatHtml(message.text);
+              return cleaned ? (
+                <Text style={isUser ? styles.userMessageText : styles.adminMessageText}>
+                  {cleaned}
+                </Text>
+              ) : null;
+            })()}
           </View>
           {isUser && (
             (user as any)?.avatar ? (

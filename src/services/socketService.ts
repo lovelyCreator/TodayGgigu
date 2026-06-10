@@ -41,6 +41,36 @@ export interface GeneralInquiry {
   unreadCount?: number;
 }
 
+/**
+ * Order note — 주문 단위 메시지 라인.
+ * Admin 이 메시지를 보내면 `user:order-note:received` 이벤트로 user 측에
+ * 들어오고, user 가 확인(읽음) 처리하면 `user:order-note:confirmed` 로
+ * admin / 다른 user 세션에 broadcast 된다.
+ *
+ * 백엔드의 OrderNoteLine 과 같은 구조 — 단순히 socket payload 용으로
+ * 옵션 필드를 약간 더 느슨하게 잡아 둠.
+ */
+export interface OrderNoteEvent {
+  orderId: string;
+  orderNumber?: string;
+  noteId?: string;
+  value: string;             // 메시지 본문
+  name?: string;             // 발신자 표시명 (예: 'admin', 사용자 이름)
+  date?: string;             // ISO 타임스탬프
+  senderType?: 'admin' | 'user' | string;
+  isConfirmed?: 'yes' | 'no' | string;
+}
+
+/** user 가 확인 처리한 후 broadcast 되는 payload. */
+export interface OrderNoteConfirmedEvent {
+  orderId: string;
+  orderNumber?: string;
+  confirmedBy: 'user' | 'admin' | string;
+  confirmedCount: number;
+  rows?: any[]; // 확인된 note rows (백엔드가 전달하는 그대로)
+  timestamp?: string;
+}
+
 export interface BroadcastNote {
   noteId: string;
   type: 'announcement' | 'maintenance' | 'update' | 'warning' | 'info' | 'promotion';
@@ -292,6 +322,53 @@ class SocketService {
    */
   getUnreadCounts(): void {
     this.emit('user:inquiry:unread-counts');
+  }
+
+  // ========== Order Note Socket Methods ==========
+  // 주문 단위 메시지(orderNoteLines) 의 실시간 양방향 채널.
+  // - Admin 이 send 하면 backend → user 측에 `user:order-note:received` 로 push.
+  // - User 가 send 하면 emit `user:order-note:send` → backend 가 admin 측에 push.
+  // - User 가 확인(읽음) 처리하면 emit `user:order-note:confirm` → backend 가
+  //   `user:order-note:confirmed` broadcast.
+
+  /** 특정 주문의 note 채널 구독 (admin 이 보낼 때 자동으로 받기 위함). */
+  subscribeToOrderNotes(orderId: string): void {
+    this.emit('user:order-note:subscribe', { orderId });
+  }
+
+  /** 구독 해제 — 화면을 벗어날 때 호출. */
+  unsubscribeFromOrderNotes(orderId: string): void {
+    this.emit('user:order-note:unsubscribe', { orderId });
+  }
+
+  /** User → admin: 새 order note 송신. */
+  sendOrderNote(
+    orderId: string,
+    value: string,
+    extra?: { orderNumber?: string; name?: string },
+  ): void {
+    this.emit('user:order-note:send', {
+      orderId,
+      orderNumber: extra?.orderNumber,
+      value,
+      name: extra?.name,
+      senderType: 'user',
+      date: new Date().toISOString(),
+      isConfirmed: 'no',
+    });
+  }
+
+  /** Admin 이 보낸 note 들을 user 가 확인 처리(읽음) 했음을 broadcast. */
+  confirmOrderNotes(
+    orderId: string,
+    extra?: { orderNumber?: string; noteIds?: string[] },
+  ): void {
+    this.emit('user:order-note:confirm', {
+      orderId,
+      orderNumber: extra?.orderNumber,
+      noteIds: extra?.noteIds,
+      confirmedBy: 'user',
+    });
   }
 
   // ========== General Inquiry Socket Methods ==========
