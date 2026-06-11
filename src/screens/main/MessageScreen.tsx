@@ -28,6 +28,12 @@ import { buildSignatureHeaders } from '../../services/signature';
 import { getOrderProgressStatusLabel } from '../../utils/orderProgressStatusLabel';
 import { useProfileTabletEmbedNavigation } from './profileScreen/ProfileTabletEmbedContext';
 import CachedImage from '../../components/CachedImage';
+import { SkeletonBlock } from '../../components/Skeleton';
+import {
+  markInquiryVisited,
+  isInquiryVisitedSync,
+  prewarmVisitedInquiries,
+} from '../../utils/visitedInquiries';
 import {
   type OrderInquiryListItem,
   fetchOrderInquiryList,
@@ -82,6 +88,9 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
     markGeneralInquiryAsRead,
     onMessageReceived,
     onGeneralInquiryMessageReceived,
+    // BottomBar 배지에 즉시 반영하기 위한 setter (이 화면에서 계산한 값을 push).
+    setUnreadCountOverride,
+    setGeneralInquiryUnreadCountOverride,
   } = useSocket();
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
   const { tryEmbedNavigate } = useProfileTabletEmbedNavigation(embedded);
@@ -143,6 +152,8 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   const [orderInquiries, setOrderInquiries] = useState<OrderInquiryListItem[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderRefreshing, setOrderRefreshing] = useState(false);
+  // 방문한 inquiry 캐시(AsyncStorage) prewarm 직후 한 번만 증가시켜 카드 리렌더 유도.
+  const [, setVisitedTick] = useState(0);
 
   // ─── General (1:1) Inquiry state ──────────────────────
   const {
@@ -177,6 +188,33 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
       })),
     [generalInquiryUnreadById],
   );
+
+  // ─── BottomBar 배지용 — 미확인 건수 계산 + SocketContext 에 push ───────
+  //
+  // 화면에 그려지는 주문문의 카드 중 사용자 방문 기록이 없고 status 가 미확인
+  // (`open` / `pending` / `unconfirmed`) 인 항목을 카운트한다. 방문 기록이
+  // 있으면 `displayStatus === 'confirmed'` 로 표시되므로 배지에서도 제외.
+  // 일반(1:1) 문의는 unreadCount > 0 인 항목 수를 그대로 합산.
+  // 의존성: orderInquiries / generalInquiriesLocal — 화면 데이터가 바뀔 때마다
+  // 자동으로 다시 세어 즉시 BottomBar 에 반영된다.
+  useEffect(() => {
+    const orderUnconfirmed = orderInquiries.reduce((acc, item) => {
+      // visited 캐시가 있으면 confirmed 로 간주 → 제외
+      if (isInquiryVisitedSync(item.inquiryId)) return acc;
+      const s = String(item.status || '').toLowerCase();
+      const isUnconfirmed = s === 'open' || s === 'pending' || s === 'unconfirmed';
+      return isUnconfirmed ? acc + 1 : acc;
+    }, 0);
+    setUnreadCountOverride(orderUnconfirmed);
+  }, [orderInquiries, setUnreadCountOverride]);
+
+  useEffect(() => {
+    const generalUnread = generalInquiriesLocal.reduce((acc, inq: any) => {
+      const c = Number(inq?.unreadCount) || 0;
+      return c > 0 ? acc + 1 : acc;
+    }, 0);
+    setGeneralInquiryUnreadCountOverride(generalUnread);
+  }, [generalInquiriesLocal, setGeneralInquiryUnreadCountOverride]);
 
   // ─── Fetch Order Inquiries (orders-proxy + inquiry API, all orders) ──
   const fetchOrderInquiries = useCallback(async () => {
@@ -250,11 +288,19 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
       if (isAuthenticated) {
         fetchOrderInquiries();
         fetchGeneralInquiries();
-        // Refresh unread counts from server so badges update after reading messages
-        if (isConnected) {
-          getUnreadCounts();
-          getGeneralInquiryUnreadCounts();
-        }
+        // 사용자가 한 번이라도 방문한 주문문의는 카드에 "확인완료" 로 표시한다.
+        // AsyncStorage 캐시를 prewarm 한 뒤 tick 증가로 리렌더 트리거.
+        prewarmVisitedInquiries()
+          .then(() => setVisitedTick((t) => t + 1))
+          .catch(() => {/* silent */});
+        // ▶ 폴링 제거: 이전엔 focus 시마다 `getUnreadCounts()` 와
+        //    `getGeneralInquiryUnreadCounts()` 를 socket emit 으로 보냈는데,
+        //    이로 인해 카운트가 반복적으로 덮어쓰여 BottomBar 배지가 깜박임.
+        //    실시간 갱신은 admin 이 새 메시지를 보낼 때의 socket push
+        //    (`user:inquiry:message:received`, `user:general-inquiry:message:received`)
+        //    가 자동으로 unreadCount 를 증가시키므로 충분.
+        //    카드 status 기반의 정확한 미확인 수는 MessageScreen 의 useEffect
+        //    가 setUnreadCountOverride 로 BottomBar 에 push 한다.
       }
       fetchFormFiles();
     }, [
@@ -339,7 +385,9 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
       setOrderInquiries((prev) =>
         prev.map((inq) => (inq.unreadCount > 0 ? { ...inq, unreadCount: 0 } : inq)),
       );
-      if (isConnected) getUnreadCounts();
+      // ▶ socket emit 제거: 로컬 state 가 이미 정확한 값 (모두 0) 으로 갱신됐고,
+      //    이걸 MessageScreen 의 별도 useEffect 가 setUnreadCountOverride 로
+      //    BottomBar 에 push 한다. socket polling 호출은 깜박임 원인이라 제거.
     })();
 
     return () => {
@@ -351,7 +399,7 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
     isAuthenticated,
     showHeavyContent,
     isConnected,
-    getUnreadCounts,
+    // getUnreadCounts 제거: 더 이상 effect 안에서 호출하지 않음 (폴링 차단).
   ]);
 
   // When the user opens the 1:1 inquiry tab, mark each unread thread read via
@@ -370,10 +418,9 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
       ),
     );
 
-    const t = setTimeout(() => {
-      if (isConnected) getGeneralInquiryUnreadCounts();
-    }, 450);
-    return () => clearTimeout(t);
+    // ▶ setTimeout 후 socket emit 제거: 로컬 state 가 즉시 0 으로 갱신됐고,
+    //    별도 useEffect 가 setGeneralInquiryUnreadCountOverride 로 BottomBar 에
+    //    push 하므로 추가 socket 호출 불필요.
   }, [
     activeTab,
     generalInquiriesLocal,
@@ -381,7 +428,7 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
     showHeavyContent,
     isConnected,
     markGeneralInquiryAsRead,
-    getGeneralInquiryUnreadCounts,
+    // getGeneralInquiryUnreadCounts 제거: effect 안에서 호출 안 함 (폴링 차단).
   ]);
 
   const handleOrderRefresh = useCallback(async () => {
@@ -517,17 +564,34 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
     return template.replace('{count}', String(count));
   };
 
-  const renderOrderItem = ({ item }: { item: OrderInquiryListItem }) => (
+  const renderOrderItem = ({ item }: { item: OrderInquiryListItem }) => {
+    // 방문 기록이 있으면 backend 응답의 status 와 무관하게 "확인완료" 로 표시.
+    // unconfirmed/open/pending 등 어떤 backend status 가 와도 사용자 입장에선
+    // 이미 본 메시지이므로 confirmed 로 일관되게 보여 준다.
+    const visited = isInquiryVisitedSync(item.inquiryId);
+    const displayStatus = visited ? 'confirmed' : item.status;
+
+    return (
     <TouchableOpacity
       style={styles.orderItem}
       activeOpacity={0.7}
-      onPress={() =>
+      onPress={() => {
+        // 즉시 로컬 마크 → 카드 라벨 즉시 "확인완료" 로 전환.
+        setOrderInquiries((prev) =>
+          prev.map((row) =>
+            row.inquiryId === item.inquiryId
+              ? { ...row, status: 'confirmed', unreadCount: 0 }
+              : row,
+          ),
+        );
+        // 영속 저장 — 다음 fetch 가 unconfirmed 로 다시 와도 "확인완료" 유지.
+        void markInquiryVisited(item.inquiryId);
         openChat({
           orderId: item.orderId,
           orderNumber: item.orderNumber,
           inquiryId: item.inquiryId,
-        })
-      }
+        });
+      }}
     >
       <View>
         {item.imageUrl ? (
@@ -571,15 +635,16 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
             {getProgressStatusLabel(item.progressStatus)}
           </Text>
         ) : null}
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '18' }]}>
-          <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.status) }]} />
-          <Text style={[styles.statusBadgeText, { color: getStatusColor(item.status) }]}>
-            {getStatusLabel(item.status)}
+        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(displayStatus) + '18' }]}>
+          <View style={[styles.statusDot, { backgroundColor: getStatusColor(displayStatus) }]} />
+          <Text style={[styles.statusBadgeText, { color: getStatusColor(displayStatus) }]}>
+            {getStatusLabel(displayStatus)}
           </Text>
         </View>
       </View>
     </TouchableOpacity>
-  );
+    );
+  };
 
   const renderOrderEmptyState = () => (
     <View style={styles.emptyContainer}>
@@ -597,9 +662,39 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
     </View>
   );
 
+  /**
+   * 주문문의 카드의 skeleton 행 — 실제 `renderOrderItem` 의 구조와 동일하게
+   * 좌측 이미지 자리 (orderItemImage), 가운데 정보 영역 (주문번호 / 날짜 /
+   * 마지막 메시지), 우측 상태 영역 (progressStatus + statusBadge) 을 회색
+   * 블록으로 표현. SkeletonBlock 의 shimmer 가 자동 적용된다.
+   */
+  const renderOrderSkeletonRow = (key: string) => (
+    <View key={key} style={styles.orderItem}>
+      <SkeletonBlock width={56} height={56} borderRadius={8} />
+      <View style={styles.orderItemInfo}>
+        <SkeletonBlock width={'60%' as any} height={14} borderRadius={3} />
+        <View style={{ height: 6 }} />
+        <SkeletonBlock width={'40%' as any} height={11} borderRadius={3} />
+        <View style={{ height: 6 }} />
+        <SkeletonBlock width={'80%' as any} height={12} borderRadius={3} />
+      </View>
+      <View style={{ alignItems: 'flex-end' }}>
+        <SkeletonBlock width={64} height={12} borderRadius={3} />
+        <View style={{ height: 8 }} />
+        <SkeletonBlock width={80} height={22} borderRadius={11} />
+      </View>
+    </View>
+  );
+
   const renderOrderTab = () => {
     if (orderLoading && orderInquiries.length === 0) {
-      return <View style={styles.loadingContainer}><ActivityIndicator size="large" color={COLORS.red} /></View>;
+      // ActivityIndicator 대신 skeleton 행을 6개 표시. 실제 카드 레이아웃과 같은
+      // 모양이라 데이터 도착 직후 시각적 점프가 작다.
+      return (
+        <View>
+          {Array.from({ length: 6 }).map((_, i) => renderOrderSkeletonRow(`order-skel-${i}`))}
+        </View>
+      );
     }
     return (
       <FlatList

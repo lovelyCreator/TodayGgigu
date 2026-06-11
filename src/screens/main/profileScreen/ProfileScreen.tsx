@@ -39,6 +39,7 @@ import { useGeneralInquiry } from '../../../hooks/useGeneralInquiry';
 import { inquiryApi } from '../../../services/inquiryApi';
 import { wishlistApi } from '../../../services/wishlistApi';
 import { depositApi } from '../../../services/depositApi';
+import { voucherApi } from '../../../services/voucherApi';
 import { productsApi } from '../../../services/productsApi';
 import { MemberAvatar, NotificationBadge, ProductCard } from '../../../components';
 import { useRecommendationsMutation } from '../../../hooks/useRecommendationsMutation';
@@ -131,6 +132,9 @@ const ProfileScreen: React.FC = () => {
   // Deposit balance sourced from the same API the DepositScreen uses, so the
   // value shown in the stats card stays in sync with the deposit detail page.
   const [depositBalance, setDepositBalance] = useState<number | null>(null);
+  // 사용자의 미사용(available) 쿠폰 amount 합계. CouponScreen 의 "미사용" 탭과
+  // 같은 데이터 소스 (voucherApi.getVoucherWallet) 를 사용해 항상 일치하게.
+  const [availableCouponTotal, setAvailableCouponTotal] = useState<number | null>(null);
   const { notes: broadcastNotes } = useNotes(); // Get broadcast notes count
   const { unreadCount: generalInquiryUnreadCount } = useGeneralInquiry(); // Get general inquiry unread count
   const [orderCounts, setOrderCounts] = useState({
@@ -331,7 +335,27 @@ const ProfileScreen: React.FC = () => {
       }
     };
 
-    // 4) 위시리스트 + 최근본 카운트
+    // 4) 미사용 쿠폰 합계 — CouponScreen 의 "미사용" 탭과 같은 데이터 소스.
+    //    availableCoupons[].amount 합산 (¥ 위안 단위). 백엔드 응답이 비어
+    //    있거나 실패하면 0 으로 fallback.
+    const fetchAvailableCouponTotal = async () => {
+      if (!isAuthenticated || isGuest) return;
+      try {
+        const response = await voucherApi.getVoucherWallet();
+        if (response.success && response.data) {
+          const items = response.data.availableCoupons || [];
+          const total = items.reduce(
+            (acc, c) => acc + (Number((c as any)?.amount) || 0),
+            0,
+          );
+          setAvailableCouponTotal(total);
+        }
+      } catch {
+        // silent
+      }
+    };
+
+    // 5) 위시리스트 + 최근본 카운트
     const fetchCounts = async () => {
       if (!isAuthenticated || isGuest || !user) return;
       try {
@@ -361,6 +385,7 @@ const ProfileScreen: React.FC = () => {
     await Promise.allSettled([
       fetchUnreadCounts(),
       fetchDepositBalance(),
+      fetchAvailableCouponTotal(),
       fetchOrderDashboardCounts(),
       fetchCounts(),
     ]);
@@ -881,15 +906,20 @@ const ProfileScreen: React.FC = () => {
             <Text style={styles.statLabel}>{t('profile.coupons')}:</Text>
             <Text style={styles.statValue}>
               {(() => {
+                // CouponScreen 의 미사용(available) 탭 쿠폰들의 amount 합계 + 가격 단위.
+                // 데이터 fetch 전이면 임시로 user.coupon 또는 0 표시.
+                if (typeof availableCouponTotal === 'number') {
+                  return `¥${availableCouponTotal.toLocaleString()}`;
+                }
                 const coupon = (user as any)?.coupon;
-                if (typeof coupon === 'number') return String(coupon);
-                if (typeof coupon === 'string') return coupon;
-                return '0';
+                if (typeof coupon === 'number') return `¥${coupon.toLocaleString()}`;
+                if (typeof coupon === 'string') return `¥${coupon}`;
+                return '¥0';
               })()}
             </Text>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.statItem}
           onPress={() => navigation.navigate('PointDetail')}
         >

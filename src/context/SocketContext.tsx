@@ -9,6 +9,7 @@ import {
 } from '../services/socketService';
 import { useAuth } from './AuthContext';
 import { getStoredToken } from '../services/authApi';
+import { inquiryApi } from '../services/inquiryApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../constants';
 
@@ -42,6 +43,11 @@ interface SocketContextType {
   currentGeneralInquiry: GeneralInquiry | null;
   generalInquiryUnreadCount: number;
   generalInquiryUnreadById: Record<string, number>;
+  // ── 화면 측에서 계산한 미확인 개수를 BottomBar 배지에 즉시 반영하기 위한 setter.
+  //    MessageScreen 이 자신이 가진 orderInquiries / generalInquiries 의 status
+  //    를 기준으로 정확한 미확인 건수를 SocketContext 로 push 한다.
+  setUnreadCountOverride: (count: number) => void;
+  setGeneralInquiryUnreadCountOverride: (count: number) => void;
   // Order Inquiry Event handlers
   onInquiryCreated: (callback: (inquiry: GeneralInquiry) => void) => void;
   onMessageReceived: (callback: (data: { message: SocketMessage; inquiryId: string; unreadCount?: number; totalUnreadCount?: number }) => void) => void;
@@ -87,10 +93,15 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [inquiries, setInquiries] = useState<GeneralInquiry[]>([]);
   const [currentInquiry, setCurrentInquiry] = useState<GeneralInquiry | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  // 화면에서 push 한 우선 값. null 이면 socket 값(`unreadCount`) 을 사용,
+  // number 이면 그 값을 그대로 노출 → socket 응답이 들어와도 무시.
+  // 이로 인해 socket 의 반복 emit 으로 인한 배지 깜박임이 사라진다.
+  const [unreadCountOverride, setUnreadCountOverrideState] = useState<number | null>(null);
   const [orderInquiryUnreadById, setOrderInquiryUnreadById] = useState<Record<string, number>>({});
   const [generalInquiries, setGeneralInquiries] = useState<GeneralInquiry[]>([]);
   const [currentGeneralInquiry, setCurrentGeneralInquiry] = useState<GeneralInquiry | null>(null);
   const [generalInquiryUnreadCount, setGeneralInquiryUnreadCount] = useState(0);
+  const [generalInquiryUnreadCountOverride, setGeneralInquiryUnreadCountOverrideState] = useState<number | null>(null);
   const [generalInquiryUnreadById, setGeneralInquiryUnreadById] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState<BroadcastNote[]>([]);
   
@@ -785,6 +796,36 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
   }, [isAuthenticated, userId, connect, disconnect, removeListeners]);
 
+  // ─── REST 폴백: 인증 직후 초기 unread count 보강 ─────────────────
+  //
+  // BottomBar 의 메시지 아이콘 배지는 socket 라운드트립 완료 후에만 값을 얻을
+  // 수 있어 mount 직후 잠시 안 보인다. REST 로 한 번 받아 즉시 표시하고,
+  // 이후 socket 이벤트가 자동으로 갱신한다.
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!isAuthenticated || !userId) return;
+      try {
+        const orderRes = await inquiryApi.getUnreadCount().catch(() => null);
+        if (cancelled) return;
+        if (orderRes && orderRes.success && orderRes.data && typeof orderRes.data.count === 'number') {
+          setUnreadCount(orderRes.data.count);
+          return;
+        }
+        // fallback: plural endpoint (returns totalUnread)
+        const pluralRes = await inquiryApi.getUnreadCounts().catch(() => null);
+        if (cancelled) return;
+        if (pluralRes && pluralRes.success && pluralRes.data && typeof pluralRes.data.totalUnread === 'number') {
+          setUnreadCount(pluralRes.data.totalUnread);
+        }
+      } catch {
+        /* silent — socket 흐름이 곧 값을 채워줄 것 */
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, userId]);
+
 
   // Event handler registration (for custom callbacks)
   const onInquiryCreated = useCallback((callback: (inquiry: GeneralInquiry) => void) => {
@@ -844,6 +885,29 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const onNoteDeleted = useCallback((callback: (noteId: string) => void) => {
     onNoteDeletedCallbackRef.current = callback;
   }, []);
+
+  // ── 외부(예: MessageScreen)에서 미확인 카운트를 직접 push 할 수 있는 setter.
+  //    화면이 자신이 그리는 카드의 status 를 기준으로 정확한 미확인 건수를 계산해
+  //    여기로 전달하면, BottomBar 배지가 즉시 갱신된다.
+  //
+  //    Override 가 설정된 동안에는 socket 의 `:unread-counts:response` 가
+  //    `setUnreadCount` 를 호출해도 외부에 노출되는 값(`unreadCount`)은 override
+  //    가 우선이라 변하지 않는다 → 깜박임 제거.
+  //    NaN/음수 방어. 음수 전달 시 override 를 해제하는 것이 아니라 0 으로 clamp.
+  const setUnreadCountOverride = useCallback((count: number) => {
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    setUnreadCountOverrideState(n);
+  }, []);
+
+  const setGeneralInquiryUnreadCountOverride = useCallback((count: number) => {
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    setGeneralInquiryUnreadCountOverrideState(n);
+  }, []);
+
+  // 노출용 합성 값: override 가 설정되어 있으면 그 값, 아니면 socket 값.
+  const effectiveUnreadCount = unreadCountOverride !== null ? unreadCountOverride : unreadCount;
+  const effectiveGeneralInquiryUnreadCount =
+    generalInquiryUnreadCountOverride !== null ? generalInquiryUnreadCountOverride : generalInquiryUnreadCount;
 
   // ========== Order Note (주문문의) socket bindings ==========
   const subscribeToOrderNotes = useCallback((orderId: string) => {
@@ -907,11 +971,12 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     closeGeneralInquiry,
     inquiries,
     currentInquiry,
-    unreadCount,
+    // override 가 설정되면 그 값 우선, 아니면 socket 응답값. 깜박임 차단.
+    unreadCount: effectiveUnreadCount,
     orderInquiryUnreadById,
     generalInquiries,
     currentGeneralInquiry,
-    generalInquiryUnreadCount,
+    generalInquiryUnreadCount: effectiveGeneralInquiryUnreadCount,
     generalInquiryUnreadById,
     onInquiryCreated,
     onMessageReceived,
@@ -928,6 +993,9 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     notes,
     onNoteReceived,
     onNoteDeleted,
+    // External setters for screen-side computed unread counts
+    setUnreadCountOverride,
+    setGeneralInquiryUnreadCountOverride,
     // Order note (주문문의)
     subscribeToOrderNotes,
     unsubscribeFromOrderNotes,
