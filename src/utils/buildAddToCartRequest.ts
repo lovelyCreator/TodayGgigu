@@ -399,10 +399,18 @@ export function buildAddToCartRequestFromDetail(
       skuId: skuIdValue,
       specId: finalSpecId,
       price: finalPriceStr,
-      amountOnSale:
-        selectedSku?.amountOnSale ??
-        selectedVariant?.stock ??
-        (hasNoOptions ? 999999 : 0),
+      amountOnSale: (() => {
+        // 1688/타오바오 SKU 응답이 `amountOnSale` 을 빠뜨리거나 0/1 같은
+        // 비현실적으로 작은 값으로 보내는 경우가 잦아, 그대로 backend 에
+        // 저장하면 사용자가 수량을 +1 만 해도 "Only 1 items available in
+        // stock" 으로 거절된다. 의미 있는 양수가 아니면 999999 로 보정.
+        const raw =
+          selectedSku?.amountOnSale ??
+          selectedVariant?.stock ??
+          (hasNoOptions ? 999999 : undefined);
+        const n = Number(raw);
+        return Number.isFinite(n) && n > 1 ? n : 999999;
+      })(),
       consignPrice: String(selectedSku?.consignPrice || finalPriceStr),
       cargoNumber: selectedSku?.cargoNumber || '',
       skuAttributes: mapSkuAttributes(skuAttrsSource),

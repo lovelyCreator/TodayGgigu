@@ -33,16 +33,18 @@ export type ProfileOrderCountsByDomain = Record<BusinessDomain, ProfileOrderCoun
 
 /** Profile 내주문 카드 — 발주/출고 결제·미확인·오류 요약 셀용 카운트. */
 export type ProfileDashboardCounts = {
-  /** 발주관리(구매대행·로켓·VVIC·배송대행) 도메인 주문 합계 — BuyList 칩 배지와 동일. */
+  /** "내 주문 → 발주 결제" — 구매결제대기(P_PENDING) 주문 수. */
   purchasePaymentPending: number;
-  /** 현지입/출고 그룹 주문 합계 — BuyList 현지입/출고 칩 배지와 동일. */
+  /** "내 주문 → 출고 결제" — 출고결제대기(IO_PAY_PENDING / IO_SHIP_PAY_PENDING) 주문 수. */
   shipPaymentPending: number;
+  /** "내 주문 → 미확인" — 라벨이 미확인인 (unreadCount > 0) 주문 수. */
   unconfirmed: number;
-  /** BuyList 오류 > 문제상품(P_MA_PROBLEM) 과 동일. */
+  /** "오류 → 문제상품" — P_MA_PROBLEM 주문 수. */
   problemProduct: number;
-  /** BuyList 오류 > 오류입고(E_ERROR) 와 동일. */
+  /** "오류 → 현지배송지연" — IO_DELAY 주문 수.
+   *  (이전엔 'errorInbound' (E_ERROR) 였으나 사용자 요구에 따라 의미를 변경.) */
   errorInbound: number;
-  /** BuyList 오류 > 출고보류 + 반품관리 합계. */
+  /** "오류 → 출고보류" — E_SHIPMENT_HOLD 주문 수. */
   shipmentHold: number;
 };
 
@@ -366,18 +368,31 @@ export const computeProfileDashboardCounts = (
   }>,
 ): ProfileDashboardCounts => {
   const counts = { ...EMPTY_DASHBOARD_COUNTS };
-  counts.purchasePaymentPending = computePurchaseAgencyDropdownCount(orders);
-  counts.shipPaymentPending = computeWarehouseGroupCount(orders);
-
   const progressCounts = computeProgressStatusCounts(orders);
-  counts.problemProduct = progressCounts.P_MA_PROBLEM ?? 0;
-  counts.errorInbound = progressCounts.E_ERROR ?? 0;
-  counts.shipmentHold = computeShipmentHoldDashboardCount(orders);
 
+  // ─── 내 주문 ─────────────────────────────────────────────
+  // 발주 결제 — 구매결제대기 (P_PENDING)
+  counts.purchasePaymentPending = progressCounts.P_PENDING ?? 0;
+  // 출고 결제 — 출고결제대기. 백엔드/도메인 별로 IO_PAY_PENDING 또는
+  // IO_SHIP_PAY_PENDING 으로 들어올 수 있어 둘 다 합산.
+  counts.shipPaymentPending =
+    (progressCounts.IO_PAY_PENDING ?? 0) +
+    (progressCounts.IO_SHIP_PAY_PENDING ?? 0);
+  // 미확인 — 라벨이 미확인인 (unreadCount > 0) 주문 수
   for (const order of orders) {
     if ((order.unreadCount ?? 0) > 0) {
       counts.unconfirmed += 1;
     }
   }
+
+  // ─── 오류 ────────────────────────────────────────────────
+  counts.problemProduct = progressCounts.P_MA_PROBLEM ?? 0;
+  // 현지배송지연 — IO_DELAY (이전엔 errorInbound = E_ERROR 였으나 사용자
+  // 요구에 따라 의미를 "현지배송지연" 으로 변경).
+  counts.errorInbound = progressCounts.IO_DELAY ?? 0;
+  // 출고보류 — E_SHIPMENT_HOLD 만 (이전엔 반품관리 USER_REFUND_REQ 까지
+  // 합산했지만 사용자 요구는 출고보류 단독).
+  counts.shipmentHold = progressCounts.E_SHIPMENT_HOLD ?? 0;
+
   return counts;
 };

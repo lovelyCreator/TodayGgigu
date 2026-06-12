@@ -35,6 +35,11 @@ import {
   prewarmVisitedInquiries,
 } from '../../utils/visitedInquiries';
 import {
+  hideInquiry,
+  isInquiryHiddenSync,
+  prewarmHiddenInquiries,
+} from '../../utils/hiddenInquiries';
+import {
   type OrderInquiryListItem,
   fetchOrderInquiryList,
   formatOrderDisplayNumber,
@@ -293,6 +298,11 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
         // 사용자가 한 번이라도 방문한 주문문의는 카드에 "확인완료" 로 표시한다.
         // AsyncStorage 캐시를 prewarm 한 뒤 tick 증가로 리렌더 트리거.
         prewarmVisitedInquiries()
+          .then(() => setVisitedTick((t) => t + 1))
+          .catch(() => {/* silent */});
+        // 사용자가 삭제한 주문문의 카드를 목록에서 제외하기 위해 hidden
+        // 캐시도 prewarm. tick 증가로 필터링 리렌더 트리거.
+        prewarmHiddenInquiries()
           .then(() => setVisitedTick((t) => t + 1))
           .catch(() => {/* silent */});
         // ▶ 폴링 제거: 이전엔 focus 시마다 `getUnreadCounts()` 와
@@ -631,18 +641,38 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
           <Text style={styles.messageCountText}>{formatMessageCountLabel(item.messageCount)}</Text>
         ) : null}
       </View>
-      <View style={{ alignItems: 'flex-end' }}>
-        {item.progressStatus ? (
-          <Text style={[styles.orderItemStatus, { color: COLORS.text.secondary }]}>
-            {getProgressStatusLabel(item.progressStatus)}
-          </Text>
-        ) : null}
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(displayStatus) + '18' }]}>
-          <View style={[styles.statusDot, { backgroundColor: getStatusColor(displayStatus) }]} />
-          <Text style={[styles.statusBadgeText, { color: getStatusColor(displayStatus) }]}>
-            {getStatusLabel(displayStatus)}
-          </Text>
+      <View style={styles.orderItemRight}>
+        <View style={{ alignItems: 'flex-end' }}>
+          {item.progressStatus ? (
+            <Text style={[styles.orderItemStatus, { color: COLORS.text.secondary }]}>
+              {getProgressStatusLabel(item.progressStatus)}
+            </Text>
+          ) : null}
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(displayStatus) + '18' }]}>
+            <View style={[styles.statusDot, { backgroundColor: getStatusColor(displayStatus) }]} />
+            <Text style={[styles.statusBadgeText, { color: getStatusColor(displayStatus) }]}>
+              {getStatusLabel(displayStatus)}
+            </Text>
+          </View>
         </View>
+        {/* 카드 삭제 단추 — 클라이언트측 숨김 (백엔드 inquiry 삭제 API 부재).
+            상위 TouchableOpacity 의 onPress (= 채팅 열기) 가 같이 발화하지
+            않도록 stopPropagation 효과를 위해 별도 TouchableOpacity 로 분리. */}
+        <TouchableOpacity
+          style={styles.orderItemDeleteButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          onPress={(e) => {
+            e.stopPropagation?.();
+            const id = item.inquiryId;
+            // 즉시 화면에서 제거 — 영속 저장은 백그라운드로.
+            setOrderInquiries((prev) => prev.filter((row) => row.inquiryId !== id));
+            void hideInquiry(id);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="delete"
+        >
+          <Icon name="trash-outline" size={20} color={COLORS.gray[500]} />
+        </TouchableOpacity>
       </View>
     </TouchableOpacity>
     );
@@ -698,13 +728,17 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
         </View>
       );
     }
+    // 사용자가 카드의 휴지통 단추로 삭제한 inquiryId 는 목록에서 제외.
+    const visibleOrderInquiries = orderInquiries.filter(
+      (it) => !isInquiryHiddenSync(it.inquiryId),
+    );
     return (
       <FlatList
-        data={orderInquiries}
+        data={visibleOrderInquiries}
         keyExtractor={(item) => item.inquiryId || item.orderId}
         renderItem={renderOrderItem}
         ListEmptyComponent={renderOrderEmptyState}
-        contentContainerStyle={orderInquiries.length === 0 ? styles.emptyListContent : undefined}
+        contentContainerStyle={visibleOrderInquiries.length === 0 ? styles.emptyListContent : undefined}
         refreshControl={<RefreshControl refreshing={orderRefreshing} onRefresh={handleOrderRefresh} />}
       />
     );
@@ -753,6 +787,24 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
             <Icon name="close-circle-outline" size={18} color={COLORS.gray[400]} />
           </TouchableOpacity>
         )}
+        {/* 카드 삭제 단추 — 주문문의 탭과 동일한 클라이언트측 숨김 패턴.
+            상태 라벨 오른쪽 끝에 위치한다. */}
+        <TouchableOpacity
+          style={styles.orderItemDeleteButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          onPress={(e) => {
+            e.stopPropagation?.();
+            const id = item._id;
+            setGeneralInquiriesLocal((prev: any[]) =>
+              prev.filter((row) => row._id !== id),
+            );
+            void hideInquiry(id);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="delete"
+        >
+          <Icon name="trash-outline" size={20} color={COLORS.gray[500]} />
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
@@ -774,7 +826,8 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   );
 
   const renderGeneralTab = () => {
-    const data = generalInquiriesLocal;
+    // 삭제(=숨김) 처리된 inquiryId 는 목록에서 제외.
+    const data = generalInquiriesLocal.filter((it: any) => !isInquiryHiddenSync(it._id));
     if (generalLoading && data.length === 0) {
       return <View style={styles.loadingContainer}><ActivityIndicator size="large" color={COLORS.red} /></View>;
     }
@@ -1023,6 +1076,18 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     fontWeight: '600',
     textAlign: 'right',
+  },
+  // 카드 오른쪽: 상태 라벨/배지 + 삭제 단추를 가로로 정렬.
+  // 삭제 단추는 상태 배지 오른쪽에 위치한다.
+  orderItemRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  orderItemDeleteButton: {
+    marginLeft: SPACING.sm,
+    padding: SPACING.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   itemUnreadBadge: {
     backgroundColor: '#FF0000',

@@ -1015,7 +1015,8 @@ const ProfileScreen: React.FC = () => {
                 count: dashboardCounts.problemProduct,
               },
               {
-                labelKey: 'profile.toErrorIn',
+                // "현지배송지연" — IO_DELAY 주문 수 (이전엔 toErrorIn).
+                labelKey: 'profile.toShippingDelay',
                 count: dashboardCounts.errorInbound,
               },
               {

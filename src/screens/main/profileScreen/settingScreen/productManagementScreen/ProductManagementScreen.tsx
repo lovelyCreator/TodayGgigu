@@ -11,6 +11,10 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
+  Animated,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -130,6 +134,12 @@ const isBetween = (d: Date, start: Date, end: Date): boolean => {
 type ProductManagementScreenProps = {
   embedded?: boolean;
 };
+
+// 검색/초기화 단추 영역의 펼친 상태 높이 — collapse 진행 시 sticky 오버레이의
+// height interpolate 범위로 사용된다. 실제 단추 높이(44) + 위쪽 마진(16) 의
+// 합과 일치해야 오버레이가 자연스럽게 차오른다. styles.searchButton.height /
+// styles.filterActions.marginTop 변경 시 함께 맞춰 수정.
+const STICKY_ACTIONS_HEIGHT = 60;
 
 const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
   embedded = false,
@@ -313,6 +323,100 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // ─── 스크롤 연동 필터 패널 collapse ──────────────────────────────────
+  //
+  // 조회(검색 + 버튼) 영역은 상단 고정. 그 아래의 필터 패널
+  // (상품유형/카테고리/리벨/sort chips/가격/날짜) 만 스크롤 변화량에 비례해
+  // 줄어들었다 늘어난다. 패널이 완전히 숨겨진 뒤에는 그 아래 콘텐츠가 정상
+  // 스크롤된다.
+  //
+  //   - collapsibleFullHeight: 펼친 상태의 측정된 실제 높이 (onLayout 으로 갱신)
+  //   - collapseProgress:      0(완전 펼침) ~ 1(완전 접힘) 누적 값.
+  //                             스크롤 dy > 0 (위로 밀어올림) 일 때 +
+  //                             스크롤 dy < 0 (아래로 끌어내림) 일 때 −
+  //                             dy 의 절대값 / fullHeight 비율로 가산.
+  const collapsibleFullHeightRef = useRef<number>(0);
+  // 측정된 collapse 패널 본래 높이를 state 로도 보관 — ScrollView 의 paddingTop
+  // 이 ref 변경만으로는 리렌더되지 않으므로, state 를 의존성으로 두어 첫
+  // 레이아웃 측정 직후 패딩이 반영되도록 한다.
+  const [collapsibleFullHeight, setCollapsibleFullHeight] = useState<number>(0);
+  // sticky header (조회 input + 검색/초기화 오버레이) 의 실측 높이.
+  // collapse 패널은 absolute 로 띄워져 있으므로 stickyHeader 바로 아래에
+  // 정확히 위치하려면 stickyHeader 의 높이를 top offset 으로 사용해야 한다.
+  const [stickyHeaderHeight, setStickyHeaderHeight] = useState<number>(0);
+  const collapseProgressAnim = useRef(new Animated.Value(0)).current;
+  const collapseProgressNumRef = useRef<number>(0);
+  // 기준점: 마지막으로 base 가 결정된 시점의 contentOffset.y 와 그때의 progress.
+  // 이 값들로부터의 dy 누적 비율이 0~1 사이에서 progress 를 결정.
+  const collapseBaseScrollYRef = useRef<number>(0);
+  const collapseBaseProgressRef = useRef<number>(0);
+  // 직전 micro dy 부호 — 방향 전환 감지용.
+  const lastDyDirRef = useRef<0 | 1 | -1>(0);
+  const lastScrollYRef = useRef<number>(0);
+
+  const onCollapsibleLayout = useCallback((e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (collapsibleFullHeightRef.current <= 0 && h > 0) {
+      collapsibleFullHeightRef.current = h;
+      // ScrollView 의 paddingTop 이 즉시 반영되도록 state 도 동기 갱신.
+      setCollapsibleFullHeight(h);
+    }
+  }, []);
+
+  // 사용자가 드래그를 시작한 순간 — 기준점을 현재 상태로 캡처해 다음 dy 비율
+  // 계산이 그 위치 기준으로 이뤄지도록 한다. 관성 스크롤 / bounce 의 미세한
+  // y 떨림은 onScrollBeginDrag 이 발화되지 않으므로 기준점 영향 없음.
+  const onListScrollBeginDrag = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = e.nativeEvent.contentOffset.y;
+      collapseBaseScrollYRef.current = y;
+      collapseBaseProgressRef.current = collapseProgressNumRef.current;
+      lastDyDirRef.current = 0;
+      lastScrollYRef.current = y;
+    },
+    [],
+  );
+
+  const onListScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = e.nativeEvent.contentOffset.y;
+      const fullH = collapsibleFullHeightRef.current;
+      if (fullH <= 0) {
+        lastScrollYRef.current = y;
+        return;
+      }
+
+      // 매 이벤트의 micro-dy 로 방향 전환을 감지. 방향이 바뀌면 그 순간을
+      // 새 기준점으로 잡아 사용자가 어느 위치에서든 방향 전환만으로 패널이
+      // 즉시 반대 방향 진행을 시작하게 한다.
+      const microDy = y - lastScrollYRef.current;
+      lastScrollYRef.current = y;
+      const dir: 0 | 1 | -1 = microDy > 0 ? 1 : microDy < 0 ? -1 : 0;
+      if (
+        dir !== 0 &&
+        lastDyDirRef.current !== 0 &&
+        dir !== lastDyDirRef.current
+      ) {
+        collapseBaseScrollYRef.current = y;
+        collapseBaseProgressRef.current = collapseProgressNumRef.current;
+      }
+      if (dir !== 0) lastDyDirRef.current = dir;
+
+      // 기준점부터의 누적 dy → progress 절대 계산.
+      // 0/1 양 끝에서 clamp 되므로 끝점에서 추가 스크롤로 인한 진동 제거.
+      const totalDy = y - collapseBaseScrollYRef.current;
+      const next = Math.max(
+        0,
+        Math.min(1, collapseBaseProgressRef.current + totalDy / fullH),
+      );
+      if (next !== collapseProgressNumRef.current) {
+        collapseProgressNumRef.current = next;
+        collapseProgressAnim.setValue(next);
+      }
+    },
+    [collapseProgressAnim],
+  );
+
   // 상품다운로드 단추 → 단추 바로 아래에 떠 있는 anchored 드롭다운(3개 옵션:
   // 이미지 Excel 다운 / Excel 다운 / 식검 다운).
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState<boolean>(false);
@@ -509,8 +613,28 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
     });
   };
 
-  const thumbOf = (p: SellerProduct): string | null =>
-    p.thumbnails?.find((th) => th.isThumbnail)?.url || p.thumbnails?.[0]?.url || null;
+  // 카드 썸네일 URL 결정 — backend 응답이 일관되지 않아 여러 필드를 순차 시도.
+  //   1) thumbnails[?] 중 isThumbnail=true 인 url
+  //   2) thumbnails[0].url
+  //   3) thumbnails[*].url 중 첫 번째 비어있지 않은 값
+  //   4) detailImgUrl (상세 페이지 대표 이미지)
+  // 모두 비어 있으면 null → placeholder 렌더.
+  const thumbOf = (p: SellerProduct): string | null => {
+    const pickFromUrl = (u: unknown): string | null => {
+      if (!u || typeof u !== 'string') return null;
+      const trimmed = u.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    };
+    const list = Array.isArray(p.thumbnails) ? p.thumbnails : [];
+    const primary = list.find((th) => th?.isThumbnail);
+    const fromPrimary = pickFromUrl(primary?.url);
+    if (fromPrimary) return fromPrimary;
+    for (const th of list) {
+      const url = pickFromUrl(th?.url);
+      if (url) return url;
+    }
+    return pickFromUrl((p as any).detailImgUrl);
+  };
 
   const renderHeader = () => (
     <View
@@ -605,10 +729,24 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
     );
   };
 
-  const renderFilters = () => (
-    <View style={styles.filterPanel}>
-      {/* Search row: label left, input box right */}
-      <View style={styles.filterRow}>
+  // 상단 고정 영역 — 조회(검색 input) + (collapse 진행 시) 검색/초기화 단추.
+  // 초기 상태 (스크롤 = 0) 에는 단추 영역의 높이/투명도가 0 이라 화면에 보이지
+  // 않고, 그 자리는 패널 내부의 단추가 차지한다. 사용자가 스크롤을 시작해
+  // 패널이 collapse 되기 시작하면 이 오버레이가 progress 에 비례해 fade in
+  // 되어 조회 input 바로 아래에 고정된다.
+  const renderStickyHeader = () => (
+    <View
+      style={styles.stickyHeader}
+      onLayout={(e: LayoutChangeEvent) => {
+        const h = e.nativeEvent.layout.height;
+        if (h > 0 && h !== stickyHeaderHeight) {
+          setStickyHeaderHeight(h);
+        }
+      }}
+    >
+      {/* 조회 input 행 — 패널의 첫 행이라 자체 marginBottom 을 0 으로 덮어써
+          상품유형 항목과의 간격을 좁힌다 (사용자 요청). */}
+      <View style={[styles.filterRow, { marginBottom: 0 }]}>
         <Text style={styles.filterRowLabel}>{t('profile.productMgmt.inquiry')}</Text>
         <View style={styles.searchBox}>
           <TextInput
@@ -620,7 +758,74 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
           />
         </View>
       </View>
+      {/* 스크롤 진행 시 등장하는 검색/초기화 오버레이 — 본래 단추 높이만큼
+          공간이 자라며 fade in. progress=0 일 땐 height=0, opacity=0 으로
+          숨겨져 클릭/탭 영역도 차지하지 않는다. */}
+      <Animated.View
+        pointerEvents={'auto'}
+        style={{
+          height: collapseProgressAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, STICKY_ACTIONS_HEIGHT],
+          }),
+          opacity: collapseProgressAnim,
+          overflow: 'hidden',
+        }}
+      >
+        {renderSearchResetButtons()}
+      </Animated.View>
+    </View>
+  );
 
+  // 검색 / 초기화 단추 — 공통 핸들러로 패널 내부 + 상단 오버레이에서 재사용.
+  const renderSearchResetButtons = () => (
+    <View style={styles.filterActions}>
+      <TouchableOpacity
+        style={styles.searchButton}
+        activeOpacity={0.85}
+        onPress={loadProducts}
+      >
+        <Text style={styles.searchButtonText}>{t('profile.productMgmt.search')}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.resetButton}
+        activeOpacity={0.7}
+        onPress={() => {
+          setSearchText('');
+          setPriceMin('');
+          setPriceMax('');
+          setActiveSort('uploadTime');
+        }}
+      >
+        <Text style={styles.resetButtonText}>{t('profile.productMgmt.reset')}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // 스크롤 변화량에 비례해 줄어들었다 늘어나는 필터 패널.
+  // 본래 높이(collapsibleFullHeight) 측정 후 collapseProgress (0~1) 에 따라
+  // height + opacity 를 interpolate.
+  const renderFilters = () => (
+    <Animated.View
+      onLayout={onCollapsibleLayout}
+      style={[
+        styles.filterPanel,
+        // height 는 펼친 상태(측정값) → 0 으로 비례 축소.
+        collapsibleFullHeightRef.current > 0
+          ? {
+              height: collapseProgressAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [collapsibleFullHeightRef.current, 0],
+              }),
+              opacity: collapseProgressAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1, 0],
+              }),
+              overflow: 'hidden',
+            }
+          : undefined,
+      ]}
+    >
       {/* Dropdowns: label left, box right */}
       {renderFilterDropdown('productType', t('profile.productMgmt.productType'))}
       {renderFilterDropdown('category', t('profile.productMgmt.category'))}
@@ -694,34 +899,22 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
         </Text>
       </TouchableOpacity>
 
-      {/* Search / Reset */}
-      <View style={styles.filterActions}>
-        <TouchableOpacity
-          style={styles.searchButton}
-          activeOpacity={0.85}
-          onPress={loadProducts}
-        >
-          <Text style={styles.searchButtonText}>{t('profile.productMgmt.search')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.resetButton}
-          activeOpacity={0.7}
-          onPress={() => {
-            setSearchText('');
-            setPriceMin('');
-            setPriceMax('');
-            setActiveSort('uploadTime');
-          }}
-        >
-          <Text style={styles.resetButtonText}>{t('profile.productMgmt.reset')}</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+      {/* 초기 상태(스크롤 0)에서는 시작/종료시간 행 바로 아래에 위치.
+          스크롤이 시작되어 collapse 진행되면 위의 오버레이가 fade in 되어
+          상단에 고정 표시되고, 패널 내부의 이 단추들은 height 축소와 함께
+          자연스럽게 사라진다. */}
+      {renderSearchResetButtons()}
+    </Animated.View>
   );
 
   // --- Bulk action toolbar ---
+  //
+  // 전체선택 체크박스 + (이전엔 상품등록/상품다운로드/삭제 버튼들) 으로 구성된
+  // 툴바. 사용자 요청으로 **현재는 화면에서 숨김** — JSX/스타일/핸들러는 모두
+  // 그대로 보존되어 있어 이 플래그만 true 로 바꾸면 즉시 복구 가능.
+  const SHOW_BULK_TOOLBAR = false;
   const renderToolbar = () => {
-    const hasSelection = selectedIds.length > 0;
+    if (!SHOW_BULK_TOOLBAR) return null;
     return (
       <View style={styles.toolbar}>
         <TouchableOpacity
@@ -735,55 +928,10 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
           <Text style={styles.selectAllText}>{t('profile.productMgmt.selectAll')}</Text>
         </TouchableOpacity>
 
-        <View style={styles.toolbarActions}>
-          <TouchableOpacity style={styles.registerButton} activeOpacity={0.85}>
-            <Text style={styles.registerButtonText}>
-              {t('profile.productMgmt.register')}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            ref={downloadBtnRef as any}
-            style={[styles.outlineButton, !hasSelection && styles.outlineButtonDisabled]}
-            activeOpacity={0.7}
-            disabled={!hasSelection}
-            onPress={() => {
-              // 단추의 화면 좌표를 측정해 그 바로 아래에 드롭다운을 배치.
-              downloadBtnRef.current?.measureInWindow((x, y, width, height) => {
-                setDownloadBtnLayout({ x, y, width, height });
-              });
-              setDownloadDropdownOpen(true);
-            }}
-          >
-            <Text
-              style={[
-                styles.outlineButtonText,
-                !hasSelection && styles.outlineButtonTextDisabled,
-              ]}
-            >
-              {t('profile.productMgmt.download')}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.outlineButton, !hasSelection && styles.outlineButtonDisabled]}
-            activeOpacity={0.7}
-            disabled={!hasSelection}
-            onPress={handleDelete}
-          >
-            <Text
-              style={[
-                styles.outlineButtonText,
-                !hasSelection && styles.outlineButtonTextDisabled,
-              ]}
-            >
-              {t('profile.productMgmt.delete')}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* 그리드/리스트 보기 토글 단추는 사용자 요청으로 제거됨.
-            viewMode state 와 FlatList 의 numColumns 분기는 그대로 두어
-            기본 grid 레이아웃이 유지된다 (추후 다른 진입점에서 mode 를
-            바꿀 일이 생기면 그때 다시 노출하면 됨). */}
+        {/* 상품등록 / 상품다운로드 / 삭제 버튼은 사용자 요청으로 제거됨.
+            관련 핸들러(handleDelete, downloadBtnRef, setDownloadDropdownOpen 등)
+            와 anchored 드롭다운 JSX 는 다른 진입점에서 재활용될 수 있어
+            그대로 둔다. */}
       </View>
     );
   };
@@ -1017,9 +1165,15 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
   };
 
   // --- Product item ---
+  // 로드 실패한 썸네일 URL 집합 — onError 가 호출되면 추가되어 다음 렌더 시
+  // placeholder 로 표시한다. 카드별이 아닌 URL 별로 추적해 같은 깨진 URL 이
+  // 여러 카드에서 사용되는 경우에도 한 번만 시도하고 모두 placeholder 로 떨어짐.
+  const [brokenThumbUrls, setBrokenThumbUrls] = useState<Set<string>>(new Set());
+
   const renderProductItem = ({ item }: { item: GroupedSellerProduct }) => {
     const checked = selectedIds.includes(item.groupKey);
-    const thumb = thumbOf(item);
+    const rawThumb = thumbOf(item);
+    const thumb = rawThumb && !brokenThumbUrls.has(rawThumb) ? rawThumb : null;
     return (
       <TouchableOpacity
         // 선택된 카드에는 붉은 테두리가 표시되어 체크 상태가 카드 전체에서
@@ -1045,7 +1199,20 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
           {checked && <Icon name="checkmark" size={14} color={COLORS.white} />}
         </View>
         {thumb ? (
-          <Image source={{ uri: thumb }} style={styles.productImage} resizeMode="cover" />
+          <Image
+            source={{ uri: thumb }}
+            style={styles.productImage}
+            resizeMode="cover"
+            onError={() => {
+              // 로드 실패한 URL 을 캐시에 기록 → 다음 렌더에서 placeholder 로 전환.
+              setBrokenThumbUrls((prev) => {
+                if (prev.has(thumb)) return prev;
+                const next = new Set(prev);
+                next.add(thumb);
+                return next;
+              });
+            }}
+          />
         ) : (
           <View style={[styles.productImage, styles.productImagePlaceholder]}>
             <Icon name="image-outline" size={28} color={COLORS.gray[400]} />
@@ -1781,11 +1948,40 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
             : undefined
         }
       >
-        <ScrollView showsVerticalScrollIndicator={false}>
+        {/* 조회 input + 검색/초기화 단추는 화면 상단에 항상 고정. */}
+        {renderStickyHeader()}
+        {/*
+          필터 패널을 sticky overlay 로 분리한 구조 — ScrollView 위치와 무관하게
+          progress 값에 따라 자유롭게 펼침/접힘이 즉시 화면에 반영된다.
+          ScrollView 에는 패널 높이만큼 paddingTop 을 두어 progress=0 (펼침)
+          상태에서 패널과 콘텐츠가 자연스럽게 겹치지 않는다.
+        */}
+        <View
+          style={[styles.collapsibleStickyWrap, { top: stickyHeaderHeight }]}
+          pointerEvents="box-none"
+        >
           {renderFilters()}
+        </View>
+        <Animated.ScrollView
+          showsVerticalScrollIndicator={false}
+          onScroll={onListScroll}
+          onScrollBeginDrag={onListScrollBeginDrag}
+          // 16ms 마다 onScroll 발화 → 60fps 의 부드러운 collapse 진행.
+          scrollEventThrottle={16}
+          // 마지막 카드 부근에서 bounce / overscroll 로 인한 micro-dy 변동 →
+          // collapse progress 진동 → 화면 떨림 현상 차단.
+          bounces={false}
+          overScrollMode="never"
+          contentContainerStyle={{
+            // collapse 패널의 실제 측정 높이만큼 paddingTop 으로 잡아 그 아래
+            // 첫 카드가 검색/초기화 단추 바로 밑에 자연스럽게 붙도록 한다.
+            // state 변경으로 measure 직후 한 번 리렌더되어 정확한 값 반영.
+            paddingTop: collapsibleFullHeight,
+          }}
+        >
           {renderToolbar()}
           {renderBody()}
-        </ScrollView>
+        </Animated.ScrollView>
         {renderPickerModal()}
         {renderDateRangeModal()}
         {renderCartModal()}
@@ -1902,6 +2098,33 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderBottomWidth: 8,
     borderBottomColor: COLORS.gray[100],
+  },
+  // 조회(검색) input + 검색/초기화 단추 = 화면 상단 고정 헤더.
+  // 외부 Animated.ScrollView 의 영향을 받지 않고 항상 노출.
+  stickyHeader: {
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    // 조회 input 과 그 아래의 상품유형 항목 사이의 간격을 약간 줄임.
+    // 이전엔 paddingBottom: SPACING.sm + 경계선이 보였는데, 사용자 요청대로
+    // 경계선 제거 + 패딩 축소.
+    paddingBottom: SPACING.xs,
+    // 경계선 제거 — borderBottom 관련 속성 모두 삭제.
+    zIndex: 2,
+  },
+  // 필터 패널을 sticky overlay 로 띄우는 wrapper. 스크롤 위치와 무관하게
+  // collapse progress 값에 따라 즉시 펼침/접힘이 화면에 반영된다.
+  // sticky header (zIndex 2) 아래, body content (zIndex 0) 위에 위치하도록
+  // zIndex 1 로 지정.
+  // position: 'absolute' 로 normal flow 에서 제외 — 그래야 패널 높이만큼의
+  // 빈 공간이 stickyHeader 아래에 생기지 않고, ScrollView 의 paddingTop 만으로
+  // 첫 카드 위치가 결정된다 (검색/초기화 단추 바로 아래).
+  collapsibleStickyWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1,
   },
   filterRow: {
     flexDirection: 'row',
@@ -2192,16 +2415,15 @@ const styles = StyleSheet.create({
   productCardGrid: {
     flexDirection: 'column',
   },
+  // 카드의 좌측 inline 체크박스 — 이미지 앞에 위치.
+  // 이전엔 position: 'absolute' 로 이미지 위에 떠 있어 썸네일이 가려졌으나,
+  // 사용자 요청대로 inline 배치로 이미지의 왼쪽 옆에 자리잡는다.
   cardCheckbox: {
-    position: 'absolute',
-    top: SPACING.sm,
-    left: SPACING.sm,
-    // 카드 이미지 / 액션 아이콘 위에 항상 노출되도록 z 우선순위를 올린다.
-    zIndex: 5,
-    elevation: 5,
     width: 22,
     height: 22,
     backgroundColor: COLORS.white,
+    marginRight: SPACING.sm,
+    alignSelf: 'center',
   },
   // 선택된 카드의 시각적 강조 — 붉은 테두리 + 살짝 붉은 배경 틴트.
   productCardSelected: {

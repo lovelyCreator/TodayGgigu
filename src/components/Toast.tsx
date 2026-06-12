@@ -76,7 +76,9 @@ const Toast: React.FC<ToastProps> = ({
       case 'success':
         return '#10B981'; // Green
       case 'error':
-        return '#EF4444'; // Red
+        // 프로젝트 브랜드 붉은색(#FF5500) 으로 통일. 이전엔 #EF4444 (분홍빛 빨강)
+        // 였으나 디자인 일관성을 위해 COLORS.red 사용.
+        return COLORS.red;
       case 'warning':
         return '#F59E0B'; // Orange
       case 'info':

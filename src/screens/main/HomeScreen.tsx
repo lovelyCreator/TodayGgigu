@@ -107,6 +107,9 @@ const HomeScreen: React.FC = () => {
   const { user, isGuest, isAuthenticated } = useAuth();
   const locale = useAppSelector((s) => s.i18n.locale) as 'en' | 'ko' | 'zh';
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  // 주문 카드 하나의 실측 높이 — 2개 이상 주문일 때 스크롤 영역 높이를
+  // 정확히 카드 2개분(+ 사이 간격) 으로 고정하기 위해 사용.
+  const [uosOrderBlockHeight, setUosOrderBlockHeight] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -1281,28 +1284,34 @@ const HomeScreen: React.FC = () => {
       (user.addresses || [])[0] ||
       null;
 
-    const firstOrder = recentOrders[0];
-    const secondOrder = recentOrders[1];
+    // (이전 첫/둘째 주문 분리 변수 제거 — 모든 주문을 동일 형식으로 표시)
 
-    const renderOrderBlock = (order: Order, isFirst: boolean) => {
+    // 모든 주문 카드를 동일한 간단 형식으로 렌더 — 상세 (tracking / 상태 /
+    // 주소 / 연락처) 는 표시하지 않는다. 이전엔 첫 카드만 상세를 보여줬으나
+    // 사용자 요청으로 두번째 카드 형태(이미지+회사명+수량+가격+전체보기) 로 통일.
+    const renderOrderBlock = (order: Order, idx: number) => {
       const item = order.items?.[0];
       const itemCount = order.items?.reduce((sum, it) => sum + (it.quantity || 1), 0) || 0;
       const total = order.totalAmount ?? order.firstTierCost?.totalKRW;
       const original = order.firstTierCost?.productTotalKRW;
-      const status = getStatusText(order);
-      const lastHistory =
-        order.statusHistory && order.statusHistory.length > 0
-          ? order.statusHistory[order.statusHistory.length - 1]
-          : null;
-      const trackingNumber = order.trackingNumber || '';
-      const courierName = (order as any).courier || (order as any).carrier || 'XX택배';
       const itemsCountLabel =
         locale === 'ko' ? `총 : ${itemCount}건 상품`
         : locale === 'zh' ? `共：${itemCount}件商品`
         : `Total: ${itemCount} item(s)`;
 
       return (
-        <View key={order.id} style={[styles.uosOrderBlock, !isFirst && styles.uosOrderBlockSpacer]}>
+        <View
+          key={order.id}
+          style={[styles.uosOrderBlock, idx > 0 && styles.uosOrderBlockSpacer]}
+          onLayout={(e) => {
+            if (idx === 0) {
+              const h = e.nativeEvent.layout.height;
+              if (h > 0 && Math.abs(h - uosOrderBlockHeight) > 0.5) {
+                setUosOrderBlockHeight(h);
+              }
+            }
+          }}
+        >
           <TouchableOpacity
             style={styles.uosProductRow}
             activeOpacity={0.85}
@@ -1329,78 +1338,6 @@ const HomeScreen: React.FC = () => {
               </View>
             </View>
           </TouchableOpacity>
-
-          {isFirst && (trackingNumber || lastHistory) && (
-            <>
-              <View style={styles.uosTrackingRow}>
-                <Text style={styles.uosTrackingCarrier}>
-                  {courierName}: <Text style={styles.uosTrackingNumber}>{trackingNumber || '-'}</Text>
-                </Text>
-                <TouchableOpacity
-                  onPress={() => handleCopyTracking(trackingNumber)}
-                  style={styles.uosCopyButton}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.uosCopyButtonText}>
-                    {locale === 'ko' ? '복사' : locale === 'zh' ? '复制' : 'Copy'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {lastHistory && (
-                <View style={styles.uosStatusBlock}>
-                  <View style={styles.uosStatusHeaderRow}>
-                    <View style={styles.uosStatusDot} />
-                    <Text style={styles.uosStatusText}>{status}</Text>
-                    <Text style={styles.uosStatusTime}>
-                      {formatTrackingDate(lastHistory.timestamp || order.updatedAt)}
-                    </Text>
-                  </View>
-                  {(lastHistory.content || lastHistory.detail || lastHistory.note) && (
-                    <Text style={styles.uosStatusDetail} numberOfLines={3}>
-                      {lastHistory.content || lastHistory.detail || lastHistory.note}
-                    </Text>
-                  )}
-                </View>
-              )}
-
-              <TouchableOpacity
-                style={styles.uosLogisticsMoreRow}
-                activeOpacity={0.7}
-                onPress={() =>
-                  (navigation as any).navigate('OrderDetail', { orderId: order.id, order })
-                }
-              >
-                <View style={styles.uosLogisticsMoreCircle} />
-                <Text style={styles.uosLogisticsMoreText}>
-                  {t('home.viewLogisticsDetails') || (
-                    locale === 'ko' ? '查看更多物流明细' : locale === 'zh' ? '查看更多物流明细' : 'View more logistics details'
-                  )}
-                </Text>
-              </TouchableOpacity>
-
-              {primaryAddress && (
-                <View style={styles.uosAddressBlock}>
-                  <View style={styles.uosAddressRow}>
-                    <Icon name="location-outline" size={16} color={LOGISTICS_ORANGE} />
-                    <Text style={styles.uosAddressText} numberOfLines={2}>
-                      {locale === 'ko' ? '배송지: ' : locale === 'zh' ? '送至 ' : 'Ship to: '}
-                      {[primaryAddress.country, primaryAddress.city, primaryAddress.street]
-                        .filter(Boolean)
-                        .join(' ')}
-                    </Text>
-                  </View>
-                  {(primaryAddress.name || primaryAddress.phone) && (
-                    <Text style={styles.uosAddressContact}>
-                      {locale === 'ko' ? '연락처: ' : locale === 'zh' ? '联系人：' : 'Contact: '}
-                      {primaryAddress.name}
-                      {primaryAddress.phone ? ` ${primaryAddress.phone}` : ''}
-                    </Text>
-                  )}
-                </View>
-              )}
-            </>
-          )}
 
           <TouchableOpacity
             style={styles.uosViewAllRow}
@@ -1453,19 +1390,35 @@ const HomeScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Order blocks (up to 2) */}
-        {firstOrder
-          ? renderOrderBlock(firstOrder, true)
-          : (
-            <View style={styles.uosEmptyState}>
-              <Text style={styles.uosEmptyText}>
-                {locale === 'ko' ? '진행 중인 주문이 없습니다.'
-                  : locale === 'zh' ? '暂无进行中的订单。'
-                  : 'No orders yet.'}
-              </Text>
-            </View>
-          )}
-        {secondOrder ? renderOrderBlock(secondOrder, false) : null}
+        {/* Order blocks — 모든 주문을 표시. 2개 이상이면 영역 높이를 카드 2개
+            높이로 고정하고 내부 스크롤로 나머지 주문을 노출. */}
+        {recentOrders.length === 0 ? (
+          <View style={styles.uosEmptyState}>
+            <Text style={styles.uosEmptyText}>
+              {locale === 'ko' ? '진행 중인 주문이 없습니다.'
+                : locale === 'zh' ? '暂无进行中的订单。'
+                : 'No orders yet.'}
+            </Text>
+          </View>
+        ) : recentOrders.length === 1 ? (
+          renderOrderBlock(recentOrders[0], 0)
+        ) : (
+          <View
+            style={
+              uosOrderBlockHeight > 0
+                ? { height: uosOrderBlockHeight * 2 + SPACING.sm }
+                : undefined
+            }
+          >
+            <ScrollView
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+              contentContainerStyle={{ paddingBottom: SPACING.xs }}
+            >
+              {recentOrders.map((o, i) => renderOrderBlock(o, i))}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Category shortcut grid replaced per request — the previous
             10-orb category list was removed and the two service cards
@@ -1943,13 +1896,18 @@ const HomeScreen: React.FC = () => {
   );
 
   const renderCsCenterSection = () => {
-    const phoneRow = (phone: string, tag: string) => (
-      <TouchableOpacity style={styles.csPhoneRow} onPress={() => openDial(phone)} activeOpacity={0.85}>
-        <View style={styles.csPhoneTextCol}>
-          {/* `adjustsFontSizeToFit` + `numberOfLines={1}` prevents the
-              long phone-number string from forcing the card wider than
-              its computed `cityCardWidth`, which would otherwise push
-              the third card to a new row on narrow phones. */}
+    // 한 줄의 전화 항목 — 가운데 정렬된 텍스트 컬럼(전화번호 + 설명) +
+    // 오른쪽 전화 아이콘. 카드 안에서 세로로 1~2 개 쌓인다.
+    // entries.map() 안에서 호출되므로 key 를 직접 부여한다 — 전화번호는
+    // 카드 내에서 유일하므로 phone 자체로 충분히 고유.
+    const phoneEntry = (phone: string, tag: string, isLast: boolean) => (
+      <TouchableOpacity
+        key={phone}
+        style={[styles.csPhoneEntry, !isLast && styles.csPhoneEntryDivider]}
+        onPress={() => openDial(phone)}
+        activeOpacity={0.85}
+      >
+        <View style={styles.csPhoneEntryTextCol}>
           <Text
             style={styles.csPhoneNumber}
             numberOfLines={1}
@@ -1960,7 +1918,25 @@ const HomeScreen: React.FC = () => {
           </Text>
           <Text style={styles.csPhoneTag} numberOfLines={1}>{tag}</Text>
         </View>
+        <View style={styles.csPhoneEntryIcon}>{PhoneHandsetIcon}</View>
       </TouchableOpacity>
+    );
+
+    // 한 카드 = 한 행. 왼쪽에 도시명(세로 중앙), 오른쪽에 전화 항목 1~2 개.
+    const cityCard = (
+      cityKey: string,
+      entries: Array<{ phone: string; tag: string }>,
+    ) => (
+      <View key={cityKey} style={styles.csCityCardFull}>
+        <View style={styles.csCityNameWrap}>
+          <Text style={styles.csCityName} numberOfLines={1}>{cityKey}</Text>
+        </View>
+        <View style={styles.csCityEntriesCol}>
+          {entries.map((e, idx) =>
+            phoneEntry(e.phone, e.tag, idx === entries.length - 1),
+          )}
+        </View>
+      </View>
     );
 
     const PhoneHandsetIcon = (
@@ -1998,71 +1974,19 @@ const HomeScreen: React.FC = () => {
           //   3. The gap, card padding and a card-only min-width all
           //      scale with the responsive bucket so phones and tablets
           //      both look comfortable.
-          const cityCardGap = responsive.isTablet ? SPACING.lg : SPACING.sm;
-          // Subtract a 1px safety margin per gap so float-rounding of
-          // the divided width can never push the third card to a new
-          // row on devices where the computed total equals the parent.
-          const cityCardWidth = Math.floor(
-            (homeContentWidth - cityCardGap * 2 - 2) / 3,
-          );
-          const cityCardPadding = responsive.isTablet ? SPACING.md : SPACING.sm;
+          // 각 도시 카드가 한 행 전체를 차지. 세로로 쌓아 표시.
           return (
-            <View
-              style={[
-                styles.csCardsRow,
-                {
-                  gap: cityCardGap,
-                  flexWrap: 'nowrap',
-                  justifyContent: 'space-between',
-                  alignItems: 'flex-start',
-                },
-              ]}
-            >
-              <View
-                style={[
-                  styles.csCityCard,
-                  styles.csCityCardTall,
-                  {
-                    width: cityCardWidth,
-                    padding: cityCardPadding,
-                    flexShrink: 1,
-                  },
-                ]}
-              >
-                <Text style={styles.csCityName}>{t('home.csWeihai')}</Text>
-                {phoneRow(t('home.csPhoneWeihai1'), t('home.csTagWeihai1'))}
-                <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
-                {phoneRow(t('home.csPhoneWeihai2'), t('home.csTagWeihai2'))}
-                <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
-              </View>
-              <View
-                style={[
-                  styles.csCityCard,
-                  {
-                    width: cityCardWidth,
-                    padding: cityCardPadding,
-                    flexShrink: 1,
-                  },
-                ]}
-              >
-                <Text style={styles.csCityName}>{t('home.csYiwu')}</Text>
-                {phoneRow(t('home.csPhoneYiwu'), t('home.csTagYiwu'))}
-                <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
-              </View>
-              <View
-                style={[
-                  styles.csCityCard,
-                  {
-                    width: cityCardWidth,
-                    padding: cityCardPadding,
-                    flexShrink: 1,
-                  },
-                ]}
-              >
-                <Text style={styles.csCityName}>{t('home.csGwangju')}</Text>
-                {phoneRow(t('home.csPhoneGwangju'), t('home.csTagGwangju'))}
-                <View style={{ alignItems: 'center' }}>{PhoneHandsetIcon}</View>
-              </View>
+            <View style={styles.csCardsCol}>
+              {cityCard(t('home.csWeihai'), [
+                { phone: t('home.csPhoneWeihai1'), tag: t('home.csTagWeihai1') },
+                { phone: t('home.csPhoneWeihai2'), tag: t('home.csTagWeihai2') },
+              ])}
+              {cityCard(t('home.csYiwu'), [
+                { phone: t('home.csPhoneYiwu'), tag: t('home.csTagYiwu') },
+              ])}
+              {cityCard(t('home.csGwangju'), [
+                { phone: t('home.csPhoneGwangju'), tag: t('home.csTagGwangju') },
+              ])}
             </View>
           );
         })()}
@@ -3326,6 +3250,67 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: SPACING.mdlg,
     alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  // 새 레이아웃: 카드들을 세로로 쌓는다 (각 카드 = 한 행).
+  csCardsCol: {
+    flexDirection: 'column',
+    gap: SPACING.sm,
+  },
+  // 한 카드 = 전체 가로폭. 왼쪽 도시명 + 오른쪽 전화 항목들의 row 구성.
+  csCityCardFull: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: FIGMA_OVERLAY_05,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    ...Platform.select({
+      android: { elevation: 2 },
+      ios: {
+        shadowColor: COLORS.black,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 2,
+      },
+    }),
+  },
+  // 도시명 컬럼 — 카드 왼쪽, 세로 중앙 정렬.
+  csCityNameWrap: {
+    width: 64,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingRight: SPACING.sm,
+  },
+  // 전화 항목 컬럼 — 카드 오른쪽, 1~2 개의 entry 를 세로로 쌓는다.
+  csCityEntriesCol: {
+    flex: 1,
+    flexDirection: 'column',
+    justifyContent: 'center',
+  },
+  // 한 전화 항목 (전화번호 + 설명 텍스트 + 전화 아이콘) — 가로 row.
+  csPhoneEntry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: SPACING.xs,
+  },
+  // 한 카드 안에 entry 가 2 개일 때 사이의 구분선.
+  csPhoneEntryDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray[100],
+  },
+  // 전화번호 + 설명 텍스트 컬럼 — 카드의 가로 중심에 위치하도록 flex: 1 + center.
+  csPhoneEntryTextCol: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  // 전화 아이콘 — 텍스트 오른쪽 끝.
+  csPhoneEntryIcon: {
+    marginLeft: SPACING.sm,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   csCityCard: {

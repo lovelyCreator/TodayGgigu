@@ -239,12 +239,12 @@ const SearchScreenComponent: React.FC = () => {
   // Handle search query change with autocomplete
   const handleSearchQueryChange = useCallback((text: string) => {
     setSearchQuery(text);
-    
+
     // Clear previous timeout
     if (autocompleteTimeoutRef.current) {
       clearTimeout(autocompleteTimeoutRef.current);
     }
-    
+
     // Hide autocomplete if query is empty
     if (!text || text.trim().length === 0) {
       setShowAutocomplete(false);
@@ -254,6 +254,17 @@ const SearchScreenComponent: React.FC = () => {
 
     // Product links / offerId / productNo — skip keyword autocomplete
     if (looksLikeDirectProductSearch(text)) {
+      setShowAutocomplete(false);
+      setAutocompleteSuggestions([]);
+      return;
+    }
+
+    // "https" 가 입력된 순간부터 자동완성/자동검색을 중단.
+    // 사용자가 검색 단추(또는 Enter) 를 직접 눌러야만 검색이 진행되도록 한다.
+    // (h, ht, htt, http 까지는 일반 키워드일 가능성이 있어 허용,
+    //  https 부터는 URL 입력으로 간주.)
+    const trimmedLower = text.trim().toLowerCase();
+    if (trimmedLower.startsWith('https')) {
       setShowAutocomplete(false);
       setAutocompleteSuggestions([]);
       return;

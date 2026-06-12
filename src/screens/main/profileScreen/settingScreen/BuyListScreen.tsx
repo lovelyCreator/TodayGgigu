@@ -351,17 +351,15 @@ const formatBuyListOrderDate = (iso?: string): string => {
 
 const getBusinessDomainBadgeLabel = (
   domain: BuyListBusinessDomain,
-  translate: (key: string) => string,
+  _translate: (key: string) => string,
 ): string => {
-  const raw =
-    domain === 'vvic_hipass'
-      ? 'VVIC'
-      : domain === 'rocket_3pl'
-        ? '로켓배송'
-        : domain === 'shipping_agency'
-          ? '배송대행'
-          : '구매대행';
-  return translateOrderOptionLabel(raw, translate);
+  // 우측 상단 컴팩트 배지에 표시되는 한 글자 식별자.
+  //   구매대행 → "구"   /  로켓배송 → "로"
+  //   VVIC    → "V"   /  배송대행 → "배"
+  if (domain === 'vvic_hipass') return 'V';
+  if (domain === 'rocket_3pl') return '로';
+  if (domain === 'shipping_agency') return '배';
+  return '구';
 };
 
 const buildOrderLogisticsSummary = (order: Order, translate: (key: string) => string): string => {
@@ -1844,15 +1842,15 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   };
 
   const renderOrderProductRow = (
-    order: Order,
+    _order: Order,
     item: OrderItem,
     uniqueKey: string,
   ) => {
     const specLines = formatSkuAttributeLines(item.skuAttributes);
     const addServiceCount = item.addServices?.length ?? 0;
     const lineSubtotal = item.subtotal || item.price * item.quantity;
-    const productTotalKRW = resolveOrderProductTotalKRW(order);
-    const shippingKRW = resolveOrderShippingKRW(order);
+    // productTotalKRW / shippingKRW 는 이전 "결제 금액" 영역에서 사용했으나
+    // 그 블록이 제거되어 더 이상 필요 없음.
 
     return (
       <View key={uniqueKey} style={styles.productItem}>
@@ -1904,17 +1902,6 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
           </Text>
           <Text style={styles.lineSubtotalText}>{formatPriceKRW(lineSubtotal)}</Text>
         </View>
-
-        <View style={styles.productPaymentCol}>
-          <Text style={styles.paymentColLabel}>{t('profile.unitSurvey.paymentAmount')}</Text>
-          <Text style={styles.paymentColValue}>{formatPriceKRW(order.totalAmount)}</Text>
-          <Text style={styles.paymentBreakdownText}>
-            {t('profile.productTotal') || '상품 총액'} {formatPriceKRW(productTotalKRW)}
-          </Text>
-          <Text style={styles.paymentBreakdownText}>
-            {(t('buyList.shippingIncluded') || '배송비 포함')} {formatPriceKRW(shippingKRW)}
-          </Text>
-        </View>
       </View>
     );
   };
@@ -1950,6 +1937,18 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
 
     return (
       <View key={`order-${order.id}`} style={styles.orderContainer}>
+        {/* 우측 상단 메타 배지 — 도메인 한 글자 + 주문번호 + 복사 단추.
+            position: 'absolute' 로 카드의 오른쪽 위 모서리에 띄움. */}
+        <View style={styles.orderHeaderMetaCorner}>
+          <View style={styles.domainBadge}>
+            <Text style={styles.domainBadgeText}>{domainBadge}</Text>
+          </View>
+          <Text style={styles.orderHeaderNumber}>{order.orderNumber}</Text>
+          <TouchableOpacity onPress={() => copyOrderNumber(order.orderNumber)}>
+            <Text style={styles.orderCopyText}>{t('buyList.copy')}</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.orderHeaderRow}>
           <View style={styles.orderHeaderMain}>
             <TouchableOpacity
@@ -1967,24 +1966,16 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
               )}
             </TouchableOpacity>
             <Text style={styles.orderStatusText}>{statusLabel}</Text>
-            <Text style={styles.orderHeaderDate} numberOfLines={1}>
-              {t('profile.unitSurvey.orderDate')} {formatBuyListOrderDate(order.createdAt)}
-            </Text>
-          </View>
-          <View style={styles.orderHeaderMeta}>
-            <View style={styles.domainBadge}>
-              <Text style={styles.domainBadgeText}>{domainBadge}</Text>
-            </View>
-            <Text style={styles.orderHeaderNumber}>{order.orderNumber}</Text>
-            <TouchableOpacity onPress={() => copyOrderNumber(order.orderNumber)}>
-              <Text style={styles.orderCopyText}>{t('buyList.copy')}</Text>
-            </TouchableOpacity>
           </View>
           <View style={styles.orderHeaderActions}>
             <TouchableOpacity style={styles.orderDetailLink} onPress={() => openOrderDetail(order)}>
               <Icon name="help-circle-outline" size={16} color={COLORS.text.secondary} />
               <Text style={styles.orderDetailLinkText}>{t('profile.unitSurvey.orderDetails')}</Text>
             </TouchableOpacity>
+            {/* "주문 세부정보" 우측에 주문 날짜를 가벼운 보조 정보로 함께 표시. */}
+            <Text style={styles.orderHeaderDate} numberOfLines={1}>
+              {t('profile.unitSurvey.orderDate')} {formatBuyListOrderDate(order.createdAt)}
+            </Text>
             <TouchableOpacity style={styles.orderInquiryButton} onPress={() => handleOrderInquiry(order)}>
               <Icon name="chatbubble-outline" size={14} color={COLORS.red} />
               <Text style={styles.orderInquiryButtonText}>{t('chat.orderInquiry')}</Text>
@@ -4771,6 +4762,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACING.xs,
     flexWrap: 'wrap',
+  },
+  // 카드의 오른쪽 위 모서리에 absolute 로 띄우는 도메인 배지 + 주문번호 + 복사 묶음.
+  // 헤더 row 의 다른 요소들 위에 떠 있도록 zIndex 를 조금 올린다.
+  orderHeaderMetaCorner: {
+    position: 'absolute',
+    top: SPACING.sm,
+    right: SPACING.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    zIndex: 2,
   },
   orderHeaderNumber: {
     fontSize: FONTS.sizes.sm,

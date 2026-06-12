@@ -319,6 +319,18 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
   // existing top-level state handles that case for backwards compat).
   const [cardExtraServices, setCardExtraServices] = useState<Record<string, ExtraService[]>>({});
   const [cardNegotiationNote, setCardNegotiationNote] = useState<Record<string, string>>({});
+  // 카드의 옵션 드롭다운 펼침 상태 — 카드별로 독립.
+  // 사용자가 옵션명(예: "흰색 양말 남성용...") 을 탭하면 해당 카드의 상세
+  // (상품명 전체 / 옵션 풀텍스트 / spec 라인들) 가 펼쳐서 표시됨.
+  const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
+  const toggleCardExpanded = useCallback((cardId: string) => {
+    setExpandedCardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(cardId)) next.delete(cardId);
+      else next.add(cardId);
+      return next;
+    });
+  }, []);
   const [cardNegotiationImages, setCardNegotiationImages] = useState<
     Record<string, NegotiationImageEntry[]>
   >({});
@@ -1906,8 +1918,8 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
   };
 
   const renderCard = (card: CartCard) => {
-    const subtotal = card.quantity * card.unitPrice;
-
+    // 카드 우측 영역에서 더 이상 상품금액(subtotal) 을 표시하지 않으므로 계산
+    // 변수 제거. 단가(¥)와 수량만 인라인으로 노출.
     return (
       <TouchableOpacity
         key={card.listKey}
@@ -1917,7 +1929,7 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
         {/* Accent strip */}
         <View style={styles.cardAccent} />
 
-        {/* TOP — company name + checkbox */}
+        {/* TOP — 체크박스 + index 배지 + 상품명 (한 줄) */}
         <View style={styles.cardTop}>
           <TouchableOpacity style={styles.checkBtn} onPress={() => toggleCheck(card.id)}>
             <View style={[styles.checkBox, card.checked && styles.checkBoxChecked]}>
@@ -1927,9 +1939,7 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
           <View style={styles.companyWrap}>
             <Text style={styles.indexBadge}>{card.index}</Text>
             <Text style={styles.companyName} numberOfLines={1}>
-              {card.companyName.length > 10
-                ? `${card.companyName.slice(0, 10)}...`
-                : card.companyName}
+              {card.productName}
             </Text>
           </View>
         </View>
@@ -1952,21 +1962,80 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
               )}
             </TouchableOpacity>
             <View style={styles.productInfo}>
-              <View style={styles.productNameBox}>
+              {/* 첫 줄: 옵션명 드롭다운 — 탭하면 해당 카드의 상세를 펼친다. */}
+              <TouchableOpacity
+                style={styles.productNameBox}
+                onPress={() => toggleCardExpanded(card.id)}
+                activeOpacity={0.7}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
                 <Text style={styles.productName} numberOfLines={1}>
-                  {card.productName}
+                  {[card.color, card.size].filter(Boolean).join(' ') || card.productName}
                 </Text>
-                <Icon name="chevron-down" size={12} color={COLORS.gray[500]} />
-              </View>
+                <Icon
+                  name={expandedCardIds.has(card.id) ? 'chevron-up' : 'chevron-down'}
+                  size={12}
+                  color={COLORS.gray[500]}
+                />
+              </TouchableOpacity>
+              {/* 두 번째 줄 이하: spec 칩들 (색상 / 사이즈 / 기타 메타) */}
               <View style={styles.metaRow}>
-                <Text style={styles.metaTag}>{t('cartOrder.card.color')} {card.color}</Text>
-                <Text style={styles.metaTag}>{card.size}</Text>
+                {!!card.color && (
+                  <Text style={styles.metaTag}>
+                    {t('cartOrder.card.color')} {card.color}
+                  </Text>
+                )}
+                {!!card.size && <Text style={styles.metaTag}>{card.size}</Text>}
               </View>
+              {/* 펼침 상태: 상품명 풀텍스트 + 옵션 풀텍스트 + spec 라인들. */}
+              {expandedCardIds.has(card.id) && (
+                <View style={styles.cardExpandedDetails}>
+                  <Text style={styles.cardExpandedLabel}>
+                    {t('cartOrder.card.productName') || '상품명'}
+                  </Text>
+                  <Text style={styles.cardExpandedValue}>{card.productName}</Text>
+
+                  {(card.color || card.size) && (
+                    <>
+                      <Text style={[styles.cardExpandedLabel, { marginTop: 6 }]}>
+                        {t('cartOrder.card.options') || '옵션'}
+                      </Text>
+                      {!!card.color && (
+                        <Text style={styles.cardExpandedValue}>
+                          {t('cartOrder.card.color')}: {card.color}
+                        </Text>
+                      )}
+                      {!!card.size && (
+                        <Text style={styles.cardExpandedValue}>{card.size}</Text>
+                      )}
+                    </>
+                  )}
+
+                  {Array.isArray((card as any).skuAttributes) &&
+                    (card as any).skuAttributes.length > 0 && (
+                      <>
+                        <Text style={[styles.cardExpandedLabel, { marginTop: 6 }]}>
+                          {t('cartOrder.card.specs') || '상세'}
+                        </Text>
+                        {((card as any).skuAttributes as Array<{ attributeName?: string; value?: string }>).map(
+                          (attr, idx) => (
+                            <Text key={`expandedAttr-${idx}`} style={styles.cardExpandedValue}>
+                              {(attr.attributeName || '').trim()}
+                              {attr.attributeName && attr.value ? ': ' : ''}
+                              {(attr.value || '').trim()}
+                            </Text>
+                          ),
+                        )}
+                      </>
+                    )}
+                </View>
+              )}
             </View>
           </View>
 
-          {/* Center: qty + unit price */}
-          <View style={styles.middleCenter}>
+          {/* 우측 인라인: 단가 ¥ 표시 + 수량 stepper (한 줄에 나란히) */}
+          <View style={styles.middleRightRow}>
+            <Text style={styles.unitPriceTextInline}>¥ {card.unitPrice.toFixed(2)}</Text>
             <View style={styles.qtyRow}>
               <TouchableOpacity style={styles.qtyBtn} onPress={() => changeQty(card.id, -1)}>
                 <Icon name="remove" size={14} color={COLORS.white} />
@@ -1976,42 +2045,10 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
                 <Icon name="add" size={14} color={COLORS.white} />
               </TouchableOpacity>
             </View>
-            <View style={styles.unitPriceBox}>
-              <Text style={styles.yenMark}>¥</Text>
-              <TextInput
-                style={styles.unitPriceInput}
-                keyboardType="numeric"
-                value={String(card.unitPrice)}
-                onChangeText={(t) => updateUnitPrice(card.id, t)}
-              />
-            </View>
-          </View>
-
-          {/* Right: subtotal (상품금액) */}
-          <View style={styles.middleRight}>
-            <Text style={styles.rightLabel}>{t('cartOrder.card.productAmount')}</Text>
-            <Text style={styles.rightValue}>¥{subtotal.toFixed(2)}</Text>
           </View>
         </View>
-
-        {/* BOTTOM — 라벨 / 삭제 */}
-        <View style={styles.cardBottom}>
-          <View style={styles.bottomActionsCompact}>
-            <TouchableOpacity
-              style={styles.labelRowBtn}
-              onPress={() => openLabelModal(card.id)}
-            >
-              <Text style={styles.labelRowText}>{t('cartOrder.card.label')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.deleteRowBtn}
-              onPress={() => handleDeleteOne(card.id)}
-            >
-              <Icon name="trash-outline" size={12} color={COLORS.primary} />
-              <Text style={styles.deleteRowText}>{t('cartOrder.card.delete')}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        {/* 라벨/삭제 버튼은 사용자 요청으로 제거됨. 라벨 설정은 별도 모달에서,
+            삭제는 다중 선택 후 하단 툴바의 휴지통 액션으로 수행 가능. */}
       </TouchableOpacity>
     );
   };
@@ -3799,14 +3836,18 @@ const styles = StyleSheet.create({
   // MIDDLE
   cardMiddle: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // 카드 펼침 시 productInfo 의 높이가 커져도 이미지 / 우측 가격·수량 영역이
+    // 가운데로 내려오지 않게 상단 정렬. 펼침 상세는 productInfo 안에서만
+    // 아래쪽으로 늘어나고 다른 컬럼은 카드 상단에 고정.
+    alignItems: 'flex-start',
     paddingHorizontal: 12,
     paddingVertical: 14,
   },
   middleLeft: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
+    // 이미지가 productInfo 의 첫 줄(옵션명) 과 같은 라인에 고정되도록 상단 정렬.
+    alignItems: 'flex-start',
   },
   productImagePressable: {
     marginRight: 10,
@@ -3914,6 +3955,37 @@ const styles = StyleSheet.create({
     width: 84,
     alignItems: 'flex-end',
     paddingLeft: 4,
+  },
+  // 카드 우측 인라인 영역 — 단가 ¥ 텍스트 + 수량 stepper 를 한 줄에 나란히.
+  // 사용자 디자인: " ¥ 1.78   [−] 2 [+] " 형태.
+  middleRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingLeft: 4,
+  },
+  unitPriceTextInline: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.primary,
+    fontWeight: '600',
+  },
+  // 카드의 옵션 드롭다운 펼침 시 표시되는 상세 영역.
+  // 메타칩 아래에 짧은 키/값 라인들을 쌓아 보여줌.
+  cardExpandedDetails: {
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[100],
+    gap: 2,
+  },
+  cardExpandedLabel: {
+    fontSize: 10,
+    color: COLORS.gray[500],
+    fontWeight: '600',
+  },
+  cardExpandedValue: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.text.primary,
   },
   rightLabel: {
     fontSize: 10,

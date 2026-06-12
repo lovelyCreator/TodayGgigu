@@ -2658,6 +2658,9 @@ Supports credit and check cards from various banks for recharging and payments.`
         remarksPlaceholder: 'Enter remarks',
         label: 'Label',
         delete: 'Delete',
+        productName: 'Product',
+        options: 'Options',
+        specs: 'Details',
       },
       summary: { totalQty: 'Total Qty', total: 'Total', order: 'Order Now', selectAll: 'Select All', deselectAll: 'Deselect' },
       extraServiceBar: {
@@ -5448,6 +5451,9 @@ Supports credit and check cards from various banks for recharging and payments.`
         remarksPlaceholder: '请输入备注',
         label: '标签',
         delete: '删除',
+        productName: '商品名',
+        options: '选项',
+        specs: '详情',
       },
       summary: { totalQty: '总数量', total: '合计', order: '立即下单', selectAll: '全选', deselectAll: '取消选择' },
       extraServiceBar: {
@@ -8303,6 +8309,9 @@ Supports credit and check cards from various banks for recharging and payments.`
         remarksPlaceholder: '비고 입력',
         label: '라벨',
         delete: '삭제',
+        productName: '상품명',
+        options: '옵션',
+        specs: '상세',
       },
       summary: { totalQty: '총수량', total: '합계', order: '바로주문', selectAll: '전체 선택', deselectAll: '선택취소' },
       extraServiceBar: {

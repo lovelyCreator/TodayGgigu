@@ -13,6 +13,7 @@ import {
   Platform,
   Animated,
   InteractionManager,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -48,7 +49,16 @@ import { useAddToCartMutation } from '../../hooks/useAddToCartMutation';
 import { AddToCartRequest, cartApi } from '../../services/cartApi';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useToast } from '../../context/ToastContext';
-import { formatPriceKRW, getLocalizedText } from '../../utils/i18nHelpers';
+import { getLocalizedText } from '../../utils/i18nHelpers';
+
+// 상품상세에서는 중국 위안(¥) 단위로 표기 — 가격값 자체는 위안 기준이며
+// 단위 기호만 ₩ → ¥ 로 교체. 천단위 콤마 포맷, 소수점 2자리 유지.
+const formatPriceCNY = (price: number): string => {
+  const n = Number(price) || 0;
+  const [intPart, decPart] = n.toFixed(2).split('.');
+  const withComma = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `¥${withComma}.${decPart}`;
+};
 import {
   isTaobaoPlatform,
   normalizeProductImageUrl,
@@ -632,10 +642,35 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
   }, [productPlatformKey, t]);
 
   const handleOpenPlatformCategory = useCallback(() => {
+    // 1688 플랫폼인 경우 — 외부 1688 상품 상세 페이지를 브라우저로 연다.
+    // offerId 우선순위: product.offerId → product.id → product.externalId →
+    // route 의 productId → route 의 offerId.
+    // 숫자만 추출하여 1688 의 offer URL 패턴에 정확히 맞춘다 (offerId 는
+    // 항상 숫자 ID).
+    if (productPlatformKey === '1688') {
+      const rawId =
+        (product as any)?.offerId ??
+        (product as any)?.id ??
+        (product as any)?.externalId ??
+        productId ??
+        offerId ??
+        '';
+      const numericId = String(rawId).replace(/[^0-9]/g, '');
+      if (numericId) {
+        const url = `https://detail.1688.com/offer/${numericId}.html?offerId=${numericId}`;
+        Linking.openURL(url).catch(() => {
+          // 브라우저 오픈 실패 시 fallback — 기존 카테고리 이동으로 대체.
+          const companyTab = productPlatformToCompanyTab(productPlatformKey);
+          setSelectedPlatform(productPlatformKey);
+          navigation.navigate('Category', { initialCompany: companyTab });
+        });
+        return;
+      }
+    }
     const companyTab = productPlatformToCompanyTab(productPlatformKey);
     setSelectedPlatform(productPlatformKey);
     navigation.navigate('Category', { initialCompany: companyTab });
-  }, [navigation, productPlatformKey, setSelectedPlatform]);
+  }, [navigation, offerId, product, productId, productPlatformKey, setSelectedPlatform]);
 
   // Live stats data - defined before useEffect that uses it
   const liveStats = [
@@ -1755,7 +1790,7 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
               {(item as any).name}
             </Text>
             <Text style={styles.simpleTaobaoPrice}>
-              {formatPriceKRW(Number((item as any).price || 0))}
+              {formatPriceCNY(Number((item as any).price || 0))}
             </Text>
           </View>
         </TouchableOpacity>
@@ -1833,7 +1868,7 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
     if (!product?.name) return '';
     return t('product.shareMessage')
       .replace('{productName}', product.name)
-      .replace('{price}', formatPriceKRW(product.price || 0));
+      .replace('{price}', formatPriceCNY(product.price || 0));
   }, [product?.name, product?.price, t]);
 
   // Early return — MUST be after ALL hooks.
@@ -2828,9 +2863,9 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
     const { price, originalPrice } = getSelectedVariationPrice;
     return (
       <View style={styles.priceRow}>
-        <Text style={styles.pricePrimary}>{formatPriceKRW(price)}</Text>
+        <Text style={styles.pricePrimary}>{formatPriceCNY(price)}</Text>
         {originalPrice > 0 && originalPrice > price && (
-          <Text style={styles.originalPriceRight}>{formatPriceKRW(originalPrice)}</Text>
+          <Text style={styles.originalPriceRight}>{formatPriceCNY(originalPrice)}</Text>
         )}
       </View>
     );
@@ -3345,7 +3380,7 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
                         {(item as any).name}
                       </Text>
                       <Text style={styles.simpleTaobaoPrice}>
-                        ₩{Number((item as any).price || 0).toLocaleString()}
+                        {formatPriceCNY(Number((item as any).price || 0))}
                       </Text>
                     </View>
                   </TouchableOpacity>

@@ -428,7 +428,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         readAt: string;
       }) => {
         if (data.inquiryId === inquiryId) {
-          showToast(`${data.readByName} read your messages`, 'info');
+          // i18n 적용 — inquiry.readMessages 의 {name} 자리에 readByName 대입.
+          // 사용자 요청: 배경색을 프로젝트 붉은색으로 → 'error' 타입 사용
+          // (Toast 컴포넌트의 error 케이스가 COLORS.red 로 매핑됨).
+          showToast(
+            t('inquiry.readMessages').replace('{name}', data.readByName || ''),
+            'error',
+          );
         }
       };
 
