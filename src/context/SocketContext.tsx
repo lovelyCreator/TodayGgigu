@@ -10,6 +10,7 @@ import {
 import { useAuth } from './AuthContext';
 import { getStoredToken } from '../services/authApi';
 import { inquiryApi } from '../services/inquiryApi';
+import { isInquiryConfirmedSync, prewarmVisitedInquiries } from '../utils/visitedInquiries';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../constants';
 
@@ -796,23 +797,52 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
   }, [isAuthenticated, userId, connect, disconnect, removeListeners]);
 
-  // ─── REST 폴백: 인증 직후 초기 unread count 보강 ─────────────────
+  // ─── 인증 직후 초기 미확인 카운트 계산 (앱 첫 기동 시 BottomBar 배지) ──
   //
-  // BottomBar 의 메시지 아이콘 배지는 socket 라운드트립 완료 후에만 값을 얻을
-  // 수 있어 mount 직후 잠시 안 보인다. REST 로 한 번 받아 즉시 표시하고,
-  // 이후 socket 이벤트가 자동으로 갱신한다.
+  // MessageScreen 의 미확인 표시 규칙과 동일한 기준으로 카운트한다:
+  //   /inquiries/orders 의 각 row 에서
+  //     visitedInquiries 캐시의 visitedAt < row.lastMessageAt
+  //     AND status ∈ {open, pending, unconfirmed}
+  //   인 항목 수.
+  //
+  // MessageScreen 이 아직 mount 되지 않은 시점에도 BottomBar 배지가 정확히
+  // 표시되도록 SocketContext 가 직접 계산해 setUnreadCount 한다. 그 뒤
+  // MessageScreen 이 mount 되면 setUnreadCountOverride 가 동일 규칙으로
+  // 다시 push 하므로 값이 일관되게 유지된다.
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
       if (!isAuthenticated || !userId) return;
       try {
-        const orderRes = await inquiryApi.getUnreadCount().catch(() => null);
+        // 1) visited 캐시 prewarm — isInquiryConfirmedSync 가 sync 조회하려면 필요.
+        await prewarmVisitedInquiries();
         if (cancelled) return;
-        if (orderRes && orderRes.success && orderRes.data && typeof orderRes.data.count === 'number') {
-          setUnreadCount(orderRes.data.count);
+
+        // 2) /inquiries/orders 응답으로 정확한 미확인 카드 수 계산.
+        const ordersRes = await inquiryApi.getOrderInquiries().catch(() => null);
+        if (cancelled) return;
+        if (ordersRes && ordersRes.success && Array.isArray(ordersRes.data?.orders)) {
+          const rows = ordersRes.data!.orders;
+          const unconfirmed = rows.reduce((acc: number, row: any) => {
+            const inquiryId = String(row?.inquiryId || '');
+            if (!inquiryId) return acc;
+            // 방문 기록의 visitedAt 이 lastMessageAt 이상이면 confirmed → 제외.
+            if (isInquiryConfirmedSync(inquiryId, row?.lastMessageAt)) return acc;
+            const s = String(row?.status || '').toLowerCase();
+            const isUnconfirmed = s === 'open' || s === 'pending' || s === 'unconfirmed';
+            return isUnconfirmed ? acc + 1 : acc;
+          }, 0);
+          setUnreadCount(unconfirmed);
           return;
         }
-        // fallback: plural endpoint (returns totalUnread)
+
+        // 3) Fallback — 위 endpoint 가 실패하면 단순 합계 endpoint 사용.
+        const countRes = await inquiryApi.getUnreadCount().catch(() => null);
+        if (cancelled) return;
+        if (countRes && countRes.success && countRes.data && typeof countRes.data.count === 'number') {
+          setUnreadCount(countRes.data.count);
+          return;
+        }
         const pluralRes = await inquiryApi.getUnreadCounts().catch(() => null);
         if (cancelled) return;
         if (pluralRes && pluralRes.success && pluralRes.data && typeof pluralRes.data.totalUnread === 'number') {

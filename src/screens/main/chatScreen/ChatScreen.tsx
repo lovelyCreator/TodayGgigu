@@ -38,6 +38,7 @@ import {
   orderNoteLinesToChatMessages,
 } from '../../../utils/messageInquiryMappers';
 import { stripChatHtml } from '../../../utils/stripChatHtml';
+import { parseChatBubbleContent } from '../../../utils/parseChatBubbleContent';
 
 type ChatRouteProp = RouteProp<RootStackParamList, 'Chat'>;
 type ChatScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Chat'>;
@@ -599,12 +600,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       return;
     }
 
-    if (attachments.length > 0) {
-      // 첨부파일은 orders-proxy 의 orderNoteLines 가 처리하지 않음.
-      // 현재 사용자 지시로 다른 endpoint 사용 불가 → 안내만 표시.
-      console.warn('[ChatScreen] attachments not supported via orders-proxy PATCH (ignored)');
-    }
-
     const username =
       (user as any)?.user_id ||
       (user as any)?.userInfo?.userName ||
@@ -612,10 +607,53 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       user?.email ||
       'user';
 
+    // ─── 1) 이미지 첨부 처리 ───────────────────────────────────────
+    //
+    // 백엔드는 orderNoteLines.value 안의 `<img src="...">` 마크업으로 이미지를
+    // 표시한다. 따라서 다음 흐름으로 처리:
+    //   a) POST /v1/orders/upload-images?lang=ko  (FormData: kind, images)
+    //   b) 응답의 urls[] 를 받아 `<img src="URL">` 태그로 변환
+    //   c) 텍스트 메시지 뒤에 이어붙여 한 노트로 PATCH /api/orders-proxy 전송
+    //
+    // 사용자가 이미지만 보내는 경우엔 텍스트가 공백이므로 마크업만 들어간다.
+    let composedMessage = messageText;
+    if (attachments.length > 0) {
+      try {
+        const filesToUpload = attachments.map((a, idx) => ({
+          uri: a.uri,
+          fileName: a.name || `image_${Date.now()}_${idx}.jpg`,
+          type: a.type || 'image/jpeg',
+        }));
+        const uploadRes = await orderApi.uploadOrderImages(
+          'negotiationContentImages',
+          filesToUpload,
+          locale,
+        );
+        if (uploadRes.success && Array.isArray(uploadRes.data?.urls) && uploadRes.data!.urls.length > 0) {
+          const imgTags = uploadRes.data!.urls
+            .map((u) => `<img src="${String(u).replace(/"/g, '&quot;')}">`)
+            .join('');
+          const base = messageText.trim();
+          // 텍스트 + 이미지 마크업 결합. 공백만 있는 placeholder 는 제거.
+          composedMessage = base ? `${base}${imgTags}` : imgTags;
+        } else {
+          console.warn('[ChatScreen] uploadOrderImages failed:', uploadRes.error);
+          setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessageId));
+          showToast(uploadRes.error || t('inquiry.failedToSend'), 'error');
+          return;
+        }
+      } catch (uploadErr) {
+        console.error('[ChatScreen] uploadOrderImages threw:', uploadErr);
+        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessageId));
+        showToast(t('inquiry.failedToSendRetry'), 'error');
+        return;
+      }
+    }
+
     try {
       const proxyRes = await orderApi.appendOrderNoteLine(
         String(orderContextId),
-        messageText,
+        composedMessage,
         String(username),
       );
       console.log('[ChatScreen] orders-proxy appendOrderNoteLine:',
@@ -971,14 +1009,44 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
               </View>
             )}
             {(() => {
-              // admin/web 리치 에디터가 보내는 HTML 마크업(<div><br></div> 등) 을
-              // 표시 직전에 제거. 일반 텍스트/숫자만 보낸 경우엔 원문 그대로 유지.
-              const cleaned = stripChatHtml(message.text);
-              return cleaned ? (
-                <Text style={isUser ? styles.userMessageText : styles.adminMessageText}>
-                  {cleaned}
-                </Text>
-              ) : null;
+              // 노트 value 안의 `<img src="...">` 와 일반 텍스트를 분해해 인라인
+              // 으로 렌더. admin/web 리치 에디터의 div/br 같은 블록 태그는
+              // 자동으로 제거되고 줄바꿈으로 변환된다.
+              const segments = parseChatBubbleContent(message.text);
+              if (segments.length === 0) {
+                // fallback: 마크업이 없으면 기존 stripChatHtml 흐름.
+                const cleaned = stripChatHtml(message.text);
+                return cleaned ? (
+                  <Text style={isUser ? styles.userMessageText : styles.adminMessageText}>
+                    {cleaned}
+                  </Text>
+                ) : null;
+              }
+              return (
+                <View>
+                  {segments.map((seg, segIdx) => {
+                    if (seg.type === 'text') {
+                      return (
+                        <Text
+                          key={`seg-text-${segIdx}`}
+                          style={isUser ? styles.userMessageText : styles.adminMessageText}
+                        >
+                          {seg.value}
+                        </Text>
+                      );
+                    }
+                    // 이미지 세그먼트 — 첨부 이미지와 동일한 스타일 적용.
+                    return (
+                      <Image
+                        key={`seg-img-${segIdx}`}
+                        source={{ uri: seg.url }}
+                        style={{ width: 180, height: 180, borderRadius: 8, marginTop: segIdx > 0 ? 6 : 0 }}
+                        resizeMode="cover"
+                      />
+                    );
+                  })}
+                </View>
+              );
             })()}
           </View>
           {isUser && (

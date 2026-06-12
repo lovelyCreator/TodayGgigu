@@ -31,7 +31,7 @@ import CachedImage from '../../components/CachedImage';
 import { SkeletonBlock } from '../../components/Skeleton';
 import {
   markInquiryVisited,
-  isInquiryVisitedSync,
+  isInquiryConfirmedSync,
   prewarmVisitedInquiries,
 } from '../../utils/visitedInquiries';
 import {
@@ -199,8 +199,10 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   // 자동으로 다시 세어 즉시 BottomBar 에 반영된다.
   useEffect(() => {
     const orderUnconfirmed = orderInquiries.reduce((acc, item) => {
-      // visited 캐시가 있으면 confirmed 로 간주 → 제외
-      if (isInquiryVisitedSync(item.inquiryId)) return acc;
+      // 방문 기록의 visitedAt 이 카드의 lastMessageAt 이상이면 confirmed.
+      // 사용자가 본 뒤 admin 이 새 메시지를 보내면 lastMessageAt > visitedAt
+      // 이 되어 다시 unconfirmed 로 카운트된다.
+      if (isInquiryConfirmedSync(item.inquiryId, item.lastMessageAt)) return acc;
       const s = String(item.status || '').toLowerCase();
       const isUnconfirmed = s === 'open' || s === 'pending' || s === 'unconfirmed';
       return isUnconfirmed ? acc + 1 : acc;
@@ -565,11 +567,11 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   };
 
   const renderOrderItem = ({ item }: { item: OrderInquiryListItem }) => {
-    // 방문 기록이 있으면 backend 응답의 status 와 무관하게 "확인완료" 로 표시.
-    // unconfirmed/open/pending 등 어떤 backend status 가 와도 사용자 입장에선
-    // 이미 본 메시지이므로 confirmed 로 일관되게 보여 준다.
-    const visited = isInquiryVisitedSync(item.inquiryId);
-    const displayStatus = visited ? 'confirmed' : item.status;
+    // 방문 기록의 visitedAt 이 카드의 lastMessageAt 이상이면 "확인완료" 로 표시.
+    // 사용자가 본 뒤 admin 이 새 메시지를 보내면 lastMessageAt 이 visitedAt
+    // 보다 나중이 되어 다시 미확인으로 돌아간다 (backend status 와 무관).
+    const confirmed = isInquiryConfirmedSync(item.inquiryId, item.lastMessageAt);
+    const displayStatus = confirmed ? 'confirmed' : item.status;
 
     return (
     <TouchableOpacity

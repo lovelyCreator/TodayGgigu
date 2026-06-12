@@ -1397,12 +1397,22 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
 
     const searchQuery = (filters.orderNumber || orderSearchText || '').trim();
 
+    // 기간선택 chip 으로 시작/끝 날짜 중 하나라도 사용자가 지정했으면
+    // `datePeriod` (last_6_months 같은 프리셋) 를 보내지 않는다. 둘 다 보내면
+    // backend 가 프리셋 윈도우와 periodFrom/To 를 충돌 처리해 결과가 엉뚱하게
+    // 나오는 경우가 있다. 사용자 선택이 없을 때만 기본 6 개월 윈도우 적용.
+    const hasUserPeriod = !!(selectedStartDate || selectedEndDate);
+
     return getOrdersRef.current({
       page: 1,
-      pageSize: 50,
+      // 사용자가 기간을 좁게 잡았어도 client-side 필터에서 안전하게 거를 수
+      // 있도록 한 번에 충분히 넓게 받는다. backend 가 pagesize 최대 100 까지
+      // 만 허용하므로 (200 은 "Invalid value" 거절) — 100 이 상한.
+      // ProfileScreen / OEMSurveyScreen / UnitSurveyScreen 모두 100 사용.
+      pageSize: hasUserPeriod ? 100 : 50,
       lang: mapLocaleToOrdersLang(locale),
       search: searchQuery || undefined,
-      datePeriod: 'last_6_months',
+      ...(hasUserPeriod ? {} : { datePeriod: 'last_6_months' as const }),
       platform: filterPlatform || undefined,
       viewFilter: 'all',
       // Status filters are applied client-side so API codes like P_PENDING still match BUY_PAY_WAIT
@@ -2118,6 +2128,35 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
           order.orderNumber?.toLowerCase().includes(q),
         );
       }
+      // 기간 필터 — 백엔드가 periodFrom/To 를 무시하거나 datePeriod 와 충돌
+      // 처리하는 경우에도 화면엔 사용자가 선택한 범위만 보이도록 client-side
+      // 에서 한 번 더 필터링한다. 시간 단위 비교를 위해 시작일은 00:00,
+      // 끝일은 23:59:59.999 로 확장 → 그 날 안에 생성된 주문은 모두 포함.
+      if (selectedStartDate || selectedEndDate) {
+        const startMs = selectedStartDate
+          ? new Date(
+              selectedStartDate.getFullYear(),
+              selectedStartDate.getMonth(),
+              selectedStartDate.getDate(),
+              0, 0, 0, 0,
+            ).getTime()
+          : -Infinity;
+        const endMs = selectedEndDate
+          ? new Date(
+              selectedEndDate.getFullYear(),
+              selectedEndDate.getMonth(),
+              selectedEndDate.getDate(),
+              23, 59, 59, 999,
+            ).getTime()
+          : Infinity;
+        result = result.filter((order) => {
+          const raw = (order as any).createdAt;
+          if (!raw) return false;
+          const t = new Date(raw).getTime();
+          if (!Number.isFinite(t)) return false;
+          return t >= startMs && t <= endMs;
+        });
+      }
       if (filterPlatform) {
         result = result.filter(order =>
           order.items?.some(item => {
@@ -2216,6 +2255,9 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       filterPlatform,
       activeBusinessDomain,
       errorSubFilter,
+      // 기간 필터 — 사용자가 chip 에서 날짜를 바꾸면 즉시 client-side 재필터링.
+      selectedStartDate,
+      selectedEndDate,
     ],
   );
 

@@ -1063,7 +1063,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
               handleCardAddToCart(item);
             }}
           >
-            <Icon name="cart-outline" size={16} color={COLORS.text.primary} />
+            <Icon name="cart-outline" size={16} color={COLORS.red} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.cardActionBtn}
@@ -1075,9 +1075,9 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
             disabled={imageSearchLoading}
           >
             {imageSearchLoading ? (
-              <ActivityIndicator size="small" color={COLORS.text.primary} />
+              <ActivityIndicator size="small" color={COLORS.red} />
             ) : (
-              <Icon name="search" size={16} color={COLORS.text.primary} />
+              <Icon name="search" size={16} color={COLORS.red} />
             )}
           </TouchableOpacity>
           <TouchableOpacity
@@ -1088,7 +1088,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
               handleCardEdit(item);
             }}
           >
-            <Icon name="create-outline" size={16} color={COLORS.text.primary} />
+            <Icon name="create-outline" size={16} color={COLORS.red} />
           </TouchableOpacity>
         </View>
         <View
@@ -2219,33 +2219,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // 카드의 우상단(이미지 오른쪽 옆 공간) 에 3개 액션 아이콘을 한 행으로 띄움.
-  // grid 모드에서는 카드가 column flex 라 그냥 두면 이미지 아래로 가버리므로
-  // position: 'absolute' 로 top-right 에 떠 있게 한다.
+  // 카드의 오른쪽 끝에 3개 액션 아이콘을 세로로 쌓아 표시한다.
+  // 이전엔 가로 배치(row)였는데 카드 너비가 좁은 모바일에서 제목 텍스트가
+  // 길어지면 아이콘을 가려 탭이 어려웠음 → 세로 배치(column)로 변경.
+  // top + bottom 을 모두 지정해 카드 상하 끝에서 적당히 안쪽으로 들어오게
+  // 하고, 세 아이콘을 space-between 으로 분산. 이로써 첫 아이콘은 상단,
+  // 세 번째(편집) 아이콘은 하단에서 SPACING.sm 만큼 떨어진 위치에 고정된다.
   cardActions: {
     position: 'absolute',
     top: SPACING.sm,
+    bottom: SPACING.sm,
     right: SPACING.sm,
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
     zIndex: 2,
   },
   cardActionBtn: {
-    width: 22,
-    height: 22,
+    width: 26,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
   productInfo: {
     flex: 1,
     marginLeft: SPACING.sm,
+    // 우측 아이콘 컬럼 (≈26 + SPACING.sm) 만큼 padding 을 두어 제목
+    // 텍스트가 아이콘과 겹치지 않게 한다. 약간의 여유 간격도 포함.
+    paddingRight: 38,
     justifyContent: 'center',
   },
   productInfoGrid: {
     marginLeft: 0,
     marginTop: SPACING.xs,
     width: '100%',
+    // grid 모드에서도 우측 아이콘 컬럼을 피하도록 동일한 padding 유지.
+    paddingRight: 38,
   },
   productName: {
     fontSize: FONTS.sizes.sm,
