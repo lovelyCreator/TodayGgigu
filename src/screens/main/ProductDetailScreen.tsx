@@ -14,6 +14,7 @@ import {
   Animated,
   InteractionManager,
   Linking,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -1755,6 +1756,46 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
     return { price: product.price || 0, originalPrice: product.originalPrice || product.price || 0 };
   }, [product, selectedVariations, routeSource, selectedPlatform]);
 
+  // 수량 컨트롤 옆에 표시할 재고 수 — 옵션이 선택된 경우 해당 SKU 의
+  // amountOnSale, 아니면 product.stockCount 를 사용. 999999 같은 sentinel
+  // (amountOnSale 이 unknown 일 때 buildAddToCartRequest 가 채우는 값) 은 숨김.
+  // MUST be before early return — hooks 순서 일관성을 위해 다른 useMemo 들과
+  // 같이 여기 둔다.
+  const displayStock = useMemo(() => {
+    if (!product) return null;
+    const productSkuInfos = (product as any).productSkuInfos || [];
+    let skuStock: number | null = null;
+    if (productSkuInfos.length > 0 && Object.keys(selectedVariations).length > 0) {
+      const matched = productSkuInfos.find((sku: any) => {
+        const skuAttributes = sku.skuAttributes || [];
+        return Object.entries(selectedVariations).every(([variationName, selectedValue]) => {
+          return skuAttributes.some((attr: any) => {
+            const attrName = (attr.attributeNameTrans || attr.attributeName || '').toLowerCase();
+            const attrValue = attr.valueTrans || attr.value || '';
+            return attrName === variationName.toLowerCase() && attrValue === selectedValue;
+          });
+        });
+      });
+      if (matched) {
+        const v = Number(matched.amountOnSale);
+        if (Number.isFinite(v)) skuStock = v;
+      }
+    }
+    const fallback = Number((product as any).stockCount);
+    const n = skuStock ?? (Number.isFinite(fallback) ? fallback : null);
+    if (n == null) return null;
+    if (n >= 999999) return null;
+    return n;
+  }, [product, selectedVariations]);
+
+  // 옵션 변경 등으로 재고가 줄어들 경우, 현재 수량이 새 재고를 초과하면
+  // 재고 값으로 끌어내린다. (displayStock 정의 직후에 두어 TDZ 회피.)
+  useEffect(() => {
+    if (typeof displayStock === 'number' && displayStock > 0) {
+      setQuantity(prev => (prev > displayStock ? displayStock : prev));
+    }
+  }, [displayStock]);
+
   const handleRelatedProductPress = useCallback((item: Product | any) => {
     const productIdToUse = (item as any).offerId || item.id;
     const itemSource =
@@ -1936,11 +1977,36 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
 
   const handleQuantityChange = (increment: boolean) => {
     const minOrderQuantity = (product as any)?.minOrderQuantity || 1;
+    // 재고 상한 — displayStock 이 null 이면 무제한(=sentinel 또는 미상) 으로 본다.
+    const maxStock =
+      typeof displayStock === 'number' && displayStock > 0 ? displayStock : Infinity;
     if (increment) {
-      setQuantity(prev => prev + 1);
+      setQuantity(prev => Math.min(maxStock, prev + 1));
     } else {
       setQuantity(prev => Math.max(minOrderQuantity, prev - 1));
     }
+  };
+
+  // TextInput 으로 직접 타이핑된 수량을 처리. 숫자가 아닌 문자는 제거하고,
+  // 재고 상한을 넘으면 재고값으로 클램프. 빈 문자열은 0 으로 두고 onBlur 에서
+  // 최소 수량으로 보정.
+  const handleQuantityInput = (text: string) => {
+    const digits = text.replace(/[^0-9]/g, '');
+    if (digits === '') {
+      setQuantity(0);
+      return;
+    }
+    const n = parseInt(digits, 10);
+    if (!Number.isFinite(n)) return;
+    const maxStock =
+      typeof displayStock === 'number' && displayStock > 0 ? displayStock : Infinity;
+    setQuantity(Math.min(maxStock, n));
+  };
+
+  // 포커스 해제 시 최소 주문 수량 이하로 떨어졌으면 끌어올린다.
+  const handleQuantityBlur = () => {
+    const minOrderQuantity = (product as any)?.minOrderQuantity || 1;
+    setQuantity(prev => (prev < minOrderQuantity ? minOrderQuantity : prev));
   };
 
   const buildAddToCartRequest = (): AddToCartRequest => {
@@ -3474,23 +3540,43 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
     <View style={[styles.bottomBar, { paddingBottom: SPACING.lg + insets.bottom }]}>
       {/* Top row with quantity and cart icon */}
       <View style={styles.topActionRow}>
-        {/* Quantity Selector */}
-        <View style={styles.quantitySelector}>
-          <TouchableOpacity 
-            style={styles.quantityButton}
-            onPress={() => handleQuantityChange(false)}
-          >
-            <MinusIcon width={18} height={18} color={COLORS.text.primary} />
-          </TouchableOpacity>
-          <Text style={styles.quantityText}>{quantity}</Text>
-          <TouchableOpacity 
-            style={styles.quantityButton}
-            onPress={() => handleQuantityChange(true)}
-          >
-            <PlusIcon width={18} height={18} color={COLORS.text.primary} />
-          </TouchableOpacity>
+        {/* Quantity Selector + 재고 표시 (가로 묶음) */}
+        <View style={styles.quantityWithStock}>
+          <View style={styles.quantitySelector}>
+            <TouchableOpacity
+              style={styles.quantityButton}
+              onPress={() => handleQuantityChange(false)}
+            >
+              <MinusIcon width={18} height={18} color={COLORS.text.primary} />
+            </TouchableOpacity>
+            <TextInput
+              style={styles.quantityText}
+              value={String(quantity)}
+              onChangeText={handleQuantityInput}
+              onBlur={handleQuantityBlur}
+              keyboardType="number-pad"
+              returnKeyType="done"
+              selectTextOnFocus
+              maxLength={7}
+            />
+            <TouchableOpacity
+              style={styles.quantityButton}
+              onPress={() => handleQuantityChange(true)}
+            >
+              <PlusIcon width={18} height={18} color={COLORS.text.primary} />
+            </TouchableOpacity>
+          </View>
+          {/* 옵션 선택 시 해당 SKU 재고, 아니면 product 전체 stockCount.
+              999999 sentinel 은 숨김. */}
+          {displayStock != null && (
+            <Text style={styles.quantityStockText}>
+              {locale === 'ko' ? `재고 ${displayStock.toLocaleString()}`
+                : locale === 'zh' ? `库存 ${displayStock.toLocaleString()}`
+                : `Stock ${displayStock.toLocaleString()}`}
+            </Text>
+          )}
         </View>
-        
+
         {/* Camera Button */}
       </View>
       
@@ -4693,6 +4779,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.xs,
     paddingVertical: 2,
   },
+  // 수량 컨트롤 + 재고 라벨을 한 줄로 묶는 wrapper.
+  quantityWithStock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  // 재고 표시 — 수량 컨트롤 오른쪽 옆.
+  quantityStockText: {
+    marginLeft: SPACING.sm,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text.secondary,
+    fontWeight: '500',
+  },
   quantityButton: {
     width: 36,
     height: 36,
@@ -4708,7 +4806,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.text.primary,
     paddingHorizontal: SPACING.lg,
-    minWidth: 40,
+    // TextInput 의 기본 vertical padding 을 제거하여 +/- 버튼 행 높이와 정렬.
+    paddingVertical: 0,
+    minWidth: 56,
     textAlign: 'center',
   },
   supportAgentButton: {
