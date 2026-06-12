@@ -100,8 +100,8 @@ android {
         applicationId "com.todayggigu.kr"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.0.2"
         resConfigs "ko", "en", "zh"
     }
     signingConfigs {
@@ -144,9 +144,17 @@ android {
             // Additional optimizations
             zipAlignEnabled true
             debuggable false
-            // Remove debug symbols
+            // 네이티브 디버그 심볼을 AAB 에 포함 — Play Console 이 비정상 종료
+            // / ANR 을 심볼화하여 분석할 수 있게 한다. 이전엔 'NONE' 이었고
+            // 그 때문에 "디버그 기호가 업로드되지 않았다" 경고가 발생했음.
+            //
+            //   FULL    : 완전한 심볼 (.symbols.zip 에 포함). 디버깅에 가장 유용.
+            //   SYMBOL_TABLE : 함수명만 포함, 라인 정보 제외 — 더 작음.
+            //
+            // App Bundle 자체에 임베드되는 심볼은 사용자 기기에는 다운로드되지
+            // 않으므로 (Play 가 별도로 저장) 최종 APK 크기에는 영향 없음.
             ndk {
-                debugSymbolLevel 'NONE'
+                debugSymbolLevel 'FULL'
             }
             // Disable lint for release to avoid file locking issues
             lintOptions {
