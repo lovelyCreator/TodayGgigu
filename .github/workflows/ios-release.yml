@@ -1,0 +1,78 @@
+name: iOS Release to App Store
+
+# Takes a build that is already on App Store Connect (uploaded by the
+# "iOS Build & TestFlight" workflow), attaches it to an App Store version,
+# sets the "What's New" notes, submits it for review, and auto-releases it
+# once Apple approves. Pure App Store Connect API work via Fastlane — no Xcode,
+# so it runs on a cheap Linux runner.
+#
+# NOTE: Apple does not allow a new submission while another version is still in
+# review. Use this after your current version has been approved/released.
+
+on:
+  workflow_dispatch:
+    inputs:
+      whats_new:
+        description: "What's New (release notes shown on the App Store)."
+        type: string
+        required: true
+        default: "Bug fixes and performance improvements."
+      version:
+        description: "App Store version (e.g. 1.0.1). Blank = the latest build's version."
+        type: string
+        default: ""
+      build_number:
+        description: "Build number to submit. Blank = the latest uploaded build."
+        type: string
+        default: ""
+      languages:
+        description: "Comma-separated App Store locales for the notes (e.g. en-US,ko)."
+        type: string
+        default: "en-US"
+
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+
+      - name: Install fastlane
+        run: gem install fastlane -N
+
+      - name: Write release notes
+        env:
+          WHATS_NEW: ${{ inputs.whats_new }}
+          LANGUAGES: ${{ inputs.languages }}
+        run: |
+          IFS=',' read -ra LANGS <<< "$LANGUAGES"
+          for lang in "${LANGS[@]}"; do
+            lang_trimmed="$(echo "$lang" | xargs)"
+            [ -z "$lang_trimmed" ] && continue
+            mkdir -p "fastlane/metadata/$lang_trimmed"
+            printf '%s\n' "$WHATS_NEW" > "fastlane/metadata/$lang_trimmed/release_notes.txt"
+            echo "Release notes for $lang_trimmed:"
+            cat "fastlane/metadata/$lang_trimmed/release_notes.txt"
+          done
+
+      - name: Submit to App Store
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+          FASTLANE_VERSION_INPUT: ${{ inputs.version }}
+          FASTLANE_BUILD_INPUT: ${{ inputs.build_number }}
+        run: |
+          fastlane release \
+            version:"${FASTLANE_VERSION_INPUT}" \
+            build_number:"${FASTLANE_BUILD_INPUT}"

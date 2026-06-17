@@ -1,0 +1,54 @@
+default_platform(:ios)
+
+platform :ios do
+  # Submit a build that is already on App Store Connect (uploaded via the
+  # TestFlight workflow) to App Store review, and auto-release it the moment
+  # Apple approves. Release notes are read from fastlane/metadata/<locale>/
+  # release_notes.txt (the release workflow writes those from your input).
+  #
+  # Run by the `ios-release.yml` workflow — not meant to be run by hand.
+  desc "Submit the latest (or specified) build to the App Store; auto-release on approval"
+  lane :release do |options|
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_API_KEY_BASE64"),
+      is_key_content_base64: true,
+      in_house: false
+    )
+
+    version      = options[:version].to_s.strip
+    build_number = options[:build_number].to_s.strip
+
+    deliver(
+      api_key: api_key,
+      # Blank -> deliver uses the selected build's own version / the latest build.
+      app_version: version.empty? ? nil : version,
+      build_number: build_number.empty? ? nil : build_number,
+
+      submit_for_review: true,    # send to Apple review
+      automatic_release: true,    # go live automatically once approved
+      force: true,                # non-interactive (no HTML preview prompt)
+
+      # Keep whatever is already configured in App Store Connect (screenshots,
+      # description, keywords, age rating). Only the release notes are pushed,
+      # via the metadata folder the workflow populates.
+      skip_screenshots: true,
+      skip_metadata: false,
+      metadata_path: "./fastlane/metadata",
+
+      # Don't run precheck against metadata we don't manage here.
+      run_precheck_before_submit: false,
+      precheck_include_in_app_purchases: false,
+
+      # Auto-answer the submission questions (matches Info.plist:
+      # ITSAppUsesNonExemptEncryption = false, and no IDFA).
+      submission_information: {
+        add_id_info_uses_idfa: false,
+        export_compliance_uses_encryption: false
+      }
+    )
+
+    UI.success("Submitted to App Store review — will auto-release on approval.")
+  end
+end

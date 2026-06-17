@@ -4,7 +4,21 @@
       "Bash(awk '/^  en: \\\\{$/{start=NR} /^  \\\\},$/ && start{print start\"-\"NR; start=0}' src/i18n/translations.ts)",
       "Bash(awk '/^  zh: \\\\{$/{start=NR} /^  \\\\},$/ && start{print start\"-\"NR; start=0}' src/i18n/translations.ts)",
       "Bash(awk '/^  ko: \\\\{$/{start=NR} /^  \\\\}$/ && start{print start\"-\"NR; start=0}' src/i18n/translations.ts)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(D=/Users/imac/Documents/todaymall_ios *)",
+      "Read(//Users/imac/Documents/todaymall_ios/**)",
+      "Bash(node -e \"try{const e=require\\('./env.json'\\);console.log\\(Object.keys\\(e\\).join\\(', '\\)\\);}catch\\(err\\){console.log\\('읽기실패',err.message\\)}\")",
+      "Bash(python3 -)",
+      "Bash(plutil -lint ios/todayggigu.xcodeproj/project.pbxproj)",
+      "Bash(git check-ignore *)",
+      "Bash(plutil -lint ios/ExportOptions.plist)",
+      "Bash(echo \"=== 시스템 전체에서 .p8 / AuthKey 파일 ===\" *)",
+      "Read(//Users/imac/Documents/**)",
+      "Read(//Users/imac/Downloads/**)",
+      "Read(//Users/imac/.appstoreconnect/**)",
+      "Read(//Users/imac/**)",
+      "Bash(git commit -m 'iOS 앱스토어 클라우드 빌드\\(GitHub Actions\\) — com.todayggigu.kr, Team V4DYLGB2XA *)",
+      "Bash(gh repo *)"
     ]
   }
 }

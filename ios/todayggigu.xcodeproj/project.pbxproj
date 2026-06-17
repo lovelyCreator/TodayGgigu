@@ -302,7 +302,9 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.todayggigu.kr";
+				DEVELOPMENT_TEAM = V4DYLGB2XA;
+				CODE_SIGN_STYLE = Automatic;
 				PRODUCT_NAME = todayggigu;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -330,7 +332,9 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.todayggigu.kr";
+				DEVELOPMENT_TEAM = V4DYLGB2XA;
+				CODE_SIGN_STYLE = Automatic;
 				PRODUCT_NAME = todayggigu;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				SWIFT_VERSION = 5.0;

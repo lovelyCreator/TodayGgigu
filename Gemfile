@@ -14,3 +14,6 @@ gem 'bigdecimal'
 gem 'logger'
 gem 'benchmark'
 gem 'mutex_m'
+
+# iOS 앱스토어 빌드/업로드 CI (GitHub Actions)
+gem 'fastlane'

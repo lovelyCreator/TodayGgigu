@@ -1,0 +1,190 @@
+name: iOS Build & TestFlight
+
+# Builds the iOS app with Xcode 26 on GitHub's macOS runner and uploads it to
+# TestFlight via the App Store Connect API key — no local Mac / certificates.
+# Signing is fully automatic (-allowProvisioningUpdates + the API key).
+#
+# Trigger it manually from the Actions tab, or by pushing a tag like `ios-v1.0.0`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Upload the build to TestFlight after it succeeds"
+        type: boolean
+        default: true
+      version:
+        description: "Marketing version to embed (e.g. 1.0.1). Leave blank to keep the project's value."
+        type: string
+        default: ""
+  push:
+    tags:
+      - "ios-v*"
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      WORKSPACE: ios/todayggigu.xcworkspace
+      SCHEME: todayggigu
+      CONFIGURATION: Release
+      ARCHIVE_PATH: ${{ github.workspace }}/build/todayggigu.xcarchive
+      EXPORT_PATH: ${{ github.workspace }}/build/export
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26"
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i ios || true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: yarn
+
+      # env.json holds runtime API URLs read via require('../../env.json').
+      # It is gitignored, so the runner has no copy — write it before xcodebuild
+      # so the archived Metro bundle ships the correct endpoints. Values are
+      # public URLs (overridable via matching GitHub secrets).
+      - name: Write env.json
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          SERVER_BASE_URL: ${{ secrets.SERVER_BASE_URL }}
+          CATEGORIES_BASE_URL: ${{ secrets.CATEGORIES_BASE_URL }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pick = (k, d) => {
+              const v = process.env[k];
+              return typeof v === "string" && v.trim() ? v.trim() : d;
+            };
+            const e = {
+              API_BASE_URL: pick("API_BASE_URL", "https://api.todayggigu.kr/v1"),
+              SERVER_BASE_URL: pick("SERVER_BASE_URL", "https://api.todayggigu.kr"),
+              CATEGORIES_BASE_URL: pick("CATEGORIES_BASE_URL", "https://todayggigu.kr/api"),
+            };
+            fs.writeFileSync("env.json", JSON.stringify(e, null, 2));
+            console.log("env.json written:", Object.keys(e).join(", "));
+          '
+
+      - name: Set up Ruby + Bundler (for CocoaPods)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          # Gemfile lives at the repo root; `bundle exec` from ios/ finds it
+          # via Bundler's upward directory search.
+
+      - name: Install JS dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: ${{ runner.os }}-pods-
+
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-xcode-dd-${{ hashFiles('ios/Podfile.lock') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-dd-${{ hashFiles('ios/Podfile.lock') }}-
+            ${{ runner.os }}-xcode-dd-
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: bundle exec pod install
+
+      - name: Write App Store Connect API key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys" "$HOME/private_keys"
+          KEY_FILE="AuthKey_${ASC_KEY_ID}.p8"
+          echo "$ASC_API_KEY_BASE64" | base64 --decode > "$HOME/.appstoreconnect/private_keys/$KEY_FILE"
+          cp "$HOME/.appstoreconnect/private_keys/$KEY_FILE" "$HOME/private_keys/$KEY_FILE"
+          echo "KEY_PATH=$HOME/.appstoreconnect/private_keys/$KEY_FILE" >> "$GITHUB_ENV"
+
+      - name: Compute build number
+        run: |
+          # TestFlight rejects duplicate build numbers. Offset the run number so
+          # CI builds won't collide with any uploaded manually before CI existed.
+          echo "BUILD_NUMBER=$(( ${{ github.run_number }} + 100 ))" >> "$GITHUB_ENV"
+
+      - name: Archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          MARKETING_VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          echo "Archiving with build number $BUILD_NUMBER"
+          VERSION_OVERRIDE=""
+          if [ -n "${MARKETING_VERSION_INPUT}" ]; then
+            VERSION_OVERRIDE="MARKETING_VERSION=${MARKETING_VERSION_INPUT}"
+            echo "Overriding marketing version -> ${MARKETING_VERSION_INPUT}"
+          fi
+          xcodebuild archive \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            $VERSION_OVERRIDE \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+      - name: Export .ipa
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Upload .ipa as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: todayggigu-ipa
+          path: ${{ env.EXPORT_PATH }}/*.ipa
+          if-no-files-found: error
+
+      - name: Upload to TestFlight
+        if: ${{ github.event_name == 'push' || inputs.upload }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          IPA="$(ls "$EXPORT_PATH"/*.ipa | head -n1)"
+          echo "Uploading $IPA"
+          xcrun altool --upload-app -f "$IPA" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"

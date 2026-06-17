@@ -1,0 +1,5 @@
+app_identifier("com.todayggigu.kr")  # The bundle identifier of the app
+team_id("V4DYLGB2XA")                # Apple Developer Portal team ID
+
+# Authentication is done with the App Store Connect API key (see Fastfile),
+# so no Apple ID / app-specific password is needed here.

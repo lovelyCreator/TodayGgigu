@@ -77,3 +77,13 @@ yarn-error.log
 
 # Environment config
 env.json
+
+# iOS CI — 시크릿/키/빌드 산출물은 커밋 금지
+fastlane/report.xml
+fastlane/README.md
+fastlane/metadata/
+/build/
+ios/build/
+*.p8
+*.p12
+*.mobileprovision
