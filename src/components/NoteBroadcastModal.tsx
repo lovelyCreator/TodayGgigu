@@ -159,6 +159,7 @@ const NoteBroadcastModal: React.FC<NoteBroadcastModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       transparent
       animationType="none"
@@ -281,7 +282,7 @@ const styles = StyleSheet.create({
   contentText: {
     fontSize: FONTS.sizes.lg,
     color: COLORS.text.primary,
-    lineHeight: 28,
+    lineHeight: Math.round(FONTS.sizes.lg * 28 / 18),
     fontWeight: '400',
     flexWrap: 'wrap',
   },

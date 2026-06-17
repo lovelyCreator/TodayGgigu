@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     fontWeight: '600',
     color: COLORS.text.primary,
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 16 / 12),
   },
   productPriceRow: {
     flexDirection: 'row',

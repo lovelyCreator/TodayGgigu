@@ -186,7 +186,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
     marginBottom: SPACING.xl,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   currencyContainer: {
     backgroundColor: COLORS.white,
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
 });
 

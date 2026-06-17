@@ -732,7 +732,7 @@ const styles = StyleSheet.create({
   productName: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   companyName: {
     fontSize: FONTS.sizes.xs,

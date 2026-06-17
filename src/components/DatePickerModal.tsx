@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import Icon from './Icon';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../constants';
+import { useTranslation } from '../hooks/useTranslation';
 
 const { width, height } = Dimensions.get('window');
 
@@ -29,8 +30,10 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
   onClose,
   onConfirm,
   initialDate,
-  title = 'Select Date',
+  title,
 }) => {
+  const { t } = useTranslation();
+  const resolvedTitle = title || t('datePicker.selectDate');
   const slideAnim = useRef(new Animated.Value(height)).current;
   const panY = useRef(new Animated.Value(0)).current;
   const isDismissing = useRef(false);
@@ -125,12 +128,8 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
     return years;
   };
 
-  const generateMonths = () => {
-    return [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-  };
+  const generateMonths = () =>
+    Array.from({ length: 12 }, (_, i) => t(`datePicker.months.${i}`));
 
   const getDaysInMonth = (year: number, month: number) => {
     return new Date(year, month + 1, 0).getDate();
@@ -147,6 +146,7 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       transparent
       animationType="fade"
@@ -171,14 +171,14 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
               </View>
               
               <View style={styles.header}>
-                <Text style={styles.title}>{title}</Text>
-                <Text style={styles.subtitle}>Select year, month, and day</Text>
+                <Text style={styles.title}>{resolvedTitle}</Text>
+                <Text style={styles.subtitle}>{t('datePicker.subtitle')}</Text>
               </View>
 
               <View style={styles.pickerContainer}>
                 {/* Year Picker */}
                 <View style={styles.pickerColumn}>
-                  <Text style={styles.pickerLabel}>Year</Text>
+                  <Text style={styles.pickerLabel}>{t('datePicker.year')}</Text>
                   <ScrollView 
                     style={styles.pickerScroll} 
                     showsVerticalScrollIndicator={false}
@@ -207,7 +207,7 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
 
                 {/* Month Picker */}
                 <View style={styles.pickerColumn}>
-                  <Text style={styles.pickerLabel}>Month</Text>
+                  <Text style={styles.pickerLabel}>{t('datePicker.month')}</Text>
                   <ScrollView 
                     style={styles.pickerScroll} 
                     showsVerticalScrollIndicator={false}
@@ -215,7 +215,7 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
                   >
                     {generateMonths().map((month, index) => (
                       <TouchableOpacity
-                        key={month}
+                        key={index}
                         style={[
                           styles.pickerItem,
                           selectedMonth === index && styles.pickerItemSelected
@@ -227,7 +227,7 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
                           styles.pickerItemText,
                           selectedMonth === index && styles.pickerItemTextSelected
                         ]}>
-                          {month.substring(0, 3)}
+                          {month}
                         </Text>
                       </TouchableOpacity>
                     ))}
@@ -236,7 +236,7 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
 
                 {/* Day Picker */}
                 <View style={styles.pickerColumn}>
-                  <Text style={styles.pickerLabel}>Day</Text>
+                  <Text style={styles.pickerLabel}>{t('datePicker.day')}</Text>
                   <ScrollView 
                     style={styles.pickerScroll} 
                     showsVerticalScrollIndicator={false}
@@ -271,7 +271,7 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
                   activeOpacity={0.7}
                 >
                   <Icon name="checkmark-circle" size={24} color={COLORS.white} />
-                  <Text style={styles.confirmButtonText}>Confirm</Text>
+                  <Text style={styles.confirmButtonText}>{t('datePicker.confirm')}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -279,7 +279,7 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({
                   onPress={handleClose}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={styles.cancelButtonText}>{t('datePicker.cancel')}</Text>
                 </TouchableOpacity>
               </View>
             </Animated.View>
@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: FONTS.sizes.md,
     color: COLORS.gray[600],
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.md * 20 / 16),
   },
   pickerContainer: {
     flexDirection: 'row',

@@ -120,6 +120,7 @@ const SortModal: React.FC<SortModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       transparent
       animationType="fade"
@@ -230,7 +231,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: FONTS.sizes.md,
     color: COLORS.gray[600],
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.md * 20 / 16),
     textAlign: 'center',
   },
   optionsContainer: {

@@ -432,7 +432,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
 });
 

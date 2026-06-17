@@ -441,7 +441,8 @@ const EditProfileScreen: React.FC = () => {
       <DatePickerModal visible={showBirthdayPicker} onClose={() => setShowBirthdayPicker(false)} onConfirm={(date) => handleFieldChange('birthday', date.toISOString())} initialDate={getBirthdayDate()} title={t('profile.birthday')} />
 
       {/* Email Modal */}
-      <Modal visible={emailModalVisible} transparent animationType="fade" onRequestClose={() => setEmailModalVisible(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={emailModalVisible} transparent animationType="fade" onRequestClose={() => setEmailModalVisible(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setEmailModalVisible(false)}>
           <Pressable style={styles.modalCard} onPress={() => undefined}>
             <View style={styles.modalHeader}>
@@ -490,7 +491,8 @@ const EditProfileScreen: React.FC = () => {
       </Modal>
 
       {/* Phone Modal */}
-      <Modal visible={phoneModalVisible} transparent animationType="fade" onRequestClose={() => setPhoneModalVisible(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={phoneModalVisible} transparent animationType="fade" onRequestClose={() => setPhoneModalVisible(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setPhoneModalVisible(false)}>
           <Pressable style={styles.modalCard} onPress={() => undefined}>
             <View style={styles.modalHeader}>
@@ -519,7 +521,8 @@ const EditProfileScreen: React.FC = () => {
       </Modal>
 
       {/* Password Modal */}
-      <Modal visible={passwordModalVisible} transparent animationType="fade" onRequestClose={() => setPasswordModalVisible(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={passwordModalVisible} transparent animationType="fade" onRequestClose={() => setPasswordModalVisible(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => { setPasswordModalVisible(false); resetPasswordState(); }}>
           <Pressable style={styles.modalCard} onPress={() => undefined}>
             <View style={styles.modalHeader}>

@@ -464,7 +464,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.text.primary,
     marginBottom: SPACING.xs,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   priceContainer: {
     flexDirection: 'row',
@@ -518,7 +518,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
     marginBottom: SPACING.xs,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   newInPriceContainer: {
     flexDirection: 'row',
@@ -591,7 +591,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.text.primary,
     marginBottom: 6,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.smmd * 18 / 15),
   },
   gridPriceRow: {
     flexDirection: 'row',
@@ -631,7 +631,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.text.primary,
     marginBottom: 6,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.smmd * 18 / 15),
   },
   horizontalPriceRow: {
     flexDirection: 'row',
@@ -682,7 +682,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: SPACING.xs,
     maxWidth: '75%', // Reduce width to make room for review
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.smmd * 18 / 15),
   },
   moreToLoveReview: {
     flexDirection: 'row',
@@ -739,7 +739,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.text.primary,
     marginBottom: 4,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.md * 18 / 16),
   },
   simplePrice: {
     fontSize: FONTS.sizes.lg,
@@ -825,7 +825,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.error,
     fontWeight: '600',
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
 });
 

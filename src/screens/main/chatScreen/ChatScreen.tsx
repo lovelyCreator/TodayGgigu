@@ -32,6 +32,7 @@ import { SocketMessage, socketService } from '../../../services/socketService';
 import { inquiryApi } from '../../../services/inquiryApi';
 import { orderApi } from '../../../services/orderApi';
 import { getOrderProgressStatusLabel } from '../../../utils/orderProgressStatusLabel';
+import { markInquiryVisited } from '../../../utils/visitedInquiries';
 import {
   fetchOrderFromProxy,
   mergeChatMessages,
@@ -715,6 +716,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       // Always use REST API for reliability
       await sendMessageViaRest(inquiryId, messageText, optimisticMessage.id, attachmentsToSend);
 
+      // 사용자 본인 전송은 "미확인" 상태에 영향을 주지 않는다 — 방문 시각을 갱신해
+      // 다음 목록 재조회에서도 확인완료로 유지되게 한다 (lastMessageAt 이 본인 메시지로
+      // 갱신돼도 visitedAt >= lastMessageAt).
+      void markInquiryVisited(inquiryId);
+
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
@@ -1230,6 +1236,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
       {/* More Options Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showMoreModal}
         statusBarTranslucent={true}
         transparent={true}
@@ -1380,7 +1387,7 @@ const styles = StyleSheet.create({
   orderDetailItemName: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   orderDetailItemMeta: {
     fontSize: FONTS.sizes.xs,
@@ -1470,12 +1477,12 @@ const styles = StyleSheet.create({
   userMessageText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   adminMessageText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   attachIconBtn: {
     padding: 4,

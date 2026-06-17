@@ -482,7 +482,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.gray[500],
     marginRight: SPACING.sm,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 18 / 12),
   },
   rowDate: {
     fontSize: FONTS.sizes.xs,

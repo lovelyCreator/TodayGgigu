@@ -165,6 +165,7 @@ const InputCheckServiceModal: React.FC<InputCheckServiceModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       transparent
       animationType="fade"
@@ -380,7 +381,7 @@ const styles = StyleSheet.create({
   descriptionText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.gray[600],
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   actionContainer: {
     paddingHorizontal: SPACING.lg,

@@ -10,7 +10,7 @@ export type BuyListEmbedDomain =
   | 'refund_management';
 
 export type ProfileDashboardRoute =
-  | { type: 'buyList'; domain: BuyListEmbedDomain; initialTab: string; progressStatus?: string }
+  | { type: 'buyList'; domain: BuyListEmbedDomain; initialTab: string; progressStatus?: string; unconfirmedOnly?: boolean }
   | { type: 'cart' }
   | { type: 'productList' }
   | { type: 'category' }

@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
     fontWeight: '600',
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   cameraButton: {
     paddingRight: SPACING.smmd,

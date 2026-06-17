@@ -78,7 +78,6 @@ import ReviewIcon from '../../../assets/icons/ReviewIcon';
 import ViewedIcon from '../../../assets/icons/ViewedIcon';
 import OfficialSupportIcon from '../../../assets/icons/OfficialSupportIcon';
 import FeedbackIcon from '../../../assets/icons/FeedbackIcon';
-import AddressIcon from '../../../assets/icons/AddressIcon';
 import SellerShopIcon from '../../../assets/icons/SellerShopIcon';
 import CustomerSupportIcon from '../../../assets/icons/CustomerSupportIcon';
 import AffiliateMarketingIcon from '../../../assets/icons/AffiliateMarketingIcon';
@@ -110,15 +109,23 @@ type ProfileScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Main
 const ProfileScreen: React.FC = () => {
   const { width: windowWidth } = useWindowDimensions();
   const responsive = useResponsive();
-  const moreToLoveGrid = useMemo(
-    () => getProfileMoreToLoveGridLayout(windowWidth, responsive.cols),
-    [windowWidth, responsive.cols],
-  );
 
   const navigation = useNavigation<ProfileScreenNavigationProp>();
   const { user, isAuthenticated, isGuest } = useAuth();
   const useTabletLandscapeLayout =
     responsive.isTabletLandscape && isAuthenticated;
+  // "함께 볼 만한 상품" 그리드: 태블릿 가로 레이아웃에서는 사이드바를 뺀
+  // 메인 패널 너비 기준으로 계산해야 카드가 패널을 벗어나지 않는다.
+  const moreToLoveSidebarWidth = useTabletLandscapeLayout
+    ? Math.min(280, Math.max(200, Math.round(responsive.width * 0.22)))
+    : 0;
+  const moreToLoveGridWidth = useTabletLandscapeLayout
+    ? Math.max(0, windowWidth - moreToLoveSidebarWidth - SPACING.md * 2)
+    : windowWidth;
+  const moreToLoveGrid = useMemo(
+    () => getProfileMoreToLoveGridLayout(moreToLoveGridWidth, responsive.cols),
+    [moreToLoveGridWidth, responsive.cols],
+  );
   const currentLocale = useAppSelector((state) => state.i18n.locale) as string;
   const normalizedLocale: 'en' | 'ko' | 'zh' =
     currentLocale === 'kr'
@@ -169,6 +176,7 @@ const ProfileScreen: React.FC = () => {
     initialTab?: string;
     domain?: BuyListEmbedDomain;
     progressStatus?: string;
+    unconfirmedOnly?: boolean;
   }) => {
     const domain = opts.domain ?? 'purchase_agency';
     const initialTab = opts.initialTab ?? 'all';
@@ -183,6 +191,7 @@ const ProfileScreen: React.FC = () => {
           domain,
           initialTab,
           progressStatus: opts.progressStatus,
+          unconfirmedOnly: opts.unconfirmedOnly,
         },
       ]);
       setSidebarActiveKey(sidebarKey);
@@ -192,6 +201,7 @@ const ProfileScreen: React.FC = () => {
         domain,
         initialTab,
         progressStatus: opts.progressStatus,
+        unconfirmedOnly: opts.unconfirmedOnly,
       });
     }
   };
@@ -848,11 +858,6 @@ const ProfileScreen: React.FC = () => {
   );
 
   const renderStatsSection = () => {
-    const defaultAddress = user?.addresses && user.addresses.length > 0 ? user?.addresses.find(addr => addr.isDefault) : null;
-
-    const addressString = defaultAddress
-      ? `${defaultAddress.street}, ${defaultAddress.city}, ${defaultAddress.state}, ${defaultAddress.zipCode}, ${defaultAddress.country}`
-      : '';
     return (
       <View
         style={[
@@ -879,10 +884,6 @@ const ProfileScreen: React.FC = () => {
             <Text style={[styles.headerLabelText, {color: '#E0B9A6'}]}> {t('profile.userId')}:</Text>
             <Text style={styles.headerLabelText}> {user?.userUniqueId || ''}</Text>
             {/* </View> */}
-          </View>
-          <View style={{flexDirection: 'row', alignItems: 'center'}}>
-            <AddressIcon width={16} height={16} color="#E0B9A6" />
-            <Text style={[styles.headerFullName, {color: '#E0B9A6'}]}>{addressString || ''}</Text>
           </View>
         </View>
       </View>
@@ -976,20 +977,31 @@ const ProfileScreen: React.FC = () => {
               {
                 labelKey: 'profile.myOrderPurchasePayment',
                 count: dashboardCounts.purchasePaymentPending,
+                // 발주 결제 — 구매결제대기(P_PENDING)
+                nav: { progressStatus: 'P_PENDING' },
               },
               {
                 labelKey: 'profile.myOrderShipmentPayment',
                 count: dashboardCounts.shipPaymentPending,
+                // 출고 결제 — 출고결제대기(IO_PAY_PENDING)
+                nav: { progressStatus: 'IO_PAY_PENDING' },
               },
               {
                 labelKey: 'profile.myOrderUnconfirmed',
                 count: dashboardCounts.unconfirmed || notificationCount,
+                // 미확인 — 라벨 미확인(unreadCount > 0)
+                nav: { unconfirmedOnly: true },
               },
             ].map((cell) => (
-              <View key={cell.labelKey} style={styles.myOrderStatCard}>
+              <TouchableOpacity
+                key={cell.labelKey}
+                style={styles.myOrderStatCard}
+                activeOpacity={0.7}
+                onPress={() => openBuyListFromProfile(cell.nav as any)}
+              >
                 <Text style={styles.myOrderItemCount}>{cell.count}</Text>
                 <Text style={styles.myOrderItemText}>{t(cell.labelKey)}</Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
 
@@ -1013,21 +1025,31 @@ const ProfileScreen: React.FC = () => {
               {
                 labelKey: 'profile.toProblem',
                 count: dashboardCounts.problemProduct,
+                // 문제상품 — P_MA_PROBLEM (오류 탭 → 문제상품 서브필터)
+                nav: { domain: 'error_management', initialTab: 'error', progressStatus: 'P_MA_PROBLEM' },
               },
               {
                 // "현지배송지연" — IO_DELAY 주문 수 (이전엔 toErrorIn).
                 labelKey: 'profile.toShippingDelay',
                 count: dashboardCounts.errorInbound,
+                nav: { progressStatus: 'IO_DELAY' },
               },
               {
                 labelKey: 'profile.toShipmentHold',
                 count: dashboardCounts.shipmentHold,
+                // 출고보류 — E_SHIPMENT_HOLD (오류 탭 → 출고보류 서브필터)
+                nav: { domain: 'error_management', initialTab: 'error', progressStatus: 'E_SHIPMENT_HOLD' },
               },
             ].map((cell) => (
-              <View key={cell.labelKey} style={styles.myOrderStatCard}>
+              <TouchableOpacity
+                key={cell.labelKey}
+                style={styles.myOrderStatCard}
+                activeOpacity={0.7}
+                onPress={() => openBuyListFromProfile(cell.nav as any)}
+              >
                 <Text style={styles.myOrderItemCount}>{cell.count}</Text>
                 <Text style={styles.myOrderItemText}>{t(cell.labelKey)}</Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
@@ -1330,10 +1352,11 @@ const ProfileScreen: React.FC = () => {
       <View style={[styles.moreToLoveSection, moreToLoveSectionStyle]}>
         <Text style={styles.sectionTitle}>{sectionTitle}</Text>
         <FlatList
+          key={`mtl-cols-${responsive.cols}`}
           data={productsToDisplay}
           renderItem={renderMoreToLoveItem}
           keyExtractor={(item, index) => `moretolove-${item.id?.toString() || index}-${index}`}
-          numColumns={2}
+          numColumns={responsive.cols}
           scrollEnabled={false}
           nestedScrollEnabled
           columnWrapperStyle={moreToLoveProductRowStyle}
@@ -1368,7 +1391,7 @@ const ProfileScreen: React.FC = () => {
       {isAuthenticated && renderStatsSection()}
       {isAuthenticated && renderMenuItems()}
       {!useTabletLandscapeLayout && isAuthenticated && renderQuickAccessSection()}
-      {!useTabletLandscapeLayout && renderMoreToLove()}
+      {renderMoreToLove()}
     </>
   );
 
@@ -1410,6 +1433,15 @@ const ProfileScreen: React.FC = () => {
                 style={styles.tabletLandscapeMain}
                 contentContainerStyle={styles.tabletLandscapeMainContent}
                 showsVerticalScrollIndicator={false}
+                onScroll={(event) => {
+                  const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+                  const distanceFromBottom =
+                    contentSize.height - contentOffset.y - layoutMeasurement.height;
+                  if (distanceFromBottom < 200) {
+                    loadMoreRecommendations();
+                  }
+                }}
+                scrollEventThrottle={16}
                 refreshControl={
                   <RefreshControl
                     refreshing={profileRefreshing}
@@ -1681,7 +1713,7 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     marginBottom: SPACING.xl,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
   },
   loginBackground: {
     width: 150,

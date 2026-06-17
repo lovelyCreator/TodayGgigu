@@ -444,7 +444,7 @@ const AddressBookScreen: React.FC<AddressBookScreenProps> = ({
             onPress={() => handleDeleteAddress(item.id)}
             activeOpacity={0.7}
           >
-            <Text style={styles.deleteButtonText}>Delete</Text>
+            <Text style={styles.deleteButtonText}>{t('profile.addressDelete')}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -453,6 +453,7 @@ const AddressBookScreen: React.FC<AddressBookScreenProps> = ({
 
   const renderAddressModal = () => (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={addressModalVisible}
       transparent={true}
       animationType="fade"
@@ -724,8 +725,8 @@ const AddressBookScreen: React.FC<AddressBookScreenProps> = ({
           contentContainerStyle={styles.addressListContent}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No addresses found</Text>
-              <Text style={styles.emptySubtext}>Add a new address to get started</Text>
+              <Text style={styles.emptyText}>{t('profile.noAddresses')}</Text>
+              <Text style={styles.emptySubtext}>{t('profile.noAddressesSubtext')}</Text>
             </View>
           }
         />
@@ -743,14 +744,14 @@ const AddressBookScreen: React.FC<AddressBookScreenProps> = ({
                 <Icon name="checkmark" size={16} color={COLORS.white} />
               )}
             </View>
-            <Text style={styles.selectAllText}>All</Text>
+            <Text style={styles.selectAllText}>{t('profile.addressSelectAll')}</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.deleteAllButton}
             onPress={handleDeleteSelected}
             activeOpacity={0.7}
           >
-            <Text style={styles.deleteAllButtonText}>Delete</Text>
+            <Text style={styles.deleteAllButtonText}>{t('profile.addressDelete')}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -758,11 +759,12 @@ const AddressBookScreen: React.FC<AddressBookScreenProps> = ({
       {renderAddressModal()}
 
       {/* Kakao Address Search WebView */}
-      <Modal visible={showKakaoAddress} transparent animationType="slide" onRequestClose={() => setShowKakaoAddress(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={showKakaoAddress} transparent animationType="slide" onRequestClose={() => setShowKakaoAddress(false)}>
         <View style={styles.kakaoModalOverlay}>
           <View style={styles.kakaoModalContent}>
             <View style={styles.kakaoModalHeader}>
-              <Text style={styles.kakaoModalTitle}>Search Address</Text>
+              <Text style={styles.kakaoModalTitle}>{t('profile.addressModal.searchAddress')}</Text>
               <TouchableOpacity onPress={() => setShowKakaoAddress(false)}>
                 <Icon name="close" size={22} color={COLORS.text.primary} />
               </TouchableOpacity>
@@ -825,7 +827,7 @@ const AddressBookScreen: React.FC<AddressBookScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.white,
   },
   embeddedContainer: {
     flex: 1,
@@ -852,8 +854,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
-    paddingTop: SPACING['3xl'],
-    paddingBottom: SPACING.md,
+    paddingTop: SPACING.xs,
+    paddingBottom: SPACING.sm,
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray[200],
@@ -883,6 +885,7 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    backgroundColor: COLORS.background,
   },
   addressListContent: {
     // paddingHorizontal: SPACING.md,
@@ -926,7 +929,7 @@ const styles = StyleSheet.create({
   addressFullText: {
     fontSize: FONTS.sizes.md,
     color: COLORS.text.primary,
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
     marginBottom: SPACING.sm,
     fontWeight: '400',
   },
@@ -1099,7 +1102,7 @@ const styles = StyleSheet.create({
   customsNotice: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.gray[500],
-    lineHeight: 17,
+    lineHeight: Math.round(FONTS.sizes.xs * 17 / 12),
     marginTop: SPACING.smmd,
   },
   // Fields
@@ -1167,7 +1170,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.red,
     marginTop: SPACING.xs,
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 16 / 12),
   },
   phoneRow: {
     flexDirection: 'row',
@@ -1200,7 +1203,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FONTS.sizes.xs,
     color: COLORS.gray[600],
-    lineHeight: 17,
+    lineHeight: Math.round(FONTS.sizes.xs * 17 / 12),
   },
   // Footer
   saveErrorBanner: {
@@ -1214,7 +1217,7 @@ const styles = StyleSheet.create({
   saveErrorText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.white,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   addressModalFooter: {
     flexDirection: 'row',

@@ -110,6 +110,7 @@ const ImagePickerModal: React.FC<ImagePickerModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       transparent
       animationType="fade"
@@ -221,7 +222,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: FONTS.sizes.md,
     color: COLORS.gray[600],
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.md * 20 / 16),
   },
   optionsContainer: {
     paddingHorizontal: SPACING.lg,
@@ -255,7 +256,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.gray[600],
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   cancelButton: {
     marginHorizontal: SPACING.lg,

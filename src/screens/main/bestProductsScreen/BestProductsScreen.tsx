@@ -455,7 +455,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     alignSelf: 'flex-start',
   },
-  productTitle: { flex: 1, fontSize: FONTS.sizes.xs, color: COLORS.text.primary, lineHeight: 16 },
+  productTitle: { flex: 1, fontSize: FONTS.sizes.xs, color: COLORS.text.primary, lineHeight: Math.round(FONTS.sizes.xs * 16 / 12) },
   productMetaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

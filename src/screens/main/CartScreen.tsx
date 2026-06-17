@@ -17,6 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect, RouteProp } from '@react-navigation/native';
 import Icon from '../../components/Icon';
 import AddNewAddressModal from '../../components/AddNewAddressModal';
+import DatePickerModal from '../../components/DatePickerModal';
+import PastOrderModal from '../../components/PastOrderModal';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants';
 import {
   launchImageLibrary,
@@ -132,12 +134,6 @@ const createNegotiationImageEntry = (asset: {
   mimeType: asset.type,
 });
 
-const TIME_PERIODS: Array<{ labelKey: 'all' | 'h1' | 'h24' | 'd7'; value: number }> = [
-  { labelKey: 'all', value: 0 },
-  { labelKey: 'h1', value: 60 * 60 * 1000 },
-  { labelKey: 'h24', value: 24 * 60 * 60 * 1000 },
-  { labelKey: 'd7', value: 7 * 24 * 60 * 60 * 1000 },
-];
 
 // Pick the string for the active locale from a multi-language field, with fallbacks.
 const pickLang = (
@@ -281,10 +277,13 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
     [locale, navigation],
   );
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedPeriod, setSelectedPeriod] = useState<number>(0);
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
   const [showPeriodMenu, setShowPeriodMenu] = useState(false);
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>('past');
-  const [now, setNow] = useState<number>(Date.now());
+  const [showPastOrderModal, setShowPastOrderModal] = useState(false);
   const [showServiceModal, setShowServiceModal] = useState(false);
   const [extraServices, setExtraServices] = useState<ExtraService[]>([]);
   const [pendingServices, setPendingServices] = useState<ExtraService[]>([]);
@@ -429,11 +428,6 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
   const [cartError, setCartError] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
     if (showOrderModal) {
       setNegotiationContentImages([]);
       setNegotiationNote('');
@@ -573,16 +567,13 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
     }, [applyCartFromBuyNowResponse, loadCart, navigation, route.params]),
   );
 
-  const formatElapsed = (ms: number): string => {
-    const sec = Math.max(0, Math.floor(ms / 1000));
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = sec % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  // Format a Date as YYYY-MM-DD for the period range buttons.
+  const formatDate = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   };
-
-  const earliestAdd = cards.length > 0 ? Math.min(...cards.map((c) => c.addedAt)) : now;
-  const elapsed = now - earliestAdd;
 
   // Defer Alert.alert past the current render frame so it reliably attaches to the
   // Android Activity (fixes "Tried to show an alert while not attached to an Activity").
@@ -1038,8 +1029,15 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
     if (searchQuery && !c.productName.toLowerCase().includes(searchQuery.toLowerCase())) {
       return false;
     }
-    if (selectedPeriod > 0 && now - c.addedAt > selectedPeriod) {
-      return false;
+    if (startDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      if (c.addedAt < start.getTime()) return false;
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      if (c.addedAt > end.getTime()) return false;
     }
     return true;
   });
@@ -2089,31 +2087,44 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
           >
             <Icon name="calendar-outline" size={12} color={COLORS.text.primary} />
             <Text style={styles.periodText} numberOfLines={1}>
-              {t('cartOrder.periodSelect')} · {formatElapsed(elapsed)}
+              {startDate || endDate
+                ? `${startDate ? formatDate(startDate) : ''} ~ ${endDate ? formatDate(endDate) : ''}`
+                : t('cartOrder.periodSelect')}
             </Text>
             <Icon name="chevron-down" size={12} color={COLORS.text.primary} />
           </TouchableOpacity>
           {showPeriodMenu && (
             <View style={styles.periodMenu}>
-              {TIME_PERIODS.map((p) => (
+              <TouchableOpacity
+                style={styles.periodMenuItem}
+                onPress={() => setShowStartPicker(true)}
+              >
+                <Text style={styles.periodMenuText} numberOfLines={1}>
+                  {t('cartOrder.startDate')}: {startDate ? formatDate(startDate) : '—'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.periodMenuItem}
+                onPress={() => setShowEndPicker(true)}
+              >
+                <Text style={styles.periodMenuText} numberOfLines={1}>
+                  {t('cartOrder.endDate')}: {endDate ? formatDate(endDate) : '—'}
+                </Text>
+              </TouchableOpacity>
+              {(startDate || endDate) && (
                 <TouchableOpacity
-                  key={p.value}
                   style={styles.periodMenuItem}
                   onPress={() => {
-                    setSelectedPeriod(p.value);
+                    setStartDate(null);
+                    setEndDate(null);
                     setShowPeriodMenu(false);
                   }}
                 >
-                  <Text
-                    style={[
-                      styles.periodMenuText,
-                      selectedPeriod === p.value && styles.periodMenuTextActive,
-                    ]}
-                  >
-                    {t(`cartOrder.periods.${p.labelKey}`)}
+                  <Text style={[styles.periodMenuText, { color: COLORS.red }]} numberOfLines={1}>
+                    {t('cartOrder.clearDates')}
                   </Text>
                 </TouchableOpacity>
-              ))}
+              )}
             </View>
           )}
         </View>
@@ -2123,10 +2134,34 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
         </TouchableOpacity>
       </View>
 
+      <DatePickerModal
+        visible={showStartPicker}
+        onClose={() => setShowStartPicker(false)}
+        onConfirm={(d) => setStartDate(d)}
+        initialDate={startDate || undefined}
+        title={t('cartOrder.startDate')}
+      />
+      <DatePickerModal
+        visible={showEndPicker}
+        onClose={() => setShowEndPicker(false)}
+        onConfirm={(d) => setEndDate(d)}
+        initialDate={endDate || undefined}
+        title={t('cartOrder.endDate')}
+      />
+
+      {/* 과거주문 모달 — orders-proxy 로 과거 주문 목록을 불러와 표시 */}
+      <PastOrderModal
+        visible={showPastOrderModal}
+        onClose={() => setShowPastOrderModal(false)}
+      />
+
       <View style={styles.tabsRow}>
         <TouchableOpacity
           style={[styles.tabBtn, activeTab === 'past' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('past')}
+          onPress={() => {
+            setActiveTab('past');
+            setShowPastOrderModal(true);
+          }}
         >
           <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>
             {t('cartOrder.tabs.past')}
@@ -2236,6 +2271,7 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
 
       {/* 발주정보 작성 및 확인 MODAL */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showOrderModal}
         animationType="slide"
         transparent
@@ -2477,6 +2513,7 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
           Each thumb has a small ✕ overlay to let the shopper delete
           the attachment in place. */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={negotiationGalleryCardId !== null}
         animationType="fade"
         transparent
@@ -2557,6 +2594,7 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
 
       {/* 라벨설정 MODAL */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={labelModalCardId !== null}
         animationType="slide"
         transparent
@@ -2770,6 +2808,7 @@ const CartScreen: React.FC<CartScreenProps> = ({ embedded = false }) => {
 
       {/* 부가서비스선택 MODAL */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showServiceModal}
         animationType="slide"
         transparent
@@ -3379,7 +3418,7 @@ const styles = StyleSheet.create({
   detailDescription: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.gray[600],
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   // Requests (center)
   requestSection: {
@@ -3723,7 +3762,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.primary,
     fontWeight: '500',
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 16 / 12),
   },
   bundleItemSpec: {
     fontSize: 10,

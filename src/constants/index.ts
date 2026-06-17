@@ -81,22 +81,41 @@ export const COLORS = {
 };
 
 // Typography
+// iPad(태블릿)에서 전체 폰트는 2배, 상품상세 본문 텍스트는 1.5배로 키운다.
+// SCREEN_WIDTH/HEIGHT 는 모듈 로드 시점값이며, 폰트 크기는 회전과 무관하므로 충분하다.
+const IS_TABLET_DEVICE = Math.min(SCREEN_WIDTH, SCREEN_HEIGHT) >= 600;
+const TABLET_FONT_SCALE = 2;
+const TABLET_PRODUCT_DETAIL_FONT_SCALE = 1.5;
+const BASE_FONT_SIZES = {
+  xs: 12,
+  xsm: 13,
+  sm: 14,
+  smmd: 15,
+  md: 16,
+  base: 16,
+  lg: 18,
+  xl: 20,
+  '2xl': 24,
+  '2lgxl': 26,
+  '3xl': 30,
+  '4xl': 36,
+  '5xl': 48,
+};
+const scaleFontSizes = (mult: number): typeof BASE_FONT_SIZES => {
+  const out: Record<string, number> = {};
+  for (const key in BASE_FONT_SIZES) {
+    out[key] = Math.round((BASE_FONT_SIZES as Record<string, number>)[key] * mult);
+  }
+  return out as typeof BASE_FONT_SIZES;
+};
+
 export const FONTS = {
-  sizes: {
-    xs: 12,
-    xsm: 13,
-    sm: 14,
-    smmd: 15,
-    md: 16,
-    base: 16,
-    lg: 18,
-    xl: 20,
-    '2xl': 24,
-    '2lgxl': 26,
-    '3xl': 30,
-    '4xl': 36,
-    '5xl': 48,
-  },
+  // 전역(모든 화면): iPad 2배.
+  sizes: scaleFontSizes(IS_TABLET_DEVICE ? TABLET_FONT_SCALE : 1),
+  // 상품상세 본문 전용: iPad 1.5배.
+  productDetailSizes: scaleFontSizes(
+    IS_TABLET_DEVICE ? TABLET_PRODUCT_DETAIL_FONT_SCALE : 1,
+  ),
   weights: {
     light: '300' as const,
     normal: '400' as const,
@@ -141,9 +160,11 @@ export const FONTS = {
 };
 
 // Spacing
-export const SPACING = {
+// iPad: 커진 폰트에 맞춰 패딩·여백·간격도 키워 컨테이너(헤더 포함)가 넉넉히 늘어나게 한다.
+const TABLET_SPACING_SCALE = 1.5;
+const BASE_SPACING = {
   xs: 4,
-  xssm:6,
+  xssm: 6,
   sm: 8,
   smmd: 12,
   md: 16,
@@ -154,6 +175,14 @@ export const SPACING = {
   '2xl': 48,
   '3xl': 64,
 };
+const scaleSpacing = (mult: number): typeof BASE_SPACING => {
+  const out: Record<string, number> = {};
+  for (const key in BASE_SPACING) {
+    out[key] = Math.round((BASE_SPACING as Record<string, number>)[key] * mult);
+  }
+  return out as typeof BASE_SPACING;
+};
+export const SPACING = scaleSpacing(IS_TABLET_DEVICE ? TABLET_SPACING_SCALE : 1);
 
 // Border Radius
 export const BORDER_RADIUS = {

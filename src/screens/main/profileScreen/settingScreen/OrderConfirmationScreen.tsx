@@ -360,7 +360,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.base,
     color: COLORS.text.secondary,
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: Math.round(FONTS.sizes.base * 24 / 16),
   },
   section: {
     backgroundColor: COLORS.white,

@@ -221,7 +221,7 @@ const styles = StyleSheet.create({
   cardRow: { flexDirection: 'row', gap: 10, marginBottom: SPACING.md },
   avatar: { width: 32, height: 32, borderRadius: 16 },
   name: { fontSize: FONTS.sizes.sm, color: COLORS.text.primary, fontWeight: '600' },
-  comment: { fontSize: FONTS.sizes.sm, color: COLORS.text.secondary, marginTop: 4, lineHeight: 20 },
+  comment: { fontSize: FONTS.sizes.sm, color: COLORS.text.secondary, marginTop: 4, lineHeight: Math.round(FONTS.sizes.sm * 20 / 14) },
   emptyBox: { paddingVertical: 40, alignItems: 'center' },
   emptyText: { color: COLORS.text.secondary },
 });

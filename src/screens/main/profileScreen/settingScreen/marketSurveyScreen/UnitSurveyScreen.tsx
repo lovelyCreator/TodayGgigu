@@ -398,6 +398,7 @@ const UnitSurveyScreen: React.FC<UnitSurveyScreenProps> = ({ embedded = false })
       />
 
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={dateModalOpen}
         transparent
         animationType="fade"

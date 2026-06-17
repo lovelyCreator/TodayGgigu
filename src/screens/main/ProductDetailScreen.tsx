@@ -71,6 +71,7 @@ import ProductImage from '../../components/ProductImage';
 import { useWishlistStatus } from '../../hooks/useWishlistStatus';
 import { useAddToWishlistMutation } from '../../hooks/useAddToWishlistMutation';
 import { useDeleteFromWishlistMutation } from '../../hooks/useDeleteFromWishlistMutation';
+import { useResponsive } from '../../hooks/useResponsive';
 import { productsApi } from '../../services/productsApi';
 import HeartPlusIcon from '../../assets/icons/HeartPlusIcon';
 import FamilyStarIcon from '../../assets/icons/FamilyStarIcon';
@@ -195,6 +196,7 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
   const { t } = useTranslation();
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
+  const responsive = useResponsive();
   
   // Use wishlist status hook to check if products are liked based on external IDs
   const { isProductLiked, refreshExternalIds, addExternalId, removeExternalId } = useWishlistStatus();
@@ -3538,49 +3540,7 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
                         'Store';
     return(
     <View style={[styles.bottomBar, { paddingBottom: SPACING.lg + insets.bottom }]}>
-      {/* Top row with quantity and cart icon */}
-      <View style={styles.topActionRow}>
-        {/* Quantity Selector + 재고 표시 (가로 묶음) */}
-        <View style={styles.quantityWithStock}>
-          <View style={styles.quantitySelector}>
-            <TouchableOpacity
-              style={styles.quantityButton}
-              onPress={() => handleQuantityChange(false)}
-            >
-              <MinusIcon width={18} height={18} color={COLORS.text.primary} />
-            </TouchableOpacity>
-            <TextInput
-              style={styles.quantityText}
-              value={String(quantity)}
-              onChangeText={handleQuantityInput}
-              onBlur={handleQuantityBlur}
-              keyboardType="number-pad"
-              returnKeyType="done"
-              selectTextOnFocus
-              maxLength={7}
-            />
-            <TouchableOpacity
-              style={styles.quantityButton}
-              onPress={() => handleQuantityChange(true)}
-            >
-              <PlusIcon width={18} height={18} color={COLORS.text.primary} />
-            </TouchableOpacity>
-          </View>
-          {/* 옵션 선택 시 해당 SKU 재고, 아니면 product 전체 stockCount.
-              999999 sentinel 은 숨김. */}
-          {displayStock != null && (
-            <Text style={styles.quantityStockText}>
-              {locale === 'ko' ? `재고 ${displayStock.toLocaleString()}`
-                : locale === 'zh' ? `库存 ${displayStock.toLocaleString()}`
-                : `Stock ${displayStock.toLocaleString()}`}
-            </Text>
-          )}
-        </View>
-
-        {/* Camera Button */}
-      </View>
-      
-      {/* Bottom row with main action buttons */}
+      {/* Action row: side icons (left) + quantity/stock + action buttons (right) */}
       <View style={styles.mainActionRow}>
         <View style={{flexDirection: 'row', alignItems: 'center', gap: SPACING.sm}}>
           <TouchableOpacity 
@@ -3632,7 +3592,43 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
             />
           </TouchableOpacity>
         </View>
-        <View style={styles.actionButtonsGroup}>
+        <View style={styles.bottomRightGroup}>
+          {/* 수량 + 재고 — 장바구니 담기 버튼 바로 왼쪽에 배치 */}
+          <View style={styles.quantityWithStock}>
+            <View style={styles.quantitySelector}>
+              <TouchableOpacity
+                style={styles.quantityButton}
+                onPress={() => handleQuantityChange(false)}
+              >
+                <MinusIcon width={18} height={18} color={COLORS.text.primary} />
+              </TouchableOpacity>
+              <TextInput
+                style={styles.quantityText}
+                value={String(quantity)}
+                onChangeText={handleQuantityInput}
+                onBlur={handleQuantityBlur}
+                keyboardType="number-pad"
+                returnKeyType="done"
+                selectTextOnFocus
+                maxLength={7}
+              />
+              <TouchableOpacity
+                style={styles.quantityButton}
+                onPress={() => handleQuantityChange(true)}
+              >
+                <PlusIcon width={18} height={18} color={COLORS.text.primary} />
+              </TouchableOpacity>
+            </View>
+            {/* 옵션 선택 시 해당 SKU 재고, 아니면 product 전체 stockCount. 999999 sentinel 은 숨김. */}
+            {displayStock != null && (
+              <Text style={styles.quantityStockText}>
+                {locale === 'ko' ? `재고 ${displayStock.toLocaleString()}`
+                  : locale === 'zh' ? `库存 ${displayStock.toLocaleString()}`
+                  : `Stock ${displayStock.toLocaleString()}`}
+              </Text>
+            )}
+          </View>
+          <View style={[styles.actionButtonsGroup, responsive.isTablet && styles.actionButtonsGroupTablet]}>
           <TouchableOpacity
             style={[
               styles.actionButton,
@@ -3693,6 +3689,7 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
               </Text>
             )}
           </TouchableOpacity>
+          </View>
         </View>
       </View>
     </View>
@@ -3703,6 +3700,7 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
     
     return (
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={imageViewerVisible}
         transparent={false}
         animationType="fade"
@@ -3908,6 +3906,7 @@ const ProductDetailScreen: React.FC<ProductDetailScreenProps> = ({
 
       {/* Unfollow Confirmation Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showUnfollowModal}
         transparent
         animationType="fade"
@@ -4035,7 +4034,7 @@ const styles = StyleSheet.create({
     marginRight: SPACING.xs,
   },
   liveStatBadgeText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.white,
     fontWeight: '500',
   },
@@ -4050,12 +4049,12 @@ const styles = StyleSheet.create({
     paddingBottom: SPACING.md,
   },
   itemInfoText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.primary,
     fontWeight: '500',
   },
   itemInfoSeparator: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.gray[400],
     marginHorizontal: SPACING.sm,
   },
@@ -4078,7 +4077,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.full,
   },
   reviewBadgeText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.white,
     fontWeight: '600',
   },
@@ -4094,7 +4093,7 @@ const styles = StyleSheet.create({
     ...SHADOWS.small,
   },
   wishlistCountText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.primary,
     fontWeight: '600',
     backgroundColor: '#FFFFFF33',
@@ -4110,7 +4109,7 @@ const styles = StyleSheet.create({
     marginTop: 0,
   },
   productName: {
-    fontSize: FONTS.sizes.lg,
+    fontSize: FONTS.productDetailSizes.lg,
     fontWeight: '600',
     color: COLORS.text.primary,
     marginBottom: 0,
@@ -4128,7 +4127,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.sm,
   },
   discountBadgeText: {
-    fontSize: FONTS.sizes.xs,
+    fontSize: FONTS.productDetailSizes.xs,
     color: COLORS.white,
     fontWeight: '600',
   },
@@ -4141,7 +4140,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.sm,
   },
   productCodeBadgeText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.red,
     fontWeight: '600',
     marginRight: SPACING.xs,
@@ -4150,14 +4149,14 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   productDescription: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     color: COLORS.text.secondary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.productDetailSizes.md * 20 / 16),
     marginTop: SPACING.sm,
     marginBottom: SPACING.sm,
   },
   soldOutText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.secondary,
     marginTop: SPACING.xs,
     fontWeight: '500',
@@ -4179,12 +4178,12 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   ratingText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.primary,
     marginLeft: SPACING.xs,
   },
   soldText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.primary,
     marginRight: SPACING.sm,
   },
@@ -4205,7 +4204,7 @@ const styles = StyleSheet.create({
     maxWidth: '42%',
   },
   topCategoryLinkText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     fontWeight: '600',
     color: COLORS.primary,
   },
@@ -4227,13 +4226,13 @@ const styles = StyleSheet.create({
     marginRight: SPACING.sm,
   },
   originalPrice: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     color: COLORS.gray[500],
     textDecorationLine: 'line-through',
     marginRight: SPACING.sm,
   },
   originalPriceRight: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     color: COLORS.gray[500],
     textDecorationLine: 'line-through',
     marginLeft: 'auto',
@@ -4245,7 +4244,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.sm,
   },
   discountText: {
-    fontSize: FONTS.sizes.xs,
+    fontSize: FONTS.productDetailSizes.xs,
     color: COLORS.white,
     fontWeight: '600',
   },
@@ -4258,12 +4257,12 @@ const styles = StyleSheet.create({
     borderTopColor: COLORS.gray[200],
   },
   productCodeLabel: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.secondary,
     fontWeight: '500',
   },
   productCodeText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.primary,
     fontWeight: '600',
     flex: 1,
@@ -4278,7 +4277,7 @@ const styles = StyleSheet.create({
     gap: SPACING.xs,
   },
   copyButtonText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.primary,
     fontWeight: '600',
   },
@@ -4287,7 +4286,7 @@ const styles = StyleSheet.create({
     paddingBottom: 0,
   },
   selectorTitle: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     fontWeight: '600',
     color: COLORS.text.primary,
     marginBottom: SPACING.md,
@@ -4309,7 +4308,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
   },
   colorName: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.primary,
     fontWeight: '500',
     textAlign: 'center',
@@ -4337,7 +4336,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
   },
   sizeText: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     color: COLORS.text.primary,
     fontWeight: '500',
   },
@@ -4366,7 +4365,7 @@ const styles = StyleSheet.create({
     borderColor: '#0000000D',
   },
   serviceCommitmentChoiceText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     fontWeight: '900',
     color: COLORS.white,
     backgroundColor: COLORS.text.red,
@@ -4377,7 +4376,7 @@ const styles = StyleSheet.create({
     borderColor: '#0000000D',
   },
   serviceCommitmentChoiceContent: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     fontWeight: '900',
     color: COLORS.text.primary,
   },
@@ -4405,20 +4404,20 @@ const styles = StyleSheet.create({
     gap: SPACING.xs,
   },
   serviceCommitmentContentTitle: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     fontWeight: '600',
     color: COLORS.black,
   },
   serviceCommitmentTitle: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     fontWeight: '600',
     color: COLORS.text.red,
     marginBottom: SPACING.xs,
   },
   serviceCommitmentText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.productDetailSizes.sm * 20 / 14),
   },
   sellerInfoContainer: {
     flexDirection: 'row',
@@ -4445,7 +4444,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   sellerNameBold: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     fontWeight: '700',
     color: COLORS.text.primary,
     marginBottom: SPACING.xs,
@@ -4461,13 +4460,13 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   sellerRatingText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     fontWeight: '600',
     color: COLORS.text.primary,
     marginLeft: SPACING.xs,
   },
   sellerSoldText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.secondary,
     fontWeight: '400',
   },
@@ -4477,7 +4476,7 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.md,
   },
   sellerStatsText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.secondary,
     marginLeft: SPACING.xs,
   },
@@ -4498,7 +4497,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.gray[300],
   },
   followButtonText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     fontWeight: '600',
     color: COLORS.white,
   },
@@ -4517,12 +4516,12 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   reviewsTitle: {
-    fontSize: FONTS.sizes.lg,
+    fontSize: FONTS.productDetailSizes.lg,
     fontWeight: '600',
     color: COLORS.text.primary,
   },
   seeAllText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.primary,
     fontWeight: '500',
   },
@@ -4544,7 +4543,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   reviewUserName: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     fontWeight: '600',
     color: COLORS.text.primary,
     marginBottom: 2,
@@ -4554,9 +4553,9 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   reviewText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.secondary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.productDetailSizes.sm * 20 / 14),
   },
   detailsContainer: {
     padding: SPACING.lg,
@@ -4568,12 +4567,12 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   detailsTitle: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     fontWeight: '700',
     color: COLORS.text.primary,
   },
   reportItemText: {
-    fontSize: FONTS.sizes.xs,
+    fontSize: FONTS.productDetailSizes.xs,
     fontWeight: '400',
     color: COLORS.text.primary,
   },
@@ -4584,7 +4583,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   sectionSubtitle: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     fontWeight: '700',
     color: COLORS.text.primary,
     marginTop: SPACING.md,
@@ -4604,7 +4603,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.gray[200],
   },
   detailLabel: {
-    fontSize: FONTS.sizes.xs,
+    fontSize: FONTS.productDetailSizes.xs,
     color: COLORS.text.primary,
     width: '35%',
     height: '100%',
@@ -4617,7 +4616,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'center',
   },
   detailValue: {
-    fontSize: FONTS.sizes.xs,
+    fontSize: FONTS.productDetailSizes.xs,
     color: COLORS.text.primary,
     fontWeight: '400',
     height: '100%',
@@ -4628,7 +4627,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'center',
   },
   readMoreText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.primary,
     textDecorationLine: 'underline',
     paddingHorizontal: SPACING.md,
@@ -4642,7 +4641,7 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.gray[200],
   },
   productImagesTitle: {
-    fontSize: FONTS.sizes.lg,
+    fontSize: FONTS.productDetailSizes.lg,
     fontWeight: '600',
     color: COLORS.text.primary,
     paddingHorizontal: SPACING.lg,
@@ -4655,7 +4654,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
   },
   productDescriptionTitle: {
-    fontSize: FONTS.sizes.lg,
+    fontSize: FONTS.productDetailSizes.lg,
     fontWeight: '600',
     color: COLORS.text.primary,
     paddingHorizontal: SPACING.lg,
@@ -4681,15 +4680,15 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   descriptionText: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     color: COLORS.text.primary,
-    lineHeight: 24,
+    lineHeight: Math.round(FONTS.productDetailSizes.md * 24 / 16),
   },
   similarProductsContainer: {
     padding: SPACING.sm,
   },
   similarProductsTitle: {
-    fontSize: FONTS.sizes.lg,
+    fontSize: FONTS.productDetailSizes.lg,
     fontWeight: '600',
     color: COLORS.text.primary,
     marginBottom: SPACING.md,
@@ -4702,7 +4701,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: SPACING.md,
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.secondary,
   },
   similarProductsGrid: {
@@ -4746,7 +4745,7 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   loadingMoreText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.secondary,
     marginLeft: SPACING.sm,
   },
@@ -4769,6 +4768,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.md,
   },
+  // 태블릿: 하단 액션 행(수량+장바구니/바로구매)을 화면 전체로 늘이지 않고
+  // 보기 좋은 최대 너비로 제한해 중앙정렬 — 버튼이 과하게 길어지지 않게 한다.
+  topActionRowTablet: {
+    maxWidth: 600,
+    width: '100%',
+    alignSelf: 'center',
+  },
   quantitySelector: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4787,7 +4793,7 @@ const styles = StyleSheet.create({
   // 재고 표시 — 수량 컨트롤 오른쪽 옆.
   quantityStockText: {
     marginLeft: SPACING.sm,
-    fontSize: FONTS.sizes.sm,
+    fontSize: FONTS.productDetailSizes.sm,
     color: COLORS.text.secondary,
     fontWeight: '500',
   },
@@ -4802,7 +4808,7 @@ const styles = StyleSheet.create({
     ...SHADOWS.small,
   },
   quantityText: {
-    fontSize: FONTS.sizes.lg,
+    fontSize: FONTS.productDetailSizes.lg,
     fontWeight: '600',
     color: COLORS.text.primary,
     paddingHorizontal: SPACING.lg,
@@ -4829,10 +4835,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACING.sm,
   },
+  // 수량/재고 + 장바구니/바로구매 버튼을 한 묶음으로 (수량이 버튼 바로 왼쪽).
+  // justifyContent: 'flex-end' — 묶음을 오른쪽 끝으로 치우치게 한다.
+  bottomRightGroup: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: SPACING.sm,
+    marginLeft: SPACING.sm,
+  },
   actionButtonsGroup: {
     flex: 1,
     flexDirection: 'row',
     marginLeft: SPACING.sm,
+  },
+  // 태블릿: 장바구니/바로구매 버튼 그룹의 길이를 360px 이하로 제한.
+  actionButtonsGroupTablet: {
+    maxWidth: 360,
   },
   actionButton: {
     flex: 1,
@@ -4857,7 +4877,7 @@ const styles = StyleSheet.create({
     borderRightWidth: 0,
   },
   addToCartText: {
-    fontSize: FONTS.sizes.smmd,
+    fontSize: FONTS.productDetailSizes.smmd,
     fontWeight: '700',
     color: COLORS.black,
     letterSpacing: 0.3,
@@ -4870,7 +4890,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 0,
   },
   buyNowText: {
-    fontSize: FONTS.sizes.smmd,
+    fontSize: FONTS.productDetailSizes.smmd,
     fontWeight: '700',
     color: COLORS.white,
     letterSpacing: 0.3,
@@ -4909,7 +4929,7 @@ const styles = StyleSheet.create({
   },
   imageCounterText: {
     color: COLORS.white,
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     fontWeight: '600',
   },
   fullScreenImageContainer: {
@@ -4936,18 +4956,18 @@ const styles = StyleSheet.create({
     maxWidth: 400,
   },
   modalTitle: {
-    fontSize: FONTS.sizes.xl,
+    fontSize: FONTS.productDetailSizes.xl,
     fontWeight: '700',
     color: COLORS.black,
     marginBottom: SPACING.md,
     textAlign: 'center',
   },
   modalMessage: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     color: COLORS.gray[500],
     marginBottom: SPACING.xl,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.productDetailSizes.md * 22 / 16),
   },
   modalButtons: {
     flexDirection: 'row',
@@ -4963,7 +4983,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButtonText: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     fontWeight: '600',
     color: COLORS.black,
   },
@@ -4975,7 +4995,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   confirmButtonText: {
-    fontSize: FONTS.sizes.md,
+    fontSize: FONTS.productDetailSizes.md,
     fontWeight: '600',
     color: COLORS.white,
   },

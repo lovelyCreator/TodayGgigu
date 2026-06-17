@@ -97,7 +97,8 @@ const UnitSurveyPaymentModal: React.FC<UnitSurveyPaymentModalProps> = ({
   if (!application) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={styles.card}>
           <Text style={styles.title}>{t('profile.unitSurvey.paymentModalTitle')}</Text>

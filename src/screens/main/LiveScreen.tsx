@@ -793,7 +793,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     fontWeight: '400',
     color: COLORS.white,
-    lineHeight: 24,
+    lineHeight: Math.round(FONTS.sizes.xs * 24 / 12),
     paddingRight: 24,
   },
   noticeNextButton: {
@@ -803,7 +803,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     fontWeight: '700',
     color: COLORS.white,
-    lineHeight: 24,
+    lineHeight: Math.round(FONTS.sizes.xs * 24 / 12),
   },
 
   // Carousel
@@ -895,7 +895,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xl,
     fontWeight: '900',
     color: COLORS.white,
-    lineHeight: 26,
+    lineHeight: Math.round(FONTS.sizes.xl * 26 / 20),
   },
   carouselEventDate: {
     fontSize: FONTS.sizes.xs,

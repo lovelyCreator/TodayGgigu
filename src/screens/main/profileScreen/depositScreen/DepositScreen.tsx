@@ -155,6 +155,43 @@ const DepositScreen: React.FC<DepositScreenProps> = ({ embedded = false }) => {
     });
   }, [transactions, activeTab, searchQuery, startDate, endDate]);
 
+  // Map raw API transaction status to a localized label (falls back to raw value if unknown).
+  const TRANSACTION_STATUS_KEYS = [
+    'completed', 'success', 'pending', 'processing',
+    'failed', 'cancelled', 'canceled', 'approved', 'rejected',
+  ];
+  const getTransactionStatusLabel = (status: string) => {
+    const key = (status || '').toLowerCase().trim();
+    return TRANSACTION_STATUS_KEYS.includes(key)
+      ? t(`deposit.transactionStatus.${key}`)
+      : status;
+  };
+
+  // Map raw transaction type/description keyword to a localized label (keeps real descriptions as-is).
+  const TRANSACTION_TYPE_KEYS = [
+    'charge', 'recharge', 'deposit', 'discharge', 'withdraw', 'refund', 'payment',
+  ];
+  // Phrase patterns coming from the backend description (a trailing order id is preserved).
+  const TRANSACTION_DESCRIPTION_PATTERNS = [
+    { re: /^payment for order\b/i, key: 'paymentForOrder' },
+    { re: /^refund(?:er)? for order\b/i, key: 'refundForOrder' },
+  ];
+  const getTransactionDescriptionLabel = (description: string) => {
+    const raw = (description || '').trim();
+    const key = raw.toLowerCase();
+    if (TRANSACTION_TYPE_KEYS.includes(key)) {
+      return t(`deposit.transactionType.${key}`);
+    }
+    for (const p of TRANSACTION_DESCRIPTION_PATTERNS) {
+      if (p.re.test(raw)) {
+        const rest = raw.replace(p.re, '').trim();
+        const label = t(`deposit.transactionType.${p.key}`);
+        return rest ? `${label} ${rest}` : label;
+      }
+    }
+    return raw;
+  };
+
   const handleSearch = () => {
     // Search is handled automatically by useMemo
     // console.log('Searching with:', { searchQuery, startDate, endDate });
@@ -443,14 +480,14 @@ const DepositScreen: React.FC<DepositScreenProps> = ({ embedded = false }) => {
                     />
                   </View>
                   <View style={styles.transactionInfo}>
-                    <Text style={styles.transactionDescription} numberOfLines={1}>{transaction.description}</Text>
+                    <Text style={styles.transactionDescription} numberOfLines={1}>{getTransactionDescriptionLabel(transaction.description)}</Text>
                     <Text style={styles.transactionDate}>{transaction.date} {transaction.time}</Text>
                   </View>
                   <View style={styles.transactionRight}>
                     <Text style={[styles.transactionAmount, transaction.type === 'charge' ? styles.chargeAmount : styles.dischargeAmount]}>
                       {transaction.type === 'charge' ? '+' : '-'}₩{transaction.amount.toLocaleString()}
                     </Text>
-                    <Text style={styles.transactionStatus}>{transaction.status}</Text>
+                    <Text style={styles.transactionStatus}>{getTransactionStatusLabel(transaction.status)}</Text>
                   </View>
                 </View>
               ))}
@@ -461,6 +498,7 @@ const DepositScreen: React.FC<DepositScreenProps> = ({ embedded = false }) => {
 
       {/* Charge Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showChargeModal}
         transparent
         animationType="slide"
@@ -560,6 +598,7 @@ const DepositScreen: React.FC<DepositScreenProps> = ({ embedded = false }) => {
 
       {/* Withdraw Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showWithdrawModal}
         transparent
         animationType="slide"
@@ -1076,7 +1115,7 @@ const styles = StyleSheet.create({
   warningText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.red,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
     marginTop: SPACING.lg,
     marginBottom: SPACING.lg,
   },

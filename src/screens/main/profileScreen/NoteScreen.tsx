@@ -633,7 +633,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.md,
     color: COLORS.text.secondary,
     marginBottom: SPACING.sm,
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
   },
   itemFooter: {
     flexDirection: 'row',
@@ -670,7 +670,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.md,
     color: COLORS.text.secondary,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
   },
   loadingContainer: {
     padding: SPACING.xl,

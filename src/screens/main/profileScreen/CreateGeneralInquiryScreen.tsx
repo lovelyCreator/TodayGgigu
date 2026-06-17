@@ -288,7 +288,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
     marginBottom: SPACING.lg,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   section: {
     marginBottom: SPACING.lg,
@@ -401,7 +401,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   emptyContainer: {
     flex: 1,

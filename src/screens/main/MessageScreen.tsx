@@ -33,6 +33,8 @@ import {
   markInquiryVisited,
   isInquiryConfirmedSync,
   prewarmVisitedInquiries,
+  markInquiryVisitedSync,
+  clearInquiryVisitedSync,
 } from '../../utils/visitedInquiries';
 import {
   hideInquiry,
@@ -341,19 +343,26 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
   useEffect(() => {
     onMessageReceived((data) => {
       if (!data.inquiryId) return;
+      // 사용자 본인(senderType:'user') 메시지는 미확인 상태에 영향 주지 않는다.
+      // admin 메시지만 lastMessageAt/unreadCount 를 갱신해 "미확인" 으로 만든다.
+      const isFromAdmin = data.message?.senderType === 'admin';
       setOrderInquiries((prev) =>
         prev.map((inq) =>
           inq.inquiryId === data.inquiryId
             ? {
                 ...inq,
-                unreadCount:
-                  data.unreadCount !== undefined
-                    ? data.unreadCount
-                    : activeTabRef.current === 'order'
-                      ? inq.unreadCount
-                      : (inq.unreadCount || 0) + 1,
                 messageCount: (inq.messageCount || 0) + 1,
-                lastMessageAt: data.message?.timestamp || new Date().toISOString(),
+                ...(isFromAdmin
+                  ? {
+                      unreadCount:
+                        data.unreadCount !== undefined
+                          ? data.unreadCount
+                          : activeTabRef.current === 'order'
+                            ? inq.unreadCount
+                            : (inq.unreadCount || 0) + 1,
+                      lastMessageAt: data.message?.timestamp || new Date().toISOString(),
+                    }
+                  : {}),
               }
             : inq,
         ),
@@ -648,12 +657,37 @@ const MessageScreen: React.FC<MessageScreenProps> = ({
               {getProgressStatusLabel(item.progressStatus)}
             </Text>
           ) : null}
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(displayStatus) + '18' }]}>
+          {/* 상태 배지 = 토글 버튼: [확인완료] ↔ [미확인] 수동 전환 */}
+          <TouchableOpacity
+            style={[styles.statusBadge, { backgroundColor: getStatusColor(displayStatus) + '18' }]}
+            activeOpacity={0.7}
+            onPress={(e) => {
+              e.stopPropagation?.();
+              const isConfirmed = displayStatus === 'confirmed' || displayStatus === 'closed';
+              if (isConfirmed) {
+                // 확인완료 → 미확인
+                clearInquiryVisitedSync(item.inquiryId);
+                setOrderInquiries((prev) =>
+                  prev.map((row) =>
+                    row.inquiryId === item.inquiryId ? { ...row, status: 'open' } : row,
+                  ),
+                );
+              } else {
+                // 미확인 → 확인완료
+                markInquiryVisitedSync(item.inquiryId);
+                setOrderInquiries((prev) =>
+                  prev.map((row) =>
+                    row.inquiryId === item.inquiryId ? { ...row, status: 'confirmed' } : row,
+                  ),
+                );
+              }
+            }}
+          >
             <View style={[styles.statusDot, { backgroundColor: getStatusColor(displayStatus) }]} />
             <Text style={[styles.statusBadgeText, { color: getStatusColor(displayStatus) }]}>
               {getStatusLabel(displayStatus)}
             </Text>
-          </View>
+          </TouchableOpacity>
         </View>
         {/* 카드 삭제 단추 — 클라이언트측 숨김 (백엔드 inquiry 삭제 API 부재).
             상위 TouchableOpacity 의 onPress (= 채팅 열기) 가 같이 발화하지

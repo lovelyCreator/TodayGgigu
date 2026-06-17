@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   introText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.sm * 22 / 14),
     marginBottom: SPACING.xl,
   },
   section: {
@@ -195,13 +195,13 @@ const styles = StyleSheet.create({
   description: {
     fontSize: FONTS.sizes.base,
     color: COLORS.text.primary,
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.base * 22 / 16),
     marginBottom: SPACING.xs,
   },
   bulletPoint: {
     fontSize: FONTS.sizes.base,
     color: COLORS.text.primary,
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.base * 22 / 16),
     marginBottom: SPACING.xs,
   },
   emailLink: {
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.lg,
     fontWeight: 'bold',
     width: SPACING.md,
-    // lineHeight: 22,
+    // lineHeight: Math.round(FONTS.sizes.lg * 22 / 18),
     marginBottom: SPACING.xs,
   }
 });

@@ -131,6 +131,7 @@ const PermissionModal: React.FC<PermissionModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       transparent
       animationType="fade"
@@ -237,7 +238,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.md,
     color: COLORS.gray[600],
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
     marginBottom: SPACING.xl,
   },
   buttonContainer: {

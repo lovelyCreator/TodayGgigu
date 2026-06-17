@@ -1281,7 +1281,8 @@ const PaymentScreen: React.FC = () => {
       />
 
       {/* Address Add/Edit Modal */}
-      <Modal visible={addressEditModalVisible} transparent animationType="slide" onRequestClose={() => setAddressEditModalVisible(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={addressEditModalVisible} transparent animationType="slide" onRequestClose={() => setAddressEditModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.addressModalContent}>
             <View style={styles.addressModalHeader}>
@@ -1448,7 +1449,8 @@ const PaymentScreen: React.FC = () => {
       </Modal>
 
       {/* Kakao Address Search WebView */}
-      <Modal visible={showKakaoAddress} transparent animationType="slide" onRequestClose={() => setShowKakaoAddress(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={showKakaoAddress} transparent animationType="slide" onRequestClose={() => setShowKakaoAddress(false)}>
         <View style={styles.kakaoModalOverlay}>
           <View style={styles.kakaoModalContent}>
             <View style={styles.kakaoModalHeader}>
@@ -1595,7 +1597,7 @@ const styles = StyleSheet.create({
   itemName: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
     fontWeight: '400',
   },
   itemVariant: {
@@ -1992,12 +1994,12 @@ const styles = StyleSheet.create({
   addressFullText: {
     fontSize: FONTS.sizes.md,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.md * 20 / 16),
   },
   addressPhone: {
     fontSize: FONTS.sizes.md,
     color: '#666666',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.md * 18 / 16),
   },
   addressActions: {
     flexDirection: 'row',
@@ -2517,7 +2519,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FONTS.sizes.sm,
     color: COLORS.gray[600],
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   addressModalSaveButton: {
     backgroundColor: COLORS.red,

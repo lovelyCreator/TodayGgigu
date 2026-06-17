@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING['2xl'],
+    paddingTop: SPACING.sm,
     paddingBottom: SPACING.xs,
     backgroundColor: COLORS.white,
   },
@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.md,
     color: COLORS.text.secondary,
     marginBottom: SPACING.xl,
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
   },
   languageContainer: {
     backgroundColor: COLORS.white,

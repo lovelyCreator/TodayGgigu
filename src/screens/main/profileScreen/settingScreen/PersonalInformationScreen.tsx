@@ -639,10 +639,12 @@ const PersonalInformationScreen: React.FC<PersonalInformationScreenProps> = ({
         {/* ===== 추가 정보 ===== */}
         <View style={styles.card}>
           <View style={styles.sectionHeadingRow}>
-            {renderSectionHeading(
-              t('profile.personalInfoScreen.companyAdditionalInfo'),
-              t('profile.personalInfoScreen.companyAdditionalInfoDesc'),
-            )}
+            <View style={styles.sectionHeadingFlex}>
+              {renderSectionHeading(
+                t('profile.personalInfoScreen.companyAdditionalInfo'),
+                t('profile.personalInfoScreen.companyAdditionalInfoDesc'),
+              )}
+            </View>
             <TouchableOpacity style={styles.editButton} activeOpacity={0.7}>
               <Icon name="create-outline" size={14} color={COLORS.gray[700]} />
               <Text style={styles.editButtonText}> {t('profile.personalInfoScreen.edit')}</Text>
@@ -772,6 +774,7 @@ const PersonalInformationScreen: React.FC<PersonalInformationScreenProps> = ({
       {/* 아바타 업로드 선택 모달 — 카메라 / 갤러리 / 삭제 / 취소 4개 옵션.
           삭제 단추는 사용자가 이미 아바타를 설정한 경우에만 노출된다. */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={avatarPickerOpen}
         transparent
         animationType="fade"
@@ -1279,6 +1282,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: SPACING.sm,
+  },
+  sectionHeadingFlex: {
+    flex: 1,
   },
   companyRow: {
     flexDirection: 'row',

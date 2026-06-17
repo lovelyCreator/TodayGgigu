@@ -164,6 +164,8 @@ export const ProfileTabletDashboardPanel: React.FC<
 
           embeddedProgressStatus={route.progressStatus}
 
+          embeddedUnconfirmedOnly={route.unconfirmedOnly}
+
         />,
 
       );

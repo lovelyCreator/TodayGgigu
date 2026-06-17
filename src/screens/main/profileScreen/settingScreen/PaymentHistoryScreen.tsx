@@ -121,6 +121,7 @@ const PaymentHistoryScreen: React.FC<PaymentHistoryScreenProps> = ({
     const cfg = pickerConfig[openPicker];
     return (
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible
         transparent
         animationType="fade"

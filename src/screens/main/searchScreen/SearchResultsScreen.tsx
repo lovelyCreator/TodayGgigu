@@ -168,7 +168,8 @@ const SearchResultsScreen: React.FC = () => {
   );
 
   const renderSortModal = () => (
-    <Modal visible={sortModalVisible} transparent animationType="slide" onRequestClose={() => setSortModalVisible(false)}>
+    <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={sortModalVisible} transparent animationType="slide" onRequestClose={() => setSortModalVisible(false)}>
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>

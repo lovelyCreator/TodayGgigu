@@ -249,15 +249,15 @@ const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.white,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.sm,
-    paddingTop: SPACING['3xl'],
-    paddingBottom: SPACING.md,
-    marginBottom: SPACING.sm,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.sm,
+    marginBottom: SPACING.xs,
     backgroundColor: COLORS.white,
   },
   backButton: {
@@ -279,6 +279,7 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    backgroundColor: COLORS.background,
   },
   userSection: {
     paddingHorizontal: SPACING.lg,

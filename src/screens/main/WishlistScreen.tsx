@@ -1156,6 +1156,7 @@ const WishlistScreen: React.FC<WishlistScreenProps> = ({ embedded = false }) => 
       
       {/* Item Status Dropdown Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showItemStatusModal}
         transparent
         animationType="fade"
@@ -1208,6 +1209,7 @@ const WishlistScreen: React.FC<WishlistScreenProps> = ({ embedded = false }) => 
       
       {/* Collection Time Dropdown Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showCollectionModal}
         transparent
         animationType="fade"
@@ -1275,6 +1277,7 @@ const WishlistScreen: React.FC<WishlistScreenProps> = ({ embedded = false }) => 
 
       {/* Delete Confirm Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showDeleteConfirmModal}
         transparent
         animationType="fade"
@@ -1315,6 +1318,7 @@ const WishlistScreen: React.FC<WishlistScreenProps> = ({ embedded = false }) => 
 
       {/* Sort Dropdown Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showSortModal}
         transparent
         animationType="fade"
@@ -1344,6 +1348,7 @@ const WishlistScreen: React.FC<WishlistScreenProps> = ({ embedded = false }) => 
 
       {/* All Filters Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showAllFiltersModal}
         transparent
         animationType="slide"
@@ -1728,7 +1733,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     fontWeight: '400',
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   productSpecs: {
     fontSize: FONTS.sizes.sm,
@@ -1826,7 +1831,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.sm * 22 / 14),
     marginBottom: SPACING.xl,
   },
   startExploringButton: {
@@ -1871,7 +1876,7 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     marginBottom: SPACING.xl,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
   },
   loginButton: {
     flexDirection: 'row',
@@ -2149,7 +2154,7 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     textAlign: 'center',
     marginBottom: SPACING['2xl'],
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
   },
   deleteModalButtons: {
     flexDirection: 'row',

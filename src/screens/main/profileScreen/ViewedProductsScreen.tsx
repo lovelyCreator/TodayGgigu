@@ -735,6 +735,7 @@ const ViewedProductsScreen: React.FC<ViewedProductsScreenProps> = ({
 
       {/* Delete All Confirmation Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showDeleteAllModal}
         transparent
         animationType="fade"
@@ -843,6 +844,7 @@ const ViewedProductsScreen: React.FC<ViewedProductsScreenProps> = ({
 
       {/* Success Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showSuccessModal}
         transparent
         animationType="fade"
@@ -1050,7 +1052,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.black,
     fontWeight: '400',
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 16 / 12),
   },
   footer: {
     paddingHorizontal: SPACING.md,
@@ -1157,7 +1159,7 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     textAlign: 'center',
     marginBottom: SPACING['2xl'],
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
   },
   modalButtons: {
     flexDirection: 'row',
@@ -1310,7 +1312,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.md,
     color: COLORS.white,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.md * 22 / 16),
   },
 });
 

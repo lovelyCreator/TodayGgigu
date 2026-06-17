@@ -571,6 +571,7 @@ const LiveSellerDetailScreen: React.FC = () => {
 
       {/* Category Dropdown Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showCategoryDropdown}
         transparent
         animationType="fade"
@@ -610,6 +611,7 @@ const LiveSellerDetailScreen: React.FC = () => {
 
       {/* Unfollow Confirmation Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showUnfollowModal}
         transparent
         animationType="fade"
@@ -999,7 +1001,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: SPACING.lg,
     fontWeight: '400',
-    lineHeight: 24,
+    lineHeight: Math.round(FONTS.sizes.md * 24 / 16),
   },
   modalButtons: {
     flexDirection: 'row',

@@ -615,6 +615,7 @@ const LoginScreen: React.FC = () => {
               </View>
               
               <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
                 visible={showCountryCodeModal}
                 transparent={true}
                 animationType="slide"
@@ -1027,7 +1028,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.xs * 20 / 12),
   },
   emailSuggestionsWrapper: {
     position: 'absolute',

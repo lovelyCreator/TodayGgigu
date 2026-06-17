@@ -756,6 +756,7 @@ const GeneralInquiryChatScreen: React.FC = () => {
 
       {/* More Options Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showMoreModal}
         statusBarTranslucent={true}
         transparent={true}
@@ -901,12 +902,12 @@ const styles = StyleSheet.create({
   userMessageText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   adminMessageText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   attachmentImage: {
     width: 200,

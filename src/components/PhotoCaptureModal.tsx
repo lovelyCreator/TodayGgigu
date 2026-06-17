@@ -164,6 +164,7 @@ const PhotoCaptureModal: React.FC<PhotoCaptureModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       transparent
       animationType="fade"
@@ -355,7 +356,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.gray[500],
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   productContainer: {
     flexDirection: 'row',
@@ -380,7 +381,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.md,
     fontWeight: '500',
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.md * 20 / 16),
     marginBottom: SPACING.md,
   },
   quantityRow: {

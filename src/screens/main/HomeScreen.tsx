@@ -1237,11 +1237,6 @@ const HomeScreen: React.FC = () => {
     );
   };
 
-  const getOrderCompanyName = (item: OrderItem) => {
-    if (!item.companyName) return '';
-    if (typeof item.companyName === 'string') return item.companyName;
-    return (item.companyName as any)[locale] || (item.companyName as any).zh || (item.companyName as any).en || '';
-  };
 
   const getStatusText = (order: Order) => {
     const map: Record<string, { en: string; ko: string; zh: string }> = {
@@ -1325,7 +1320,7 @@ const HomeScreen: React.FC = () => {
             />
             <View style={styles.uosProductTextCol}>
               <Text style={styles.uosProductTitle} numberOfLines={2}>
-                {getOrderCompanyName(item) || getOrderItemName(item)}
+                {order.orderNumber ? `${t('profile.orderNo')} ${order.orderNumber}` : getOrderItemName(item)}
               </Text>
               <View style={styles.uosProductMetaRow}>
                 <Text style={styles.uosProductMetaLeft}>{itemsCountLabel}</Text>
@@ -2233,6 +2228,7 @@ const HomeScreen: React.FC = () => {
       {/* 인기검색순위 모달 — 인사이트 카드의 '인기검색순위 Hot10' 단추에서 열림.
           2-열 × 5-행 (총 10개 행) 그리드: 각 행은 [인기 10 | 랜크 번호 | 아이템명 | 상승 N]. */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={categoryModalVisible}
         transparent
         animationType="fade"
@@ -2264,6 +2260,7 @@ const HomeScreen: React.FC = () => {
       </Modal>
 
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showPopularRankingModal}
         transparent
         animationType="fade"
@@ -2630,7 +2627,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.black,
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 1.5),
   },
   homeGuestBrand1688: {
     color: LOGISTICS_ORANGE,
@@ -2663,7 +2660,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: 'rgba(255,255,255,0.92)',
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 1.5),
   },
   homeGuestHeaderRight: {
     flexDirection: 'row',
@@ -2833,14 +2830,14 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm * 1.5,
     fontWeight: '900',
     color: COLORS.text.primary,
-    lineHeight: 30,
+    lineHeight: Math.round(FONTS.sizes.sm * 30 / 14),
   },
   guestWelcomeHeadline2: {
     flex: 1,
     fontSize: FONTS.sizes.sm,
     fontWeight: '700',
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   guestQuickStrip: {
     flexDirection: 'row',
@@ -3071,7 +3068,7 @@ const styles = StyleSheet.create({
   logisticsServiceDesc: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 1.33),
   },
   integratedSection: {
     paddingHorizontal: HOME_GUTTER,
@@ -3233,7 +3230,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.sm * 1.57),
     marginBottom: SPACING.xs,
   },
   csSubtitle2: {
@@ -3241,7 +3238,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.sm * 22 / 14),
     marginBottom: SPACING.md,
   },
   csCardsRow: {
@@ -3384,23 +3381,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   csQuickCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: SPACING.xs,
   },
   csQuickIconImage: {
-    width: 40,
-    height: 40,
+    width: 60,
+    height: 60,
   },
   csQuickTitle: {
-    fontSize: 10,
+    fontSize: 15,
     fontWeight: '700',
     color: COLORS.black,
     textAlign: 'center',
-    lineHeight: 13,
+    lineHeight: 20,
   },
   csQuickGo: {
     marginTop: 4,
@@ -4124,7 +4121,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xl,
     fontWeight: '900',
     color: COLORS.black,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.xl * 20 / 20),
   },
   liveChannelSubtitle: {
     fontSize: FONTS.sizes.xl,
@@ -4661,7 +4658,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     fontWeight: '700',
     color: COLORS.black,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 1.3),
   },
   uosProductMetaRow: {
     flexDirection: 'row',
@@ -4747,7 +4744,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 16 / 12),
   },
   uosLogisticsMoreRow: {
     flexDirection: 'row',
@@ -4779,7 +4776,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     color: COLORS.black,
     fontWeight: '600',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   uosAddressContact: {
     marginTop: 4,

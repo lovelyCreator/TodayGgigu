@@ -45,6 +45,7 @@ const PlatformMenu: React.FC<PlatformMenuProps> = ({
       </TouchableOpacity>
 
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showMenu}
         transparent={true}
         animationType="fade"

@@ -357,6 +357,7 @@ export default function OrderListPlaceholderScreen<TKey extends string>(
 
       {/* 통관 dropdown */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showCustomsDropdown}
         transparent
         animationType="fade"
@@ -402,6 +403,7 @@ export default function OrderListPlaceholderScreen<TKey extends string>(
 
       {/* 운송 dropdown */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showTransportDropdown}
         transparent
         animationType="fade"

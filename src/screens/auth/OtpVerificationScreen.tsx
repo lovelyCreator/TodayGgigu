@@ -355,7 +355,7 @@ const styles = StyleSheet.create({
   instruction: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   phoneNumberBold: {
     fontWeight: '700',

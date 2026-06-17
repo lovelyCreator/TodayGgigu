@@ -284,6 +284,7 @@ const UnitSurveyRequestModal: React.FC<UnitSurveyRequestModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       transparent
       animationType="fade"

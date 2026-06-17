@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
   orderNumber: { fontSize: FONTS.sizes.sm, color: COLORS.text.secondary },
   itemRow: { flexDirection: 'row', gap: SPACING.sm, alignItems: 'flex-start' },
   itemImage: { width: 56, height: 56, borderRadius: BORDER_RADIUS.sm, backgroundColor: COLORS.gray[100] },
-  itemName: { fontSize: FONTS.sizes.sm, color: COLORS.text.primary, lineHeight: 18 },
+  itemName: { fontSize: FONTS.sizes.sm, color: COLORS.text.primary, lineHeight: Math.round(FONTS.sizes.sm * 18 / 14) },
   itemPrice: { fontSize: FONTS.sizes.sm, color: COLORS.text.secondary, marginTop: 2 },
   amountRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 },
   amountLabel: { fontSize: FONTS.sizes.sm, color: COLORS.text.secondary },

@@ -20,7 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView, WebViewNavigation } from 'react-native-webview';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import Icon from 'react-native-vector-icons/Ionicons';
+import Icon from '../../../../components/Icon';
 
 import { COLORS, FONTS, SPACING } from '../../../../constants/index';
 import { useTranslation } from '../../../../hooks/useTranslation';
@@ -69,7 +69,11 @@ const injectedViewportOverride = `
       }
       var m = document.createElement('meta');
       m.name = 'viewport';
-      m.content = 'width=' + DESIGN_WIDTH + ', initial-scale=0.45, minimum-scale=0.3, maximum-scale=3.0, user-scalable=yes';
+      // 디자인 너비(900px)를 기기 화면 너비에 맞춰 스케일 → 폰·태블릿 모두 화면을 꽉 채운다.
+      // (고정 0.45 는 폰 기준이라 iPad 에서 작게 떠 여백이 컸음)
+      var screenW = (window.screen && window.screen.width) ? window.screen.width : 405;
+      var fillScale = Math.max(0.3, screenW / DESIGN_WIDTH);
+      m.content = 'width=' + DESIGN_WIDTH + ', initial-scale=' + fillScale + ', minimum-scale=0.3, maximum-scale=3.0, user-scalable=yes';
       (document.head || document.documentElement).appendChild(m);
       if (document.documentElement) {
         document.documentElement.style.minWidth = DESIGN_WIDTH + 'px';
@@ -79,6 +83,17 @@ const injectedViewportOverride = `
         document.body.style.minWidth = DESIGN_WIDTH + 'px';
         document.body.style.overflowX = 'auto';
         document.body.style.overflowY = 'auto';
+      }
+      // 좌우 여백 제거 — body/html 기본 마진·패딩을 0 으로, 가운데 정렬(margin:auto)·
+      // max-width 로 좁아진 상위 컨테이너를 풀너비로 펴서 결제창이 화면을 꽉 채우게 한다.
+      var STYLE_ID = 'rn-fullwidth-style';
+      if (!document.getElementById(STYLE_ID)) {
+        var st = document.createElement('style');
+        st.id = STYLE_ID;
+        st.innerHTML =
+          'html,body{margin:0!important;padding:0!important;}' +
+          'body>*{margin-left:0!important;margin-right:0!important;max-width:100%!important;width:100%!important;box-sizing:border-box!important;}';
+        (document.head || document.documentElement).appendChild(st);
       }
     }
     applyViewport();
@@ -224,7 +239,7 @@ const BillgateWebViewScreen: React.FC = () => {
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.closeButton} onPress={handleClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Icon name="close" size={22} color={COLORS.black} />
+          <Icon name="arrow-back" size={22} color={COLORS.black} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {t('payment.cardPayment') || '신용카드 결제'}

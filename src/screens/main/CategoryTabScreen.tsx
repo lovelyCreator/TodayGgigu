@@ -22,7 +22,7 @@ import { useNavigation, useFocusEffect, useRoute, RouteProp } from '@react-navig
 import { requestCameraPermission, requestPhotoLibraryPermission } from '../../utils/permissions';
 import { StackNavigationProp } from '@react-navigation/stack';
 
-import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS, IMAGE_CONFIG } from '../../constants';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS, IMAGE_CONFIG } from '../../constants';
 
 const BACK_NAVIGATION_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 import { RootStackParamList } from '../../types';
@@ -1217,10 +1217,7 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: COLORS.white,
-    paddingTop: SPACING.md,
-    borderBottomWidth: 2,
-    borderBottomColor: COLORS.gray[200],
-    ...SHADOWS.sm,
+    paddingTop: SPACING.sm,
   },
   headerRow: {
     flexDirection: 'row',

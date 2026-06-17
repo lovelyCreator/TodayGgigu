@@ -367,6 +367,7 @@ const ForgotPasswordScreen: React.FC = () => {
 
         {/* Country Code Selection Modal */}
         <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
           visible={showCountryCodeModal}
           transparent={true}
           animationType="slide"
@@ -478,7 +479,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
     marginBottom: SPACING.lg,
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.xs * 22 / 12),
   },
   checkContainer: {
     marginBottom: SPACING.lg,

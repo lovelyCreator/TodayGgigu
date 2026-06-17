@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.text.primary,
     marginBottom: SPACING.xs,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   productSpecs: {
     fontSize: FONTS.sizes.sm,

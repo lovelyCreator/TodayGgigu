@@ -253,6 +253,7 @@ const AddNewAddressModal: React.FC<AddNewAddressModalProps> = ({
   return (
     <>
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={visible}
         transparent
         animationType="fade"
@@ -447,6 +448,7 @@ const AddNewAddressModal: React.FC<AddNewAddressModalProps> = ({
       </Modal>
 
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showKakaoAddress}
         transparent
         animationType="slide"
@@ -562,7 +564,7 @@ const styles = StyleSheet.create({
   customsNotice: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.gray[500],
-    lineHeight: 17,
+    lineHeight: Math.round(FONTS.sizes.xs * 17 / 12),
     marginTop: SPACING.smmd,
   },
   fieldLabel: {
@@ -617,7 +619,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.red,
     marginTop: SPACING.xs,
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 16 / 12),
   },
   phoneRow: {
     flexDirection: 'row',
@@ -650,7 +652,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FONTS.sizes.xs,
     color: COLORS.gray[600],
-    lineHeight: 17,
+    lineHeight: Math.round(FONTS.sizes.xs * 17 / 12),
   },
   saveErrorBanner: {
     marginHorizontal: SPACING.md,
@@ -663,7 +665,7 @@ const styles = StyleSheet.create({
   saveErrorText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.white,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   addressModalFooter: {
     flexDirection: 'row',

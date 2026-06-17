@@ -18,22 +18,18 @@ export const getPagePaddingHorizontal = (layout: ResponsiveLayout): number => {
 };
 
 /**
- * 상품리스트 등 그리드·필터가 많은 화면 — 태블릿 가로에서는 좁은 컬럼 대신
- * 화면 전체(좌우 gutter 만)를 쓴다.
+ * 상품리스트 등 그리드·필터가 많은 화면 — 태블릿(가로·세로 모두)에서는 좁은
+ * 중앙 컬럼 대신 화면 전체에 적당한 좌우 여백(gutter*1.5)만 두고 넓게 쓴다.
  */
 export const getListPagePadding = (layout: ResponsiveLayout): number => {
   if (!layout.isTablet) return 0;
-  if (layout.isTabletLandscape) return Math.round(layout.gutter * 1.5);
-  return getPagePaddingHorizontal(layout);
+  return Math.round(layout.gutter * 1.5);
 };
 
 export const getListPageContentWidth = (layout: ResponsiveLayout): number => {
   if (!layout.isTablet) return layout.width;
-  if (layout.isTabletLandscape) {
-    const pad = getListPagePadding(layout);
-    return layout.width - pad * 2;
-  }
-  return getContentMaxWidth(layout);
+  const pad = getListPagePadding(layout);
+  return layout.width - pad * 2;
 };
 
 export const getModalMaxWidth = (layout: ResponsiveLayout): number => {

@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
   addressText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
     marginBottom: SPACING.xs,
   },
   addressCity: {

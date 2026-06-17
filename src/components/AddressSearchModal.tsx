@@ -238,6 +238,7 @@ const AddressSearchModal: React.FC<AddressSearchModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       animationType="slide"
       transparent={true}
@@ -415,7 +416,7 @@ const styles = StyleSheet.create({
   instructionsText: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.gray[500],
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 18 / 12),
   },
   resultsContainer: {
     flex: 1,

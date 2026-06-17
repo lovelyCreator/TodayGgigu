@@ -238,7 +238,7 @@ const MainTabNavigator = () => {
   const TAB_BAR_DOWN_OFFSET = 0;
   const isLowInsetPhone = !responsive.isTablet && insets.bottom < 8;
   const baseTabBarHeight = responsive.isTablet
-    ? 56
+    ? 84
     : isLowInsetPhone
       ? 60
       : 45;
@@ -261,7 +261,7 @@ const MainTabNavigator = () => {
         freezeOnBlur: true,
         tabBarIcon: ({ focused }) => {
           const iconColor = focused ? COLORS.text.red : COLORS.black;
-          const iconSize = 24;
+          const iconSize = responsive.isTablet ? 36 : 24;
 
           if (route.name === 'Home') {
             return <HomeIcon width={iconSize} height={iconSize} color={iconColor} />;
@@ -296,7 +296,7 @@ const MainTabNavigator = () => {
                     justifyContent: 'center',
                     paddingHorizontal: 4,
                   }}>
-                    <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+                    <Text style={{ color: '#fff', fontSize: responsive.isTablet ? 15 : 10, fontWeight: '700' }}>
                       {totalMessageUnread > 99 ? '99+' : totalMessageUnread}
                     </Text>
                   </View>
@@ -332,7 +332,7 @@ const MainTabNavigator = () => {
           return (
             <Text
               style={{
-                fontSize: 12,
+                fontSize: responsive.isTablet ? 18 : 12,
                 color: focused ? COLORS.text.red : COLORS.black,
                 fontWeight: focused ? '600' : '400',
               }}
@@ -411,7 +411,7 @@ const MainTabNavigator = () => {
             }
           : null),
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: responsive.isTablet ? 18 : 12,
           marginTop: 4,
         },
         headerShown: false,

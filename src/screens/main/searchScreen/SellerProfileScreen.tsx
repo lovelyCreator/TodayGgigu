@@ -355,7 +355,7 @@ const SellerProfileScreen: React.FC = () => {
               <ActivityIndicator size="small" color={isFollowing ? COLORS.text.red : COLORS.background} />
             ) : (
               <Text style={[styles.followButtonText, isFollowing && styles.followingButtonText]}>
-                {isFollowing ? 'Following' : 'Follow'}
+                {isFollowing ? t('live.following') : t('live.follow')}
               </Text>
             )}
           </TouchableOpacity>
@@ -424,9 +424,6 @@ const SellerProfileScreen: React.FC = () => {
               <Icon name="search" size={16} color={COLORS.white} />
             </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.menuButton}>
-            <Icon name="ellipsis-horizontal" size={24} color={COLORS.black} />
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
       {renderHeader()}
@@ -480,6 +477,7 @@ const SellerProfileScreen: React.FC = () => {
 
       {/* Unfollow Confirmation Modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showUnfollowModal}
         transparent
         animationType="fade"
@@ -524,13 +522,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   safeArea: {
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.white,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.sm,
-    paddingTop: SPACING.xl,
+    paddingTop: SPACING.sm,
     paddingBottom: SPACING.md,
     backgroundColor: COLORS.white,
     gap: SPACING.sm,
@@ -566,12 +564,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 4,
-  },
-  menuButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   loadingContainer: {
     flex: 1,
@@ -729,7 +721,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: SPACING.lg,
     fontWeight: '400',
-    lineHeight: 24,
+    lineHeight: Math.round(FONTS.sizes.md * 24 / 16),
   },
   modalButtons: {
     flexDirection: 'row',

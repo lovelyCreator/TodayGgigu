@@ -422,7 +422,7 @@ const styles = StyleSheet.create({
   revenueDesc: {
     fontSize: FONTS.sizes.xs,
     color: '#8B5E3C',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 18 / 12),
   },
 
   // Invite Section
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
   inviteSectionDesc: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 18 / 12),
   },
 
   // Invite Cards
@@ -480,7 +480,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 18 / 12),
     marginBottom: SPACING.md,
     paddingHorizontal: SPACING.sm,
   },

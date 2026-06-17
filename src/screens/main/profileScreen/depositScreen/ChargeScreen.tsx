@@ -323,7 +323,7 @@ const styles = StyleSheet.create({
   warningText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.secondary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
     marginTop: SPACING.lg,
   },
   submitButton: {

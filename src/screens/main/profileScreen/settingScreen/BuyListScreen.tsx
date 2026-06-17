@@ -546,6 +546,7 @@ type BuyListScreenProps = {
   embeddedDomain?: BuyListBusinessDomain | 'error_management' | 'refund_management';
   embeddedInitialTab?: string;
   embeddedProgressStatus?: string;
+  embeddedUnconfirmedOnly?: boolean;
 };
 
 const BuyListScreen: React.FC<BuyListScreenProps> = ({
@@ -553,6 +554,7 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   embeddedDomain,
   embeddedInitialTab,
   embeddedProgressStatus,
+  embeddedUnconfirmedOnly,
 }) => {
   const navigation = useNavigation<BuyListScreenNavigationProp>();
   const route = useRoute<BuyListScreenRouteProp>();
@@ -632,6 +634,10 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
   } | null>(null);
   const errorChipRef = useRef<View | null>(null);
   const [selectedProgressStatus, setSelectedProgressStatus] = useState<string | null>(null);
+  // "내 주문 → 미확인" — 라벨 미확인(unreadCount > 0) 주문만 표시하는 필터.
+  const [unconfirmedFilter, setUnconfirmedFilter] = useState<boolean>(
+    embedded ? !!embeddedUnconfirmedOnly : !!route.params?.unconfirmedOnly,
+  );
   // 현지입/출고 드롭다운 필터 — '전체' / '입고' / '출고' 3가지.
   // 'all' 일 때는 현지 그룹 전체, 'in' 은 입고 관련 진행상태, 'out' 은 출고 관련.
   const [warehouseFilter, setWarehouseFilter] = useState<'all' | 'in' | 'out'>('all');
@@ -744,6 +750,12 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       setErrorSubFilter('error_management');
     }
   }, [embedded, embeddedProgressStatus, route.params?.progressStatus]);
+
+  // "미확인" 파라미터 동기화 — 진입 시 라벨 미확인 필터 on/off.
+  useEffect(() => {
+    const next = embedded ? !!embeddedUnconfirmedOnly : !!route.params?.unconfirmedOnly;
+    setUnconfirmedFilter(next);
+  }, [embedded, embeddedUnconfirmedOnly, route.params?.unconfirmedOnly]);
 
   const [unreadCounts, setUnreadCounts] = useState<{ [inquiryId: string]: number }>({});
   const [selectAll, setSelectAll] = useState(false);
@@ -2236,12 +2248,17 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
           orderMatchesProgressStatus(order, selectedProgressStatus),
         );
       }
+      // "내 주문 → 미확인" — 라벨 미확인(unreadCount > 0) 주문만.
+      if (unconfirmedFilter) {
+        result = result.filter((order) => ((order as any).unreadCount ?? 0) > 0);
+      }
       return result;
     },
     [
       activeTab,
       orders,
       selectedProgressStatus,
+      unconfirmedFilter,
       filters.orderNumber,
       filterPlatform,
       activeBusinessDomain,
@@ -2652,6 +2669,7 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
             left = chip.x (칩의 좌측에 맞춰 정렬).
             팝오버 느낌을 위해 backdrop 은 투명 — 바깥쪽 탭으로만 닫힘. */}
         <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
           visible={isPurchaseDropdownOpen}
           transparent
           animationType="fade"
@@ -2712,6 +2730,7 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
             발주관리와 같은 앵커링 패턴: 칩 바로 아래에 떠 있고 너비는 칩 너비와 일치.
             top·left·width 모두 칩의 measureInWindow 결과로 인라인 오버라이드. */}
         <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
           visible={!!(currentGroup && expandedStatusGroup === activeTab && activeTab === 'warehouse')}
           transparent
           animationType="fade"
@@ -2782,6 +2801,7 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
 
         {/* 오류 드롭다운 — 오류관리 · 반품관리 · 출고보류 · 문제상품 */}
         <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
           visible={!!(errorGroup && isErrorDropdownOpen && activeTab === 'error')}
           transparent
           animationType="fade"
@@ -3110,7 +3130,8 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       />
 
       {/* Date Range Picker Modal */}
-      <Modal visible={showDateModal} transparent animationType="fade" onRequestClose={() => setShowDateModal(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={showDateModal} transparent animationType="fade" onRequestClose={() => setShowDateModal(false)}>
         <TouchableOpacity style={styles.dateModalOverlay} activeOpacity={1} onPress={() => setShowDateModal(false)}>
           <View style={styles.dateModalContent} onStartShouldSetResponder={() => true}>
             {/* Month navigation */}
@@ -3200,7 +3221,8 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       />
 
       {/* Refund Modal */}
-      <Modal visible={!!refundModalOrder} transparent animationType="slide" onRequestClose={() => setRefundModalOrder(null)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={!!refundModalOrder} transparent animationType="slide" onRequestClose={() => setRefundModalOrder(null)}>
         <View style={styles.refundModalOverlay}>
           <View style={styles.refundModalContent}>
             {/* Header */}
@@ -3330,7 +3352,8 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       </Modal>
 
       {/* Cancel Order Modal */}
-      <Modal visible={!!cancelOrderModal} transparent animationType="fade" onRequestClose={() => setCancelOrderModal(null)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={!!cancelOrderModal} transparent animationType="fade" onRequestClose={() => setCancelOrderModal(null)}>
         <View style={styles.cancelModalOverlay}>
           <View style={styles.cancelModalContent}>
             {/* Header */}
@@ -3409,7 +3432,8 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       </Modal>
 
       {/* Navigation Modal */}
-      <Modal visible={showNavModal} transparent animationType="fade" onRequestClose={() => setShowNavModal(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={showNavModal} transparent animationType="fade" onRequestClose={() => setShowNavModal(false)}>
         <TouchableOpacity style={styles.navModalOverlay} activeOpacity={1} onPress={() => setShowNavModal(false)}>
           <View style={styles.navModalContent} onStartShouldSetResponder={() => true}>
             <View style={styles.navModalGrid}>
@@ -3455,7 +3479,8 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       </Modal>
 
       {/* All Filters Modal */}
-      <Modal visible={showAllFiltersModal} transparent animationType="slide" onRequestClose={() => setShowAllFiltersModal(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={showAllFiltersModal} transparent animationType="slide" onRequestClose={() => setShowAllFiltersModal(false)}>
         <View style={styles.allFiltersOverlay}>
           <View style={styles.allFiltersContent}>
             <View style={styles.allFiltersHeader}>
@@ -3646,7 +3671,8 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       )}
 
       {/* Edit Address Modal */}
-      <Modal visible={addressModalVisible} transparent animationType="slide" onRequestClose={() => setAddressModalVisible(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={addressModalVisible} transparent animationType="slide" onRequestClose={() => setAddressModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.addressModalContent}>
             <View style={styles.addressModalHeader}>
@@ -3787,7 +3813,8 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
       </Modal>
 
       {/* Kakao Address Search WebView */}
-      <Modal visible={showKakaoAddress} transparent animationType="slide" onRequestClose={() => setShowKakaoAddress(false)}>
+      <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']} visible={showKakaoAddress} transparent animationType="slide" onRequestClose={() => setShowKakaoAddress(false)}>
         <View style={styles.kakaoModalOverlay}>
           <View style={styles.kakaoModalContent}>
             <View style={styles.kakaoModalHeader}>
@@ -3835,7 +3862,7 @@ const BuyListScreen: React.FC<BuyListScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.white,
   },
   embeddedContainer: {
     flex: 1,
@@ -3853,7 +3880,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm * 2,
-    paddingTop: SPACING.lg * 2,
+    paddingTop: SPACING.sm,
     backgroundColor: COLORS.white,
     gap: SPACING.sm,
   },
@@ -3976,6 +4003,7 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    backgroundColor: COLORS.background,
   },
   content: {
     paddingBottom: SPACING.xl,
@@ -4477,14 +4505,14 @@ const styles = StyleSheet.create({
   orderSummaryLeft: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 18 / 12),
     flexShrink: 1,
   },
   seeMoreLink: {
     fontSize: FONTS.sizes.xs,
     color: '#2563EB',
     fontWeight: '600',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 18 / 12),
   },
   orderSummaryCenter: {
     fontSize: FONTS.sizes.sm,
@@ -4492,7 +4520,7 @@ const styles = StyleSheet.create({
     color: COLORS.text.primary,
     flexShrink: 0,
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
     paddingTop: 1,
   },
   orderSummaryRight: {
@@ -4500,7 +4528,7 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     flexShrink: 0,
     textAlign: 'right',
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 18 / 12),
     paddingTop: 1,
     minWidth: 120,
   },
@@ -4521,7 +4549,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.sm,
     fontWeight: '500',
     color: COLORS.text.primary,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   productSpecs: {
     fontSize: FONTS.sizes.xs,
@@ -4530,7 +4558,7 @@ const styles = StyleSheet.create({
   productDescription: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 16 / 12),
   },
   productPriceCol: {
     alignItems: 'flex-end',
@@ -5205,7 +5233,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.sm * 20 / 14),
   },
   cancelReasonLabel: {
     fontSize: FONTS.sizes.sm,
@@ -5383,7 +5411,7 @@ const styles = StyleSheet.create({
   refundItemName: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
   },
   refundItemPrice: {
     fontSize: FONTS.sizes.sm,
@@ -5462,7 +5490,7 @@ const styles = StyleSheet.create({
   atcProductName: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.text.primary,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.sm * 18 / 14),
     marginBottom: SPACING.xs,
   },
   atcProductPrice: {

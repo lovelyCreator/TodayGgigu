@@ -797,6 +797,7 @@ const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
 
       {/* Label preview modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={labelViewer !== null}
         transparent
         animationType="fade"
@@ -864,6 +865,7 @@ const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
 
       {/* Address edit modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={addressModalVisible}
         transparent
         animationType="slide"
@@ -955,6 +957,7 @@ const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
       </Modal>
 
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={showKakaoAddress}
         transparent
         animationType="slide"
@@ -1129,7 +1132,7 @@ const styles = StyleSheet.create({
   sectionHeadingText: { fontSize: FONTS.sizes.sm, fontWeight: '700', color: COLORS.text.primary },
   infoField: { marginBottom: 8 },
   infoFieldLabel: { fontSize: 11, color: COLORS.text.secondary, marginBottom: 2 },
-  infoFieldValue: { fontSize: FONTS.sizes.sm, color: COLORS.text.primary, lineHeight: 18 },
+  infoFieldValue: { fontSize: FONTS.sizes.sm, color: COLORS.text.primary, lineHeight: Math.round(FONTS.sizes.sm * 18 / 14) },
   paymentRecordLine: { fontSize: FONTS.sizes.xs, color: COLORS.text.primary, marginBottom: 4 },
   editAddressLink: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   editAddressText: { fontSize: FONTS.sizes.xs, color: COLORS.red, fontWeight: '600' },
@@ -1169,7 +1172,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.gray[100],
   },
   productMainCol: { flex: 1, gap: 2 },
-  productTitle: { fontSize: FONTS.sizes.sm, color: COLORS.text.primary, lineHeight: 18 },
+  productTitle: { fontSize: FONTS.sizes.sm, color: COLORS.text.primary, lineHeight: Math.round(FONTS.sizes.sm * 18 / 14) },
   productSpecLine: { fontSize: FONTS.sizes.xs, color: COLORS.text.secondary },
   productMetricsGrid: { flexDirection: 'row', gap: SPACING.sm },
   metricCell: { flex: 1 },
@@ -1255,7 +1258,7 @@ const styles = StyleSheet.create({
   labelPreviewContent: {
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 16 / 12),
   },
   labelPreviewBarcode: {
     marginTop: SPACING.xs,

@@ -1834,6 +1834,7 @@ const SearchScreenComponent: React.FC = () => {
 
       {/* Clear history confirm modal */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={clearHistoryConfirmVisible}
         transparent
         animationType="fade"
@@ -2329,7 +2330,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: '#856404',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    lineHeight: 16,
+    lineHeight: Math.round(FONTS.sizes.xs * 16 / 12),
   },
   keepShoppingForContainer: {
     marginTop: SPACING.lg,

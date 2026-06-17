@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.base,
     color: COLORS.text.secondary,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: Math.round(FONTS.sizes.base * 22 / 16),
     marginBottom: SPACING.lg,
   },
   errorDetails: {

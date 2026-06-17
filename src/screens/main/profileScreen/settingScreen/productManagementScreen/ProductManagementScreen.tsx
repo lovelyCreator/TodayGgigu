@@ -167,11 +167,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
 
   const responsive = useResponsive();
   const listPagePadding = getListPagePadding(responsive);
-  const listContentPaddingH = responsive.isTabletLandscape
-    ? 0
-    : responsive.isTablet
-      ? responsive.gutter
-      : SPACING.md;
+  const listContentPaddingH = responsive.isTablet ? 0 : SPACING.md;
   const listContentPaddingV = responsive.isTablet ? responsive.gutter : SPACING.md;
   const gridGap = SPACING.sm;
   const [listContainerWidth, setListContainerWidth] = useState(0);
@@ -640,7 +636,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
     <View
       style={[
         styles.header,
-        responsive.isTabletLandscape && {
+        responsive.isTablet && {
           paddingHorizontal: listPagePadding,
         },
       ]}
@@ -663,7 +659,12 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
     const open = openPicker === pickerKey;
     return (
       <View style={styles.filterRow}>
-        <Text style={styles.filterRowLabel}>{label}</Text>
+        <Text
+          style={[styles.filterRowLabel, responsive.isTablet && styles.filterRowLabelTablet]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
         <TouchableOpacity
           // ref 부착 — onPress 에서 measureInWindow 로 화면 절대 좌표 측정.
           ref={(node) => {
@@ -1230,7 +1231,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
               handleCardAddToCart(item);
             }}
           >
-            <Icon name="cart-outline" size={16} color={COLORS.red} />
+            <Icon name="cart-outline" size={24} color={COLORS.red} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.cardActionBtn}
@@ -1244,7 +1245,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
             {imageSearchLoading ? (
               <ActivityIndicator size="small" color={COLORS.red} />
             ) : (
-              <Icon name="search" size={16} color={COLORS.red} />
+              <Icon name="search" size={24} color={COLORS.red} />
             )}
           </TouchableOpacity>
           <TouchableOpacity
@@ -1255,7 +1256,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
               handleCardEdit(item);
             }}
           >
-            <Icon name="create-outline" size={16} color={COLORS.red} />
+            <Icon name="create-outline" size={24} color={COLORS.red} />
           </TouchableOpacity>
         </View>
         <View
@@ -1353,6 +1354,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
     const cfg = pickerConfig[openPicker];
     return (
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible
         transparent
         animationType="fade"
@@ -1524,6 +1526,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
     const totalQty = Object.values(cartModalQtyMap).reduce((s, n) => s + (n || 0), 0);
     return (
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={!!cartModalProduct}
         transparent
         animationType="fade"
@@ -1784,6 +1787,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
     );
     return (
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible
         transparent
         animationType="fade"
@@ -1941,9 +1945,9 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
       )}
       <TabletContent
         style={styles.body}
-        fullWidth={responsive.isTabletLandscape}
+        fullWidth={responsive.isTablet}
         contentStyle={
-          responsive.isTabletLandscape
+          responsive.isTablet
             ? { paddingHorizontal: listPagePadding }
             : undefined
         }
@@ -1991,6 +1995,7 @@ const ProductManagementScreen: React.FC<ProductManagementScreenProps> = ({
             정렬되며, 백드롭 탭으로 닫힘. 3개 옵션: 이미지 Excel 다운 /
             Excel 다운 / 식검 다운. */}
         <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
           visible={downloadDropdownOpen}
           transparent
           animationType="fade"
@@ -2077,7 +2082,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    paddingTop: SPACING.xs,
+    paddingBottom: SPACING.sm,
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray[100],
@@ -2135,6 +2141,10 @@ const styles = StyleSheet.create({
     width: 64,
     fontSize: FONTS.sizes.sm,
     color: COLORS.gray[700],
+  },
+  // 태블릿: 2배 폰트에서 라벨(상품유형/카테고리/라벨종류)이 한 줄에 들어가도록 너비 확장.
+  filterRowLabelTablet: {
+    width: 124,
   },
   searchBox: {
     flex: 1,

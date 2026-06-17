@@ -112,6 +112,27 @@ export const isInquiryConfirmedSync = (
   return visitedAt >= lastMs;
 };
 
+/**
+ * 동기 버전 — 인메모리 캐시를 즉시 갱신하고 영속 저장은 백그라운드로.
+ * 사용자 상호작용(전송/토글)에서 호출해 카드 라벨이 즉시 반영되게 한다.
+ */
+export const markInquiryVisitedSync = (inquiryId: string): void => {
+  if (!inquiryId) return;
+  // 캐시 미로드 시 부분 데이터로 덮어쓰지 않도록 async 버전(loadCache 후 병합)으로 폴백.
+  if (!cache) { void markInquiryVisited(inquiryId); return; }
+  void persist({ ...cache, [inquiryId]: Date.now() }); // persist 가 cache 를 동기 갱신
+};
+
+/** 동기 버전 — 방문 기록 제거(→ 미확인). 인메모리 캐시 즉시 갱신. */
+export const clearInquiryVisitedSync = (inquiryId: string): void => {
+  if (!inquiryId) return;
+  if (!cache) { void clearInquiryVisited(inquiryId); return; }
+  if (!(inquiryId in cache)) return;
+  const next = { ...cache };
+  delete next[inquiryId];
+  void persist(next);
+};
+
 /** 캐시 prewarm — 화면 mount/focus 시 한 번 호출. */
 export const prewarmVisitedInquiries = async (): Promise<void> => {
   await loadCache();

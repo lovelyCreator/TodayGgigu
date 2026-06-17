@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
     marginLeft: SPACING.sm,
-    lineHeight: 18,
+    lineHeight: Math.round(FONTS.sizes.xs * 18 / 12),
   },
   bottomContainer: {
     padding: SPACING.lg,

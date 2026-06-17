@@ -689,7 +689,7 @@ const OnlineProductEditScreen: React.FC = () => {
       {/* 본문 컨테이너 — 회색 배경(원래 container 가 갖던 색)을 여기로 옮김.
           기존 ScrollView 가 styles.body 를 이미 쓰고 있어 충돌을 피하려고
           여기는 styles.bodyWrap 로 둠. */}
-      <TabletContent style={styles.bodyWrap}>
+      <TabletContent style={styles.bodyWrap} fullWidth={responsive.isTablet}>
 
       {/* 수기입력 tab */}
       <View style={styles.tabBar}>
@@ -1029,6 +1029,7 @@ const OnlineProductEditScreen: React.FC = () => {
       {/* 썸네일 추가 시 노출되는 카메라/갤러리 선택 모달 —
           PersonalInformationScreen 의 아바타 픽커 스타일을 따른다. */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={thumbPickerOpen}
         transparent
         animationType="fade"
@@ -1081,6 +1082,7 @@ const OnlineProductEditScreen: React.FC = () => {
           인라인 오버라이드해 드롭다운이 행 너비와 정확히 일치하도록 한다.
           백드롭 탭으로 닫힘. */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={categoryDropdownOpen}
         transparent
         animationType="fade"
@@ -1150,6 +1152,7 @@ const OnlineProductEditScreen: React.FC = () => {
           입력값(라벨종류 / 양식 / 상품명 / 라벨 내용 / 바코드 / 이미지) 은
           state 로 보관되어 다음 열기 때도 유지됨. */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={labelModalRowId !== null}
         transparent
         animationType="fade"
@@ -1426,6 +1429,7 @@ const OnlineProductEditScreen: React.FC = () => {
           state(라벨 종류 / 양식 / 상품명 / 내용 / 바코드)를 그대로 미리보기에
           반영. 닫기 / 확인 두 단추로 종료. */}
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={barcodeViewerRowId !== null}
         transparent
         animationType="fade"

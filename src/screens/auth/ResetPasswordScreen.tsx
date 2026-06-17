@@ -344,7 +344,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.text.secondary,
     marginBottom: SPACING.lg,
-    lineHeight: 20,
+    lineHeight: Math.round(FONTS.sizes.xs * 20 / 12),
   },
   inputContainer: {
     marginTop: SPACING.md,

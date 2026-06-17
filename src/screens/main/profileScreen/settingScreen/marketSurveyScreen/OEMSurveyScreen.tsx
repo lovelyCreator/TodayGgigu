@@ -400,6 +400,7 @@ const OEMSurveyScreen: React.FC<OEMSurveyScreenProps> = ({ embedded = false }) =
       />
 
       <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
         visible={dateModalOpen}
         transparent
         animationType="fade"

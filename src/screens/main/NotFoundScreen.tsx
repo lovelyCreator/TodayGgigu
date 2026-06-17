@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.md,
     color: COLORS.text.primary,
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: Math.round(FONTS.sizes.md * 24 / 16),
     marginBottom: SPACING.xxl,
   },
   buttonContainer: {

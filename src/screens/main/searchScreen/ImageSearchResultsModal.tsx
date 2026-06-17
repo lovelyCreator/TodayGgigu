@@ -404,6 +404,7 @@ const ImageSearchResultsModal: React.FC<ImageSearchResultsModalProps> = ({
 
   return (
     <Modal
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
       visible={visible}
       animationType="slide"
       transparent={true}
